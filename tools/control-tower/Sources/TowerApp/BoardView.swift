@@ -147,7 +147,7 @@ struct BoardView: View {
                 }
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
-                        ForEach(team.rows, id: \.id) { LiveRowView(row: $0).padding(.leading, TeamHeader.nameInset(scale.value) + 16).tag($0.id) }
+                        ForEach(team.rows, id: \.id) { LiveRowView(row: $0).padding(.leading, TeamHeader.workerInset(scale.value)).tag($0.id) }
                     } header: {
                         TeamHeader(team: team)
                             .contentShape(.rect)
@@ -325,14 +325,17 @@ private struct GroupHeader: View {
 
 /// A team under the my-team head, drawn as a folder line rather than a worker: a group icon, the name, its counts,
 /// on a band of GitHub's header color, where the text and muted colors read 4.5:1 or more (DiffContrastTests).
-private struct TeamHeader: View {
+struct TeamHeader: View {
     let team: TeamGroup
     @Environment(\.boardFontScale) private var scale
-    private static let iconWidth: CGFloat = 20
+    /// Wide enough for `person.3` at `.callout` up to the largest font scale (R47).
+    private static let iconWidth: CGFloat = 26
 
-    /// Where the team's name starts past the row's leading edge: outer inset 6, band inset 6, icon, spacing 6.
-    /// Its workers go one step (16) further in.
+    /// Where the team's name starts past the header cell's leading edge: outer inset 6, band inset 6, icon, spacing 6.
     static func nameInset(_ scale: CGFloat) -> CGFloat { 6 + 6 + iconWidth * scale + 6 }
+    /// A worker row's inset: one step (16) past the name, less the 2 points a row cell already sits right of a
+    /// header cell in the sidebar style (R47).
+    static func workerInset(_ scale: CGFloat) -> CGFloat { nameInset(scale) + 14 }
 
     var body: some View {
         HStack(spacing: 6) {

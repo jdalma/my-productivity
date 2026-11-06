@@ -570,3 +570,11 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     #expect(teamHeaderDetail(model(board, query: "ac").teams[0]) == "워커 1")  // a search counts the rows it shows
     #expect(teamHeaderDetail(model(board, query: "ab").teams[0]) == "워커 1 · 1 대기")
 }
+
+/// R47: the icon cell holds `person.3` at every font scale, and a worker starts one step past the team's name
+/// (the header cell sits 2 points left of a row cell in the sidebar style, so the step is 14 + 2).
+@MainActor @Test func teamWorkersStartOneStepPastTheTeamName() {
+    #expect(TeamHeader.nameInset(1) == 44)
+    #expect(TeamHeader.nameInset(2) == 70)
+    #expect(TeamHeader.workerInset(1) == 58)
+}

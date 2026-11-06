@@ -337,6 +337,8 @@ private struct TeamHeader: View {
         }
         .padding(.horizontal, 6).padding(.vertical, 3)
         .background(DiffColors.header, in: .rect(cornerRadius: 5))
+        // the band alone is close to the sidebar (R45); the outline makes the folder line show
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(DiffColors.border, lineWidth: 1))
         .padding(.leading, 6)
         .textCase(nil)
         .help(team.summary)

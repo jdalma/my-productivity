@@ -140,11 +140,17 @@ struct BoardView: View {
             if model.teams.isEmpty && model.agents.isEmpty {
                 Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "실행 중인 세션 없음" : "검색과 맞는 실행 중 세션 없음").foregroundStyle(.secondary)
             }
-            ForEach(model.teams, id: \.name) { team in
-                Section(isExpanded: teamExpanded(team.name)) {
-                    ForEach(team.rows, id: \.id) { LiveRowView(row: $0).tag($0.id) }
-                } header: {
-                    GroupHeader(tag: .team, title: team.name, count: waitingText(team.waiting), tooltip: team.summary)
+            if model.liveAreas.contains(.team) {
+                // the area's head only: no rows, so nothing in it can be selected or double-clicked
+                Section {} header: {
+                    GroupHeader(tag: .team, title: nil, count: nil, tooltip: "my-team 팀 \(model.teams.count)개")
+                }
+                ForEach(model.teams, id: \.name) { team in
+                    Section(isExpanded: teamExpanded(team.name)) {
+                        ForEach(team.rows, id: \.id) { LiveRowView(row: $0).tag($0.id) }
+                    } header: {
+                        GroupHeader(tag: nil, title: team.name, count: waitingText(team.waiting), tooltip: team.summary)
+                    }
                 }
             }
             ForEach(model.agents, id: \.agent) { g in
@@ -289,21 +295,26 @@ struct ResizeUpDownCursor: NSViewRepresentable {
     }
 }
 
-/// One line, the sidebar's largest text: label `.headline`, team name `.title3`, waiting count `.callout`.
+/// One line, the sidebar's largest text: an area's label `.headline`, a team's name `.headline` indented under the
+/// my-team label, waiting count `.callout`.
 /// Sizes, largest first: group header > live row title (`.body`) > history title, folder (`.callout`) > secondary lines
 /// (`.caption1`); paths are tooltips. Names set `.primary` explicitly: a section header otherwise dims them.
 /// The group summary is the tooltip.
 private struct GroupHeader: View {
-    let tag: LineKind
-    /// The team's name; nil for an agent group, which shows its label only.
+    /// An area's label (my-team, claude, codex); nil for a team inside the my-team area.
+    let tag: LineKind?
+    /// The team's name; nil for an area head, which shows its label only.
     let title: String?
     let count: String?
     let tooltip: String
 
     var body: some View {
         HStack(spacing: 6) {
-            KindTag(kind: tag, style: .headline)
-            if let title { Text(title).scaledFont(.title3, weight: .semibold).foregroundStyle(.primary).lineLimit(1) }
+            if let tag { KindTag(kind: tag, style: .headline) }
+            // a team sits one step under the my-team head: indented, the name a size smaller
+            if let title {
+                Text(title).scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).lineLimit(1).padding(.leading, 12)
+            }
             Spacer(minLength: 8)
             if let count { Text(count).scaledFont(.callout).foregroundStyle(.secondary) }
         }

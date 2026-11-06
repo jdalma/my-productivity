@@ -104,6 +104,8 @@ struct SidebarModel: Equatable {
     var working: Int
 
     var liveRows: [LiveRow] { teams.flatMap(\.rows) + agents.flatMap(\.rows) }
+    /// The running list's areas, top to bottom: one my-team area over all its teams, then one per agent.
+    var liveAreas: [LineKind] { (teams.isEmpty ? [] : [.team]) + agents.map { .agent($0.agent) } }
 }
 
 /// Team sections folded in the sidebar, by team name; every team is open by default.

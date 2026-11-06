@@ -538,3 +538,15 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     #expect(SidebarPane.live.select(nil, current: live) == nil)
     #expect(SidebarPane.history.select(nil, current: past) == nil)
 }
+
+@Test func theRunningListHasOneMyTeamAreaAboveItsTeamsThenAgentAreas() {
+    let w = { (n: String, h: String) in worker(n, session: session(h, status: .busy)) }
+    let none = Board(at: at, teams: [], loose: [session("pane:x:%9", status: .busy)])
+    #expect(model(none).liveAreas == [.agent(.claude)])  // no team: no my-team area
+    let one = Board(at: at, teams: [team("a", [w("w", "pane:a:%1")])], loose: [])
+    #expect(model(one).liveAreas == [.team])
+    let many = Board(at: at, teams: [team("a", [w("w", "pane:a:%1")]), team("b", [w("v", "pane:b:%2")])],
+                     loose: [session("pane:x:%3", status: .busy), session("pane:y:%4", agent: .codex, status: .busy)])
+    #expect(model(many).liveAreas == [.team, .agent(.claude), .agent(.codex)])  // one my-team area, however many teams
+    #expect(model(many, query: "b").liveAreas == [.team])  // a search showing no agent session drops those areas
+}

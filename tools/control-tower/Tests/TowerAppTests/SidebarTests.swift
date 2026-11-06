@@ -550,3 +550,13 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     #expect(model(many).liveAreas == [.team, .agent(.claude), .agent(.codex)])  // one my-team area, however many teams
     #expect(model(many, query: "b").liveAreas == [.team])  // a search showing no agent session drops those areas
 }
+
+@Test func clickingATeamNameFoldsAndUnfoldsLikeItsDisclosure() {
+    var c = CollapsedTeams(stored: "")
+    c.toggle("t", query: "")
+    #expect(!c.isExpanded("t", query: ""))
+    c.toggle("t", query: "")
+    #expect(c.isExpanded("t", query: "") && c.names.isEmpty)
+    c.toggle("t", query: "x")  // during a search, as with the disclosure, nothing changes
+    #expect(c.names.isEmpty)
+}

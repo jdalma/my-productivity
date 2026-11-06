@@ -150,6 +150,8 @@ struct BoardView: View {
                         ForEach(team.rows, id: \.id) { LiveRowView(row: $0).tag($0.id) }
                     } header: {
                         GroupHeader(tag: nil, title: team.name, count: waitingText(team.waiting), tooltip: team.summary)
+                            .contentShape(.rect)
+                            .onTapGesture { toggleTeam(team.name) }
                     }
                 }
             }
@@ -224,6 +226,12 @@ struct BoardView: View {
             c.set(team, expanded: open, query: query)
             storedCollapsed = c.stored
         }
+    }
+
+    private func toggleTeam(_ team: String) {
+        var c = collapsed
+        c.toggle(team, query: query)
+        storedCollapsed = c.stored
     }
 
     /// A row picked outside the sidebar opens its folded team, so the selection shows.

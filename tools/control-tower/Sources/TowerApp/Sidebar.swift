@@ -130,6 +130,9 @@ struct CollapsedTeams: Equatable {
         if expanded { names.remove(team) } else { names.insert(team) }
     }
 
+    /// A click on the team's name: the same fold its disclosure would make.
+    mutating func toggle(_ team: String, query: String) { set(team, expanded: !isExpanded(team, query: query), query: query) }
+
     /// Opens the team holding a row selected from outside the sidebar (menu bar, queue card).
     mutating func reveal(_ id: RowID, in board: Board) {
         guard case .live(let rowID) = id,

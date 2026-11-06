@@ -16,12 +16,12 @@ enum LineKind: Equatable {
 
     /// my-team: Primer's accent blue (light `--fgColor-accent` one step darker, for 4.5:1 on its tint), the palette
     /// of DiffColors. claude: terracotta, 12° of hue from the waiting icon's system orange and darker, so a tag never
-    /// reads as a state.
+    /// reads as a state. codex: Primer's display teal (light scale-7, dark scale-8), 28° or more of hue from my-team.
     var color: Color {
         switch self {
         case .team: pair(0x0550aeff, 0x58a6ffff)
         case .agent(.claude): pair(0x9a3f1fff, 0xe8906fff)
-        case .agent(.codex): .teal
+        case .agent(.codex): pair(0x0d5b63ff, 0x24d6c4ff)
         }
     }
 

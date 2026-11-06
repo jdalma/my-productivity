@@ -8,3 +8,12 @@
 
 Runs in a JavaScriptCore context with no network APIs. Diff lines are passed as call arguments, never spliced into script text.
 To update: replace the file from the same npm path, then update the version and sha256 here.
+
+# Linked: SwiftTerm
+
+- Package: https://github.com/migueldeicaza/SwiftTerm, pinned `exact: "1.99.1"` in Package.swift
+- Used for: the board's pane terminal (TowerApp, T46)
+- License: MIT, full text in `SwiftTerm-LICENSE` (shipped in the app bundle beside this file)
+
+SwiftTerm's manifest also declares swift-argument-parser, swift-docc-plugin and swift-png. SwiftPM resolves some of them,
+but the app binary links SwiftTerm alone; the others serve SwiftTerm's own tools and non-Apple platforms.

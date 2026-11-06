@@ -272,6 +272,11 @@ func menuModel(_ board: Board, history: [HistorySession], home: String) -> MenuM
 /// `N 대기`; nil at 0.
 func waitingText(_ n: Int) -> String? { n > 0 ? "\(n) 대기" : nil }
 
+/// A team header's counts, of the rows it lists (so a search's matches): "워커 3 · 1 대기".
+func teamHeaderDetail(_ team: TeamGroup) -> String {
+    (["워커 \(team.rows.count)"] + [waitingText(team.rows.filter(\.badge.waits).count)].compactMap { $0 }).joined(separator: " · ")
+}
+
 func teamSummaryLine(_ team: Team) -> String {
     let (total, by) = stateCounts(team)
     let waiting = by[.waitingForUser, default: 0] + by[.idle, default: 0]

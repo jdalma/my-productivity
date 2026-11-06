@@ -560,3 +560,15 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     c.toggle("t", query: "x")  // during a search, as with the disclosure, nothing changes
     #expect(c.names.isEmpty)
 }
+
+@Test func aTeamHeaderCountsTheWorkersItListsAndThoseWaiting() {
+    let board = Board(at: at, teams: [team("t", [
+        worker("ab", session: session("pane:t:%1", myTurn: true)),
+        worker("ac", session: session("pane:t:%2", status: .busy)),
+        worker("bd", session: session("pane:t:%3", status: .busy)),
+        worker("dead", session: session("pane:t:%4"), alive: false),
+    ])], loose: [])
+    #expect(teamHeaderDetail(model(board).teams[0]) == "워커 3 · 1 대기")  // a stopped worker is not listed, so not counted
+    #expect(teamHeaderDetail(model(board, query: "ac").teams[0]) == "워커 1")  // a search counts the rows it shows
+    #expect(teamHeaderDetail(model(board, query: "ab").teams[0]) == "워커 1 · 1 대기")
+}

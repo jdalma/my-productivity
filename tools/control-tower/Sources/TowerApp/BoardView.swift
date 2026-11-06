@@ -143,13 +143,13 @@ struct BoardView: View {
             if model.liveAreas.contains(.team) {
                 // the area's head only: no rows, so nothing in it can be selected or double-clicked
                 Section {} header: {
-                    GroupHeader(tag: .team, title: nil, count: nil, tooltip: "my-team 팀 \(model.teams.count)개")
+                    GroupHeader(tag: .team, count: nil, tooltip: "my-team 팀 \(model.teams.count)개")
                 }
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
                         ForEach(team.rows, id: \.id) { LiveRowView(row: $0).tag($0.id) }
                     } header: {
-                        GroupHeader(tag: nil, title: team.name, count: waitingText(team.waiting), tooltip: team.summary)
+                        TeamHeader(team: team)
                             .contentShape(.rect)
                             .onTapGesture { toggleTeam(team.name) }
                     }
@@ -159,7 +159,7 @@ struct BoardView: View {
                 Section {
                     ForEach(g.rows, id: \.id) { LiveRowView(row: $0).tag($0.id) }
                 } header: {
-                    GroupHeader(tag: .agent(g.agent), title: nil, count: waitingText(g.waiting), tooltip: g.summary)
+                    GroupHeader(tag: .agent(g.agent), count: waitingText(g.waiting), tooltip: g.summary)
                 }
             }
         }
@@ -303,31 +303,43 @@ struct ResizeUpDownCursor: NSViewRepresentable {
     }
 }
 
-/// One line, the sidebar's largest text: an area's label `.headline`, a team's name `.headline` indented under the
-/// my-team label, waiting count `.callout`.
+/// An area's head, the sidebar's largest text: its label `.headline`, waiting count `.callout`.
 /// Sizes, largest first: group header > live row title (`.body`) > history title, folder (`.callout`) > secondary lines
-/// (`.caption1`); paths are tooltips. Names set `.primary` explicitly: a section header otherwise dims them.
-/// The group summary is the tooltip.
+/// (`.caption1`); paths are tooltips. The group summary is the tooltip.
 private struct GroupHeader: View {
-    /// An area's label (my-team, claude, codex); nil for a team inside the my-team area.
-    let tag: LineKind?
-    /// The team's name; nil for an area head, which shows its label only.
-    let title: String?
+    /// The area's label: my-team, claude or codex.
+    let tag: LineKind
     let count: String?
     let tooltip: String
 
     var body: some View {
         HStack(spacing: 6) {
-            if let tag { KindTag(kind: tag, style: .headline) }
-            // a team sits one step under the my-team head: indented, the name a size smaller
-            if let title {
-                Text(title).scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).lineLimit(1).padding(.leading, 12)
-            }
+            KindTag(kind: tag, style: .headline)
             Spacer(minLength: 8)
             if let count { Text(count).scaledFont(.callout).foregroundStyle(.secondary) }
         }
         .textCase(nil)
         .help(tooltip)
+    }
+}
+
+/// A team under the my-team head, drawn as a folder line rather than a worker: a group icon, the name, its counts,
+/// on a band of GitHub's header color, where the text and muted colors read 4.5:1 or more (DiffContrastTests).
+private struct TeamHeader: View {
+    let team: TeamGroup
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "person.3").scaledFont(.callout).foregroundStyle(DiffColors.mutedText)
+            Text(team.name).scaledFont(.headline, weight: .semibold).foregroundStyle(DiffColors.text).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(teamHeaderDetail(team)).scaledFont(.callout).foregroundStyle(DiffColors.mutedText).lineLimit(1)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .background(DiffColors.header, in: .rect(cornerRadius: 5))
+        .padding(.leading, 6)
+        .textCase(nil)
+        .help(team.summary)
     }
 }
 

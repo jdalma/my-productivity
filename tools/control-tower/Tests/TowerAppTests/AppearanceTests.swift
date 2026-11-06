@@ -40,8 +40,8 @@ import Testing
         return out
     }
     #expect([hex(LineKind.team.color, .aqua), hex(LineKind.team.color, .darkAqua)] == ["0550ae", "58a6ff"])
-    #expect([hex(LineKind.agent(.claude).color, .aqua), hex(LineKind.agent(.claude).color, .darkAqua)] == ["9a3f1f", "e8906f"])
-    #expect(hex(LineKind.agent(.claude).textColor, .aqua) == "9a3f1f")
+    #expect([hex(LineKind.agent(.claude).color, .aqua), hex(LineKind.agent(.claude).color, .darkAqua)] == ["8f3a1c", "e8906f"])
+    #expect(hex(LineKind.agent(.claude).textColor, .aqua) == "8f3a1c")
     // T43: Primer's display teal, light scale-7 and dark scale-8, for 4.5:1 where the tags sit
     #expect([hex(LineKind.agent(.codex).color, .aqua), hex(LineKind.agent(.codex).color, .darkAqua)] == ["0d5b63", "24d6c4"])
 }

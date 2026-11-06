@@ -20,7 +20,7 @@ enum LineKind: Equatable {
     var color: Color {
         switch self {
         case .team: pair(0x0550aeff, 0x58a6ffff)
-        case .agent(.claude): pair(0x9a3f1fff, 0xe8906fff)
+        case .agent(.claude): pair(0x8f3a1cff, 0xe8906fff)
         case .agent(.codex): pair(0x0d5b63ff, 0x24d6c4ff)
         }
     }

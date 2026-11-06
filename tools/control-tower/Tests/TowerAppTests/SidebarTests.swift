@@ -583,3 +583,31 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     }
     #expect(TeamHeader.workerInset(1) == 44 - NSFont.preferredFont(forTextStyle: .body).pointSize)
 }
+
+private func teamHistory(_ id: String, team: String?, worker: String, at: String) -> HistorySession {
+    HistorySession(id: id, agent: .claude, title: "\(worker) title", workspace: "/Users/me/proj", branch: nil, createdAt: nil,
+                   updatedAt: at, lastPrompt: nil, transcriptPath: "/t/\(id).jsonl", live: false,
+                   resumeCommand: ["claude", "--resume", id], member: team.map { TeamWorker(team: $0, worker: worker) })
+}
+
+@Test func endedTeamSessionsShowAsOneTeamInTheHistory() {
+    let history = [
+        teamHistory("pm2", team: "shop", worker: "pm", at: "2026-11-02T03:00:00.000Z"),
+        teamHistory("solo", team: nil, worker: "x", at: "2026-11-02T02:00:00.000Z"),
+        teamHistory("be", team: "shop", worker: "be", at: "2026-11-02T01:00:00.000Z"),
+        teamHistory("lab", team: "lab", worker: "pm", at: "2026-11-01T00:00:00.000Z"),
+    ]
+    let running = Board(at: at, teams: [team("lab", [worker("pm", session: session("pane:l:%1", status: .busy))])], loose: [])
+    let m = model(running, history: history)
+    // one line per team, where its newest session would be; a team's sessions inside, newest first
+    #expect(m.historyItems.map(\.id) == ["team:shop", "/t/solo.jsonl", "team:lab"])
+    guard case .team(let shop) = m.historyItems[0], case .team(let lab) = m.historyItems[2] else { Issue.record("teams"); return }
+    #expect(shop.sessions.map(\.id) == ["pm2", "be"])
+    #expect(!shop.running && lab.running)  // a team that runs now has nothing to resume
+    #expect(m.history.map(\.id) == ["pm2", "be", "solo", "lab"])  // every session listed, for selection
+    // a page counts lines, so a team is never cut in half
+    let one = model(running, history: history, historyLimit: 1)
+    #expect(one.historyItems.count == 1 && one.history.map(\.id) == ["pm2", "be"] && one.historyRemaining == 2)
+    // the team's name finds it even when no session title holds it
+    #expect(model(running, history: history, query: "shop").historyItems.map(\.id) == ["team:shop"])
+}

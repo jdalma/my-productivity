@@ -93,9 +93,9 @@ struct SidebarModel: Equatable {
     var teams: [TeamGroup]
     /// Claude Code, then Codex; an agent with no session has no group.
     var agents: [AgentGroup]
-    /// One page or more of the filtered history, running sessions listed above left out.
-    var history: [HistorySession]
-    /// Filtered history entries past `history`.
+    /// One page or more of the filtered history as the list shows it, running sessions listed above left out.
+    var historyItems: [HistoryItem]
+    /// Filtered history lines past `historyItems`.
     var historyRemaining: Int
     /// Every live row waiting on me, search ignored, longest wait first; a row without a start time last.
     var queue: [LiveRow]
@@ -103,6 +103,15 @@ struct SidebarModel: Equatable {
     var working: Int
 
     var liveRows: [LiveRow] { teams.flatMap(\.rows) + agents.flatMap(\.rows) }
+    /// Every session in `historyItems`, in list order.
+    var history: [HistorySession] {
+        historyItems.flatMap { item -> [HistorySession] in
+            switch item {
+            case .session(let h): [h]
+            case .team(let t): t.sessions
+            }
+        }
+    }
     /// The running list's areas, top to bottom: one my-team area over all its teams, then one per agent.
     var liveAreas: [LineKind] { (teams.isEmpty ? [] : [.team]) + agents.map { .agent($0.agent) } }
 }
@@ -140,6 +149,48 @@ struct CollapsedTeams: Equatable {
     }
 
     private func isSearching(_ query: String) -> Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
+/// One line of the history list: a session alone, or the ended sessions of one my-team team.
+enum HistoryItem: Equatable {
+    case session(HistorySession)
+    case team(TeamHistory)
+
+    var id: String {
+        switch self {
+        case .session(let h): h.transcriptPath
+        case .team(let t): "team:\(t.name)"
+        }
+    }
+}
+
+/// A my-team team's ended sessions, found by the prompt my-team typed into each worker first.
+struct TeamHistory: Equatable {
+    var name: String
+    /// Newest first.
+    var sessions: [HistorySession]
+    /// The team runs now: there is nothing to resume.
+    var running: Bool
+}
+
+/// `sessions` (newest first) as list lines: a team's sessions gathered on one line, where its newest one was.
+func historyLines(_ sessions: [HistorySession], running: Set<String>) -> [HistoryItem] {
+    var lines: [HistoryItem] = []
+    var teamLine: [String: Int] = [:]
+    for h in sessions {
+        guard let team = h.member?.team else {
+            lines.append(.session(h))
+            continue
+        }
+        if let i = teamLine[team], case .team(var t) = lines[i] {
+            t.sessions.append(h)
+            lines[i] = .team(t)
+        } else {
+            teamLine[team] = lines.count
+            lines.append(.team(TeamHistory(name: team, sessions: [h], running: running.contains(team))))
+        }
+    }
+    return lines
 }
 
 enum AgentFilter: Hashable {
@@ -204,8 +255,10 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
     let past = history.filter { h in
         !listed.contains(h.transcriptPath)
             && (filter == .all || (filter == .claude) == (h.agent == .claude))
-            && hit([h.title, h.workspace, h.branch])
+            && hit([h.title, h.workspace, h.branch, h.member?.team])
     }
+    let running = Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))
+    let items = historyLines(past, running: running)
     let queue = all.filter(\.session.myTurn).enumerated().sorted { a, b in
         switch (parseISO(a.element.session.since), parseISO(b.element.session.since)) {
         case let (x?, y?) where x != y: x < y
@@ -215,7 +268,7 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
         }
     }.map(\.element)
     return SidebarModel(teams: teams, agents: agents,
-                        history: Array(past.prefix(historyLimit)), historyRemaining: max(0, past.count - historyLimit),
+                        historyItems: Array(items.prefix(historyLimit)), historyRemaining: max(0, items.count - historyLimit),
                         queue: queue, working: all.filter { $0.badge == .working }.count)
 }
 

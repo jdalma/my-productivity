@@ -169,8 +169,19 @@ struct BoardView: View {
     private func historyList(_ model: SidebarModel) -> some View {
         List(selection: paneSelection(.history)) {
             Section {
-                ForEach(model.history, id: \.transcriptPath) { h in
-                    HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
+                ForEach(model.historyItems, id: \.id) { item in
+                    switch item {
+                    case .session(let h):
+                        HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
+                    case .team(let t):
+                        DisclosureGroup {
+                            ForEach(t.sessions, id: \.transcriptPath) { h in
+                                HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
+                            }
+                        } label: {
+                            TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
+                        }
+                    }
                 }
                 if model.historyRemaining > 0 {
                     Button("더 보기 (남은 \(model.historyRemaining)개)") { historyLimit += historyPageSize }
@@ -246,6 +257,10 @@ struct BoardView: View {
         HStack {
             Text("실행 중").scaledFont(.headline, weight: .semibold)
             Spacer()
+            Button("새 팀", systemImage: "plus") { tower.newTeam() }
+                .buttonStyle(.borderless)
+                .scaledFont(.callout)
+                .help("~/teams 에서 Claude와 새 my-team 팀 config를 만들고 띄우는 터미널을 엽니다")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.bar)
@@ -371,6 +386,33 @@ private struct LiveRowView: View {
             Text(row.badge.elapsed).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
         }
         .help(badgeLabel(row.badge) + "\n" + row.path)
+    }
+}
+
+/// A stopped my-team team in the history: its name, workers and last activity, and a button that starts it again
+/// with each worker back in its last session.
+private struct TeamHistoryHeader: View {
+    let team: TeamHistory
+    let now: Date
+    let resume: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            KindTag(kind: .team, style: .caption1)
+            Text(team.name).scaledFont(.callout, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
+            Text("워커 \(Set(team.sessions.compactMap { $0.member?.worker }).count)")
+                .scaledFont(.caption1).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            if let newest = team.sessions.first {
+                Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
+            }
+            Button("이어서 띄우기", action: resume)
+                .buttonStyle(.link)
+                .scaledFont(.caption1)
+                .disabled(team.running)
+                .help(team.running ? "이 팀은 지금 실행 중입니다"
+                                   : "새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
+        }
     }
 }
 

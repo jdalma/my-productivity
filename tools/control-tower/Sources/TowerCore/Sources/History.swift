@@ -21,9 +21,12 @@ public struct HistorySession: Codable, Hashable, Sendable {
     public var live: Bool
     /// `claude --resume <id>` or `codex resume <id>`, run in `workspace`.
     public var resumeCommand: [String]
+    /// The my-team worker this session was, from the prompt my-team typed first. The board's own; not in the JSON.
+    public var member: TeamWorker?
 
     public init(id: String, agent: AgentKind, title: String, workspace: String, branch: String?, createdAt: String?,
-                updatedAt: String, lastPrompt: String?, transcriptPath: String, live: Bool, resumeCommand: [String]) {
+                updatedAt: String, lastPrompt: String?, transcriptPath: String, live: Bool, resumeCommand: [String],
+                member: TeamWorker? = nil) {
         self.id = id
         self.agent = agent
         self.title = title
@@ -35,6 +38,7 @@ public struct HistorySession: Codable, Hashable, Sendable {
         self.transcriptPath = transcriptPath
         self.live = live
         self.resumeCommand = resumeCommand
+        self.member = member
     }
 
     enum CodingKeys: String, CodingKey {
@@ -284,24 +288,39 @@ func parseTranscript(_ f: TranscriptFile) -> TranscriptFacts? {
     return facts.map { var x = $0; x.updatedAt = x.updatedAt ?? isoString(f.mtime); return x }
 }
 
-/// The first prompt my-team types into a worker pane names its state dir; `<team> · <worker>` says more
-/// than the sentence, which is the same for every worker. nil for any other text or when the path is missing.
-func myTeamBootstrapTitle(_ prompt: String) -> String? {
+/// A my-team team and one of its workers, by name.
+public struct TeamWorker: Hashable, Sendable {
+    public var team: String
+    public var worker: String
+
+    public init(team: String, worker: String) {
+        self.team = team
+        self.worker = worker
+    }
+}
+
+/// The first prompt my-team types into a worker pane (start or add-worker) names its state dir,
+/// `…/sessions/<team>/workers/<worker>/`. nil for any other text or when the path is missing.
+func myTeamBootstrap(_ prompt: String) -> TeamWorker? {
     guard prompt.hasPrefix("Team is live.") || prompt.hasPrefix("You just joined team "),
           let m = prompt.firstMatch(of: #//sessions/([^/\s]+)/workers/([^/\s]+)//#) else { return nil }
-    return "\(m.1) · \(m.2)"
+    return TeamWorker(team: String(m.1), worker: String(m.2))
 }
 
 /// Facts → sessions, newest first. The Codex title comes from `codexTitles` (session_index.jsonl), then the first prompt.
 func historySessions(_ facts: [TranscriptFacts], codexTitles: [String: String],
                      liveTranscripts: Set<String>) -> [HistorySession] {
     let sessions = facts.map { f in
-        let title = f.title ?? (f.agent == .codex ? codexTitles[f.id].nonEmpty : nil) ?? f.firstPrompt.map { myTeamBootstrapTitle($0) ?? $0 } ?? ""
+        let member = f.firstPrompt.flatMap(myTeamBootstrap)
+        // `<team> · <worker>` says more than the bootstrap sentence, which is the same for every worker
+        let title = f.title ?? (f.agent == .codex ? codexTitles[f.id].nonEmpty : nil)
+            ?? member.map { "\($0.team) · \($0.worker)" } ?? f.firstPrompt ?? ""
         return HistorySession(
             id: f.id, agent: f.agent, title: oneLine(title), workspace: f.cwd, branch: f.branch,
             createdAt: f.createdAt, updatedAt: f.updatedAt ?? "", lastPrompt: f.lastPrompt.map(oneLine),
             transcriptPath: f.path, live: liveTranscripts.contains(f.path),
-            resumeCommand: f.agent == .claude ? ["claude", "--resume", f.id] : ["codex", "resume", f.id]
+            resumeCommand: f.agent == .claude ? ["claude", "--resume", f.id] : ["codex", "resume", f.id],
+            member: member
         )
     }
     let keyed = sessions.enumerated().map { (time: parseISO($1.updatedAt) ?? 0, offset: $0, session: $1) }

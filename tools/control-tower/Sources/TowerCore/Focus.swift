@@ -27,6 +27,8 @@ public struct FocusPlan: Equatable, Sendable {
 /// A Ghostty window opened via `open` gets launchd's PATH (no /opt/homebrew/bin),
 /// so the attach command needs tmux's absolute path.
 public let towerTmuxBin = resolveExecutable("tmux") ?? "tmux"
+/// Same for `my-team`, run in a terminal the board opens to start a team.
+public let myTeamBin = resolveExecutable("my-team") ?? "my-team"
 
 private let terminalApps = [
     "ghostty": "Ghostty",
@@ -75,8 +77,15 @@ public let resumePath = childEnvironment(base: ProcessInfo.processInfo.environme
 public func planResume(_ s: HistorySession, ghosttyApp: String = "Ghostty",
                        bins: [AgentKind: String] = resumeBins, path: String = resumePath) -> [String]? {
     guard !s.live, !s.workspace.isEmpty, let program = s.resumeCommand.first else { return nil }
-    return ["open", "-na", "\(ghosttyApp).app", "--args", "--working-directory=\(s.workspace)", "-e",
-            "/usr/bin/env", "PATH=\(path)", bins[s.agent] ?? program] + s.resumeCommand.dropFirst()
+    return planTerminal(in: s.workspace, [bins[s.agent] ?? program] + s.resumeCommand.dropFirst(),
+                        ghosttyApp: ghosttyApp, path: path)
+}
+
+/// The argv that opens a new Ghostty window in `cwd` running `command` with our PATH, no shell involved.
+public func planTerminal(in cwd: String, _ command: [String], ghosttyApp: String = "Ghostty",
+                         path: String = resumePath) -> [String] {
+    ["open", "-na", "\(ghosttyApp).app", "--args", "--working-directory=\(cwd)", "-e", "/usr/bin/env", "PATH=\(path)"]
+        + command
 }
 
 /// One Ghostty terminal (a tab or a split) as its AppleScript dictionary reports it.

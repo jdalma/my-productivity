@@ -96,6 +96,29 @@ final class Tower {
         }
     }
 
+    /// Opens a terminal where Claude writes a new team's config in `~/teams` with the user and starts it.
+    func newTeam() {
+        run("새 팀 터미널을 열지 못함", [planTerminal(in: teamsDir, [resumeBins[.claude] ?? "claude", newTeamPrompt])])
+    }
+
+    /// Opens a terminal that starts a stopped team again, each claude worker resuming its last session.
+    func resumeTeam(_ team: String) {
+        let sessions = lastSessions(of: team, in: history)
+        guard let base = teamBase(team),
+              let data = try? JSONSerialization.data(withJSONObject: resumeConfig(base, sessions: sessions),
+                                                     options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        else { return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(team)) }
+        let command = resumeTeamCommand(team: team, config: String(decoding: data, as: UTF8.self),
+                                        path: "\(teamsDir)/\(team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)
+        run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, command)])
+    }
+
+    private func run(_ failure: String, _ argvs: [[String]]) {
+        Task {
+            do { try await FocusRunner.run(argvs) } catch { showAlert(failure, error) }
+        }
+    }
+
     private func showAlert(_ title: String, _ error: any Error) {
         NSApp.activate()
         let alert = NSAlert(error: error)

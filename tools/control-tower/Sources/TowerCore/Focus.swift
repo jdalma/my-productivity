@@ -57,8 +57,14 @@ public func planFocus(handle: String, board: Board, clients: [TmuxClient],
     if clients.contains(where: { $0.session == t.session }) {
         return FocusPlan(kind: .attached, commands: tmux + [["open", "-a", ghosttyApp]])
     }
-    return FocusPlan(kind: .detached,
-                     commands: tmux + [["open", "-na", "\(ghosttyApp).app", "--args", "-e", tmuxBin, "attach", "-t", t.session]])
+    // `direct:` splits on spaces; a session name with one is only raised, not attached
+    guard !(tmuxBin + t.session).contains(where: \.isWhitespace) else {
+        return FocusPlan(kind: .detached, commands: tmux + [["open", "-a", ghosttyApp]])
+    }
+    return FocusPlan(kind: .detached, commands: tmux + [
+        planTerminal(in: homeDir, commandLine: "direct:\(tmuxBin) attach -t \(t.session)", ghosttyApp: ghosttyApp,
+                     keepOpen: false),
+    ])
 }
 
 /// `claude` usually lives in `~/.local/bin`, which a GUI app's PATH lacks.
@@ -85,14 +91,14 @@ public func planResume(_ s: HistorySession, ghosttyApp: String = "Ghostty",
 }
 
 /// The argv that opens a new Ghostty window in `cwd` running `commandLine` (Ghostty's `command` syntax) with our
-/// PATH, the window kept open when the command ends so a failure stays readable. Through Ghostty's AppleScript:
+/// PATH; with `keepOpen` the window stays when the command ends, so a failure stays readable. Through Ghostty's AppleScript:
 /// Ghostty 1.3 takes `open --args -e <argv>` as files to open, one window each. The values reach the script as
 /// `argv`, never as script text.
 public func planTerminal(in cwd: String, commandLine: String, ghosttyApp: String = "Ghostty",
-                         path: String = resumePath) -> [String] {
+                         path: String = resumePath, keepOpen: Bool = true) -> [String] {
     ["osascript", "-e", "on run argv", "-e", "tell application \"\(ghosttyApp)\"",
      "-e", "new window with configuration {initial working directory:(item 1 of argv), command:(item 2 of argv), "
-         + "environment variables:{item 3 of argv}, wait after command:true}",
+         + "environment variables:{item 3 of argv}, wait after command:\(keepOpen)}",
      "-e", "activate", "-e", "end tell", "-e", "end run",
      cwd, commandLine, "PATH=\(path)"]
 }

@@ -77,15 +77,24 @@ public let resumePath = childEnvironment(base: ProcessInfo.processInfo.environme
 public func planResume(_ s: HistorySession, ghosttyApp: String = "Ghostty",
                        bins: [AgentKind: String] = resumeBins, path: String = resumePath) -> [String]? {
     guard !s.live, !s.workspace.isEmpty, let program = s.resumeCommand.first else { return nil }
-    return planTerminal(in: s.workspace, [bins[s.agent] ?? program] + s.resumeCommand.dropFirst(),
+    let argv = [bins[s.agent] ?? program] + s.resumeCommand.dropFirst()
+    // `direct:` runs the argv without a shell, split on spaces, so an argument may not hold one
+    guard !argv.contains(where: { $0.contains(where: \.isWhitespace) }) else { return nil }
+    return planTerminal(in: s.workspace, commandLine: "direct:" + argv.joined(separator: " "),
                         ghosttyApp: ghosttyApp, path: path)
 }
 
-/// The argv that opens a new Ghostty window in `cwd` running `command` with our PATH, no shell involved.
-public func planTerminal(in cwd: String, _ command: [String], ghosttyApp: String = "Ghostty",
+/// The argv that opens a new Ghostty window in `cwd` running `commandLine` (Ghostty's `command` syntax) with our
+/// PATH, the window kept open when the command ends so a failure stays readable. Through Ghostty's AppleScript:
+/// Ghostty 1.3 takes `open --args -e <argv>` as files to open, one window each. The values reach the script as
+/// `argv`, never as script text.
+public func planTerminal(in cwd: String, commandLine: String, ghosttyApp: String = "Ghostty",
                          path: String = resumePath) -> [String] {
-    ["open", "-na", "\(ghosttyApp).app", "--args", "--working-directory=\(cwd)", "-e", "/usr/bin/env", "PATH=\(path)"]
-        + command
+    ["osascript", "-e", "on run argv", "-e", "tell application \"\(ghosttyApp)\"",
+     "-e", "new window with configuration {initial working directory:(item 1 of argv), command:(item 2 of argv), "
+         + "environment variables:{item 3 of argv}, wait after command:true}",
+     "-e", "activate", "-e", "end tell", "-e", "end run",
+     cwd, commandLine, "PATH=\(path)"]
 }
 
 /// One Ghostty terminal (a tab or a split) as its AppleScript dictionary reports it.

@@ -277,13 +277,23 @@ private func ended(_ agent: AgentKind, live: Bool = false, workspace: String = "
                    resumeCommand: agent == .claude ? ["claude", "--resume", "S"] : ["codex", "resume", "S"])
 }
 
+/// Ghostty 1.3 takes `open -na Ghostty.app --args -e <argv>` as files to open, one window each, and drops the rest
+/// (user report, 2026-11-06), so a resume asks Ghostty for a window over AppleScript: the workspace, the command
+/// in `direct:` form (no shell), our PATH, and the window kept open when the command ends.
 @Test func planResumeOpensANewGhosttyWindowInTheWorkspace() {
     let bins: [AgentKind: String] = [.claude: "/bin/claude", .codex: "/bin/codex"]
-    let env = ["/usr/bin/env", "PATH=/opt/homebrew/bin:/usr/bin"]
-    #expect(planResume(ended(.claude), bins: bins, path: "/opt/homebrew/bin:/usr/bin") ==
-        ["open", "-na", "Ghostty.app", "--args", "--working-directory=/w/my app", "-e"] + env + ["/bin/claude", "--resume", "S"])
-    #expect(planResume(ended(.codex), ghosttyApp: "G", bins: bins, path: "/opt/homebrew/bin:/usr/bin") ==
-        ["open", "-na", "G.app", "--args", "--working-directory=/w/my app", "-e"] + env + ["/bin/codex", "resume", "S"])
+    let claude = planResume(ended(.claude), bins: bins, path: "/opt/homebrew/bin:/usr/bin") ?? []
+    #expect(claude.first == "osascript")
+    #expect(Array(claude.suffix(3)) == ["/w/my app", "direct:/bin/claude --resume S", "PATH=/opt/homebrew/bin:/usr/bin"])
+    let script = claude.dropLast(3).joined(separator: "\n")
+    #expect(script.contains("tell application \"Ghostty\""))
+    #expect(script.contains("new window with configuration {initial working directory:(item 1 of argv), "
+        + "command:(item 2 of argv), environment variables:{item 3 of argv}, wait after command:true}"))
+    let codex = planResume(ended(.codex), ghosttyApp: "G", bins: bins, path: "/p") ?? []
+    #expect(codex.dropLast(3).joined().contains("tell application \"G\""))
+    #expect(codex[codex.count - 2] == "direct:/bin/codex resume S")
+    // `direct:` splits on spaces: a program path with one cannot be planned
+    #expect(planResume(ended(.claude), bins: [.claude: "/my bin/claude"]) == nil)
 }
 
 @Test func theResumePathReachesHomebrewWhereNodeLives() {

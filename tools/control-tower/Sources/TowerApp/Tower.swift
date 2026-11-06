@@ -98,7 +98,7 @@ final class Tower {
 
     /// Opens a terminal where Claude writes a new team's config in `~/teams` with the user and starts it.
     func newTeam() {
-        run("새 팀 터미널을 열지 못함", [planTerminal(in: teamsDir, [resumeBins[.claude] ?? "claude", newTeamPrompt])])
+        run("새 팀 터미널을 열지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine([resumeBins[.claude] ?? "claude", newTeamPrompt]))])
     }
 
     /// Opens a terminal that starts a stopped team again, each claude worker resuming its last session.
@@ -110,7 +110,7 @@ final class Tower {
         else { return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(team)) }
         let command = resumeTeamCommand(team: team, config: String(decoding: data, as: UTF8.self),
                                         path: "\(teamsDir)/\(team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)
-        run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, command)])
+        run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))])
     }
 
     private func run(_ failure: String, _ argvs: [[String]]) {

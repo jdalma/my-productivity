@@ -105,3 +105,9 @@ enum TeamLaunchError: LocalizedError {
         }
     }
 }
+
+/// `argv` as a Ghostty command line that Ghostty hands to a shell: each argument single-quoted, so a config, a
+/// prompt or a path reaches the program as it is.
+func shellCommandLine(_ argv: [String]) -> String {
+    argv.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
+}

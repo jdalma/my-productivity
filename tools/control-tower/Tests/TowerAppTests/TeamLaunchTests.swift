@@ -112,3 +112,8 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     #expect(workers[0]["pane_id"] == nil)
     #expect(base["note"] as? String == "kept")
 }
+
+@Test func aShellCommandLineQuotesEveryArgument() {
+    #expect(shellCommandLine(["/bin/sh", "-c", "echo \"$1\" it's", "sh", #"{"a":"b c"}"#])
+        == #"'/bin/sh' '-c' 'echo "$1" it'\''s' 'sh' '{"a":"b c"}'"#)
+}

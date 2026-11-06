@@ -68,13 +68,13 @@ private func model(_ board: Board, history: [HistorySession] = [], query: String
     #expect(model(board).teams[0].rows[0].badge == .waitingForUser(minutes: 10))
 }
 
-@Test func workerLinePrefersStateReason() {
+@Test func workerMessagePrefersStateReason() {
     let sf = StateFile(state: "working", reason: "writing tests", updatedAt: nil)
     let board = Board(at: at, teams: [team("t", [
         worker("a", session: session("pane:t:%1", lastAssistant: "hello\nworld"), state: sf),
         worker("b", session: session("pane:t:%2", lastAssistant: "hello\nworld")),
     ])], loose: [])
-    #expect(model(board).teams[0].rows.map(\.line) == ["writing tests", "hello world"])
+    #expect(model(board).teams[0].rows.map(\.message) == ["writing tests", "hello\nworld"])
 }
 
 @Test func looseSessionsGroupByAgentClaudeFirst() {
@@ -89,7 +89,7 @@ private func model(_ board: Board, history: [HistorySession] = [], query: String
     #expect(groups[0].rows.map(\.folder) == ["other", "proj"])
     #expect(groups[0].rows.map(\.path) == ["/opt/other", "~/proj"])
     #expect(groups[0].rows[0].badge == .waitingForUser(minutes: 10))
-    #expect(groups[0].rows[1].line == "hi")
+    #expect(groups[0].rows[1].message == "hi")
     #expect(groups[1].rows.map(\.folder) == ["proj"])
     #expect(groups[1].rows[0].badge == .working)
 }
@@ -434,11 +434,9 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     #expect(m.working == 2)
 }
 
-@Test func aRowKeepsItsMessageLinesAndShowsThemJoined() {
+@Test func aRowKeepsItsMessageLines() {
     let board = Board(at: at, teams: [], loose: [session("pid:1", myTurn: true, lastAssistant: "one\ntwo\nthree\nfour")])
-    let row = model(board).queue[0]
-    #expect(row.message == "one\ntwo\nthree\nfour")
-    #expect(row.line == "one two three four")
+    #expect(model(board).queue[0].message == "one\ntwo\nthree\nfour")
 }
 
 @Test func aPermissionPromptShowsHowLongItHasWaited() {

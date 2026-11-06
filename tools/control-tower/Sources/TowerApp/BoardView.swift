@@ -147,7 +147,7 @@ struct BoardView: View {
                 }
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
-                        ForEach(team.rows, id: \.id) { LiveRowView(row: $0).tag($0.id) }
+                        ForEach(team.rows, id: \.id) { LiveRowView(row: $0).padding(.leading, TeamHeader.nameInset(scale.value) + 16).tag($0.id) }
                     } header: {
                         TeamHeader(team: team)
                             .contentShape(.rect)
@@ -327,10 +327,17 @@ private struct GroupHeader: View {
 /// on a band of GitHub's header color, where the text and muted colors read 4.5:1 or more (DiffContrastTests).
 private struct TeamHeader: View {
     let team: TeamGroup
+    @Environment(\.boardFontScale) private var scale
+    private static let iconWidth: CGFloat = 20
+
+    /// Where the team's name starts past the row's leading edge: outer inset 6, band inset 6, icon, spacing 6.
+    /// Its workers go one step (16) further in.
+    static func nameInset(_ scale: CGFloat) -> CGFloat { 6 + 6 + iconWidth * scale + 6 }
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "person.3").scaledFont(.callout).foregroundStyle(DiffColors.mutedText)
+                .frame(width: Self.iconWidth * scale, alignment: .leading)
             Text(team.name).scaledFont(.headline, weight: .semibold).foregroundStyle(DiffColors.text).lineLimit(1)
             Spacer(minLength: 8)
             Text(teamHeaderDetail(team)).scaledFont(.callout).foregroundStyle(DiffColors.mutedText).lineLimit(1)
@@ -349,21 +356,14 @@ private struct LiveRowView: View {
     let row: LiveRow
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(spacing: 6) {
             StatusIconView(badge: row.badge, style: .body)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(row.title).scaledFont(.body).foregroundStyle(.primary).lineLimit(1).layoutPriority(1)
-                    if let folder = row.shownFolder {
-                        Text(folder).scaledFont(.callout).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    Text(row.badge.elapsed).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
-                }
-                if !row.line.isEmpty {
-                    Text(row.line).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
-                }
+            Text(row.title).scaledFont(.body).foregroundStyle(.primary).lineLimit(1).layoutPriority(1)
+            if let folder = row.shownFolder {
+                Text(folder).scaledFont(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
+            Spacer(minLength: 8)
+            Text(row.badge.elapsed).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
         }
         .help(badgeLabel(row.badge) + "\n" + row.path)
     }

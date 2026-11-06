@@ -67,7 +67,6 @@ struct LiveRow: Equatable {
 
     /// The folder shown after the title; nil when it would repeat the title.
     var shownFolder: String? { folder == title ? nil : folder }
-    var line: String { oneLine(message) }
     /// The label in front of the row's group: `my-team` with the team's name, or the agent alone.
     var group: (kind: LineKind, name: String?) { teamName.map { (.team, $0) } ?? (.agent(session.agent), nil) }
 }
@@ -364,10 +363,6 @@ func resumeCopyText(_ h: HistorySession) -> String {
 func abbreviate(_ path: String, home: String) -> String {
     if path == home { return "~" }
     return !home.isEmpty && path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
-}
-
-private func oneLine(_ s: String) -> String {
-    s.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
 }
 
 private func date(_ iso: String?) -> Date? {

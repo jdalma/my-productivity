@@ -333,9 +333,11 @@ struct TeamHeader: View {
 
     /// Where the team's name starts past the header cell's leading edge: outer inset 6, band inset 6, icon, spacing 6.
     static func nameInset(_ scale: CGFloat) -> CGFloat { 6 + 6 + iconWidth * scale + 6 }
-    /// A worker row's inset: half a step (8) past the name, less the 2 points a row cell already sits right of a
-    /// header cell in the sidebar style (R47).
-    static func workerInset(_ scale: CGFloat) -> CGFloat { nameInset(scale) + 6 }
+    /// A worker row's inset, so its name starts half a step (8) past the team's name: a row cell sits 2 points right
+    /// of a header cell in the sidebar style (R47), and the row's status icon and 6 points come before its name.
+    static func workerInset(_ scale: CGFloat) -> CGFloat {
+        nameInset(scale) + 8 - 2 - StatusIconView.size(.body, scale: scale) - 6
+    }
 
     var body: some View {
         HStack(spacing: 6) {

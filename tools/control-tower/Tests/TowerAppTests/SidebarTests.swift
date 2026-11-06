@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 import TowerCore
@@ -571,10 +572,14 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     #expect(teamHeaderDetail(model(board, query: "ab").teams[0]) == "워커 1 · 1 대기")
 }
 
-/// R47: the icon cell holds `person.3` at every font scale, and a worker starts half a step past the team's name
-/// (T47b; the header cell sits 2 points left of a row cell in the sidebar style, so the step is 6 + 2).
-@MainActor @Test func teamWorkersStartOneStepPastTheTeamName() {
+/// R47, T47c: the icon cell holds `person.3` at every font scale, and a worker's name starts half a step (8) past the
+/// team's name. A row cell sits 2 points right of a header cell, and a row's status icon and its spacing come first.
+@MainActor @Test func teamWorkerNamesStartHalfAStepPastTheTeamName() {
     #expect(TeamHeader.nameInset(1) == 44)
     #expect(TeamHeader.nameInset(2) == 70)
-    #expect(TeamHeader.workerInset(1) == 50)
+    for scale in [1.0, 1.3, 2.0] {
+        let workerName = 2 + TeamHeader.workerInset(scale) + StatusIconView.size(.body, scale: scale) + 6
+        #expect(abs(workerName - (TeamHeader.nameInset(scale) + 8)) < 0.001)
+    }
+    #expect(TeamHeader.workerInset(1) == 44 - NSFont.preferredFont(forTextStyle: .body).pointSize)
 }

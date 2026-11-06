@@ -69,9 +69,13 @@ struct StatusIconView: View {
     var style: NSFont.TextStyle?
     @Environment(\.boardFontScale) private var scale
 
+    /// The icon's square side: the style's point size at the board's font scale.
+    static func size(_ style: NSFont.TextStyle, scale: CGFloat) -> CGFloat {
+        NSFont.preferredFont(forTextStyle: style).pointSize * scale
+    }
+
     var body: some View {
-        let size = style.map { NSFont.preferredFont(forTextStyle: $0).pointSize * scale }
-            ?? NSFont.preferredFont(forTextStyle: .body).pointSize
+        let size = style.map { Self.size($0, scale: scale) } ?? Self.size(.body, scale: 1)
         icon(size: size)
             .frame(width: size, height: size)
             .help(badgeLabel(badge))

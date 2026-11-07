@@ -424,11 +424,10 @@ private struct TeamHistoryHeader: View {
                 Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
             }
             if launching {
-                HStack(spacing: 4) {
-                    ProgressView().controlSize(.mini)
-                    Text("띄우는 중…").scaledFont(.caption1).foregroundStyle(.secondary)
-                }
-                .help("터미널에서 팀을 띄우고 있습니다. 보드에 실행 중으로 잡히면 끝납니다")
+                // the spinner the running list shows for "working"; the words are in its tooltip
+                ProgressView().controlSize(.mini)
+                    .help("팀을 띄우는 중: 보드에 실행 중으로 잡히면 끝납니다")
+                    .accessibilityLabel("팀을 띄우는 중")
             } else {
                 Button("이어서 띄우기", action: resume)
                     .buttonStyle(.link)

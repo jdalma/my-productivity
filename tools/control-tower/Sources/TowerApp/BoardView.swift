@@ -185,14 +185,9 @@ struct BoardView: View {
             // my-team teams apart from single terminals, as in the running list above
             if !model.historyTeams.isEmpty {
                 Section {
+                    // one line a team: its workers' sessions stay out of the list, the line resumes them together
                     ForEach(model.historyTeams, id: \.name) { t in
-                        DisclosureGroup {
-                            ForEach(t.sessions, id: \.transcriptPath) { h in
-                                HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
-                            }
-                        } label: {
-                            TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
-                        }
+                        TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
                     }
                 } header: {
                     GroupHeader(tag: .team, count: nil, tooltip: "끝난 my-team 팀 \(model.historyTeams.count)개")

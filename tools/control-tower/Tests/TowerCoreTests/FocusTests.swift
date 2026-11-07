@@ -19,7 +19,7 @@ private func fixtureBoard() throws -> Board { try JSONDecoder().decode(Board.sel
         == FocusPlan(kind: .detached, commands: [
             ["tmux", "select-window", "-t", "my-team-detached-team-mvrtwe47:@4"],
             ["tmux", "select-pane", "-t", "%29"],
-            planTerminal(in: NSHomeDirectory(), commandLine: "direct:tmux attach -t my-team-detached-team-mvrtwe47",
+            planTerminal(in: NSHomeDirectory(), commandLine: "'tmux' 'attach' '-t' 'my-team-detached-team-mvrtwe47'",
                          keepOpen: false),
         ]))
     // Ghostty 1.3 takes `open --args -e` as files to open (user report, 2026-11-06): no such launch is planned

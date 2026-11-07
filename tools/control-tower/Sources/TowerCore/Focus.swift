@@ -57,13 +57,9 @@ public func planFocus(handle: String, board: Board, clients: [TmuxClient],
     if clients.contains(where: { $0.session == t.session }) {
         return FocusPlan(kind: .attached, commands: tmux + [["open", "-a", ghosttyApp]])
     }
-    // `direct:` splits on spaces; a session name with one is only raised, not attached
-    guard !(tmuxBin + t.session).contains(where: \.isWhitespace) else {
-        return FocusPlan(kind: .detached, commands: tmux + [["open", "-a", ghosttyApp]])
-    }
     return FocusPlan(kind: .detached, commands: tmux + [
-        planTerminal(in: homeDir, commandLine: "direct:\(tmuxBin) attach -t \(t.session)", ghosttyApp: ghosttyApp,
-                     keepOpen: false),
+        planTerminal(in: homeDir, commandLine: shellCommandLine([tmuxBin, "attach", "-t", t.session]),
+                     ghosttyApp: ghosttyApp, keepOpen: false),
     ])
 }
 
@@ -83,17 +79,14 @@ public let resumePath = childEnvironment(base: ProcessInfo.processInfo.environme
 public func planResume(_ s: HistorySession, ghosttyApp: String = "Ghostty",
                        bins: [AgentKind: String] = resumeBins, path: String = resumePath) -> [String]? {
     guard !s.live, !s.workspace.isEmpty, let program = s.resumeCommand.first else { return nil }
-    let argv = [bins[s.agent] ?? program] + s.resumeCommand.dropFirst()
-    // `direct:` runs the argv without a shell, split on spaces, so an argument may not hold one
-    guard !argv.contains(where: { $0.contains(where: \.isWhitespace) }) else { return nil }
-    return planTerminal(in: s.workspace, commandLine: "direct:" + argv.joined(separator: " "),
+    return planTerminal(in: s.workspace, commandLine: shellCommandLine([bins[s.agent] ?? program] + s.resumeCommand.dropFirst()),
                         ghosttyApp: ghosttyApp, path: path)
 }
 
-/// The argv that opens a new Ghostty window in `cwd` running `commandLine` (Ghostty's `command` syntax) with our
-/// PATH; with `keepOpen` the window stays when the command ends, so a failure stays readable. Through Ghostty's AppleScript:
-/// Ghostty 1.3 takes `open --args -e <argv>` as files to open, one window each. The values reach the script as
-/// `argv`, never as script text.
+/// The argv that opens a new Ghostty window in `cwd` running `commandLine` with our PATH; with `keepOpen` the window
+/// stays when the command ends, so a failure stays readable. Through Ghostty's AppleScript: Ghostty 1.3 takes
+/// `open --args -e <argv>` as files to open, one window each. The values reach the script as `argv`, never as
+/// script text. Ghostty runs `commandLine` as `bash -c "exec -l <commandLine>"`; build it with `shellCommandLine`.
 public func planTerminal(in cwd: String, commandLine: String, ghosttyApp: String = "Ghostty",
                          path: String = resumePath, keepOpen: Bool = true) -> [String] {
     ["osascript", "-e", "on run argv", "-e", "tell application \"\(ghosttyApp)\"",
@@ -170,4 +163,10 @@ private func tabTitle(_ name: String) -> String {
 /// Selects the terminal's tab and brings its window to the front. The id travels as an argument, never as script text.
 public func ghosttyFocusArgv(_ id: String) -> [String] {
     ["osascript", "-e", "on run argv", "-e", "tell application \"Ghostty\" to focus terminal id (item 1 of argv)", "-e", "end run", id]
+}
+
+/// `argv` as one command line for the login shell Ghostty starts it with: each argument single-quoted, so a path,
+/// a session name, a prompt or a config reaches the program as it is.
+public func shellCommandLine(_ argv: [String]) -> String {
+    argv.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
 }

@@ -605,6 +605,9 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     #expect(shop.sessions.map(\.id) == ["pm2", "be"])
     #expect(!shop.running && lab.running)  // a team that runs now has nothing to resume
     #expect(m.history.map(\.id) == ["pm2", "be", "solo", "lab"])  // every session listed, for selection
+    // the list shows teams apart from single terminals, each newest first
+    #expect(m.historyTeams.map(\.name) == ["shop", "lab"])
+    #expect(m.historySingles.map(\.id) == ["solo"])
     // a page counts lines, so a team is never cut in half
     let one = model(running, history: history, historyLimit: 1)
     #expect(one.historyItems.count == 1 && one.history.map(\.id) == ["pm2", "be"] && one.historyRemaining == 2)

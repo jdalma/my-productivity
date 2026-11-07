@@ -103,6 +103,13 @@ struct SidebarModel: Equatable {
     var working: Int
 
     var liveRows: [LiveRow] { teams.flatMap(\.rows) + agents.flatMap(\.rows) }
+    /// The page's my-team teams and single terminals, apart, each newest first.
+    var historyTeams: [TeamHistory] {
+        historyItems.compactMap { if case .team(let t) = $0 { t } else { nil } }
+    }
+    var historySingles: [HistorySession] {
+        historyItems.compactMap { if case .session(let h) = $0 { h } else { nil } }
+    }
     /// Every session in `historyItems`, in list order.
     var history: [HistorySession] {
         historyItems.flatMap { item -> [HistorySession] in

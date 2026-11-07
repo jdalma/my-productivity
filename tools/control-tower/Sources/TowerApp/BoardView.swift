@@ -168,26 +168,7 @@ struct BoardView: View {
 
     private func historyList(_ model: SidebarModel) -> some View {
         List(selection: paneSelection(.history)) {
-            Section {
-                ForEach(model.historyItems, id: \.id) { item in
-                    switch item {
-                    case .session(let h):
-                        HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
-                    case .team(let t):
-                        DisclosureGroup {
-                            ForEach(t.sessions, id: \.transcriptPath) { h in
-                                HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
-                            }
-                        } label: {
-                            TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
-                        }
-                    }
-                }
-                if model.historyRemaining > 0 {
-                    Button("더 보기 (남은 \(model.historyRemaining)개)") { historyLimit += historyPageSize }
-                        .buttonStyle(.link)
-                }
-            } header: {
+            Section {} header: {
                 HStack {
                     Text("기록 · 최근순")
                     Spacer()
@@ -200,6 +181,35 @@ struct BoardView: View {
                     .labelsHidden()
                     .frame(width: 180)
                 }
+            }
+            // my-team teams apart from single terminals, as in the running list above
+            if !model.historyTeams.isEmpty {
+                Section {
+                    ForEach(model.historyTeams, id: \.name) { t in
+                        DisclosureGroup {
+                            ForEach(t.sessions, id: \.transcriptPath) { h in
+                                HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
+                            }
+                        } label: {
+                            TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
+                        }
+                    }
+                } header: {
+                    GroupHeader(tag: .team, count: nil, tooltip: "끝난 my-team 팀 \(model.historyTeams.count)개")
+                }
+            }
+            if !model.historySingles.isEmpty {
+                Section {
+                    ForEach(model.historySingles, id: \.transcriptPath) { h in
+                        HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
+                    }
+                } header: {
+                    Text("단일 터미널").scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).textCase(nil)
+                }
+            }
+            if model.historyRemaining > 0 {
+                Button("더 보기 (남은 \(model.historyRemaining)개)") { historyLimit += historyPageSize }
+                    .buttonStyle(.link)
             }
         }
         .contextMenu(forSelectionType: RowID.self) { rowMenu($0, model) } primaryAction: { rowAction($0, model) }

@@ -175,7 +175,9 @@ struct BoardView: View {
                 Section {
                     // one line a team: its workers' sessions stay out of the list, the line resumes them together
                     ForEach(model.historyTeams, id: \.run) { t in
-                        TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.run) }
+                        TeamHistoryHeader(team: t, now: Date(), launching: tower.launches.pending(t.run.team)) {
+                            tower.resumeTeam(t.run)
+                        }
                     }
                 }
             }
@@ -404,6 +406,8 @@ private struct LiveRowView: View {
 private struct TeamHistoryHeader: View {
     let team: TeamHistory
     let now: Date
+    /// The board asked to start this team and has not seen it run yet.
+    let launching: Bool
     let resume: () -> Void
 
     var body: some View {
@@ -419,12 +423,20 @@ private struct TeamHistoryHeader: View {
             if let newest = team.sessions.first {
                 Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
             }
-            Button("이어서 띄우기", action: resume)
-                .buttonStyle(.link)
-                .scaledFont(.caption1)
-                .disabled(team.running)
-                .help(team.running ? "이 팀은 지금 실행 중입니다"
-                                   : "새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
+            if launching {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.mini)
+                    Text("띄우는 중…").scaledFont(.caption1).foregroundStyle(.secondary)
+                }
+                .help("터미널에서 팀을 띄우고 있습니다. 보드에 실행 중으로 잡히면 끝납니다")
+            } else {
+                Button("이어서 띄우기", action: resume)
+                    .buttonStyle(.link)
+                    .scaledFont(.caption1)
+                    .disabled(team.running)
+                    .help(team.running ? "이 팀은 지금 실행 중입니다"
+                                       : "새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
+            }
         }
     }
 }

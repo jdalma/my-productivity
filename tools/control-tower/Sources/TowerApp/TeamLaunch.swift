@@ -55,15 +55,42 @@ private func modified(_ path: String) -> Date {
     (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
 }
 
-/// Writes the config, starts the team, and attaches this terminal to the team's tmux session. On a failure the
-/// window stays open on the error until Enter.
+/// Writes the config, starts the team, and attaches this terminal to the team's tmux session. A team that already
+/// runs (a second click, or one from before the board restarted) is only attached: two `my-team start` of one team
+/// race and leave a tmux session no manifest names. On a failure the window stays open on the error until Enter.
 func resumeTeamCommand(team: String, config: String, path: String, myTeam: String, tmux: String) -> [String] {
     let script = """
-        printf '%s\\n' "$1" > "$2" && "$3" start --config "$2" \
-        && exec "$4" attach -t "$("$3" status --team "$5" --json | plutil -extract session raw -o - -)"
-        echo; echo '팀을 띄우지 못했습니다. Enter로 닫기'; read -r _
+        alive=$("$3" status --team "$5" --json 2>/dev/null | plutil -extract team_alive raw -o - - 2>/dev/null)
+        if [ "$alive" = true ]; then echo '이미 실행 중인 팀입니다. 그 세션에 붙습니다.'
+        else printf '%s\\n' "$1" > "$2" && "$3" start --config "$2" \
+            || { echo; echo '팀을 띄우지 못했습니다. Enter로 닫기'; read -r _; exit 1; }
+        fi
+        exec "$4" attach -t "$("$3" status --team "$5" --json | plutil -extract session raw -o - -)"
         """
     return ["/bin/sh", "-c", script, "sh", config, path, myTeam, tmux, team]
+}
+
+/// The teams the board has asked to start and not yet seen running. One click starts a team; another click on it
+/// does nothing until the board sees it run, or `wait` passes (my-team waits up to 30 s for its panes).
+struct TeamLaunches {
+    static let wait: TimeInterval = 120
+    private var started: [String: Date] = [:]
+
+    func pending(_ team: String) -> Bool { started[team] != nil }
+
+    /// false while `team` is already being started.
+    mutating func begin(_ team: String, at now: Date) -> Bool {
+        guard started[team] == nil else { return false }
+        started[team] = now
+        return true
+    }
+
+    mutating func cancel(_ team: String) { started[team] = nil }
+
+    /// Drops the teams that run now and the ones that never came up in time.
+    mutating func settle(running: Set<String>, now: Date) {
+        started = started.filter { team, at in !running.contains(team) && now.timeIntervalSince(at) < Self.wait }
+    }
 }
 
 /// What Claude is asked first in a new-team terminal.

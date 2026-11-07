@@ -14,6 +14,8 @@ final class Tower {
     var boardSelectRequest: RowID?
     /// Launch or reopen asked for the board window; the menu bar label opens it and clears this.
     var boardOpenRequested = false
+    /// Teams the board asked to start and has not seen running yet: their resume button waits.
+    private(set) var launches = TeamLaunches()
     @ObservationIgnored private var notifier: Notifier?
 
     init() {
@@ -46,6 +48,7 @@ final class Tower {
             notifier?.post(s, title: displayTitle(s, in: next))
         }
         board = next
+        launches.settle(running: runningTeams(next), now: Date())
     }
 
     var myTurn: Int { board.map(myTurnCount) ?? 0 }
@@ -103,20 +106,29 @@ final class Tower {
 
     /// Opens a terminal that starts one run of a stopped team again, each claude worker resuming its last session.
     func resumeTeam(_ teamRun: TeamRun) {
+        guard launches.begin(teamRun.team, at: Date()) else { return }
         let runs = teamRuns(history)
         let sessions = history.filter { runs[$0.transcriptPath] == teamRun }
         guard let base = teamBase(teamRun.team),
               let data = try? JSONSerialization.data(withJSONObject: resumeConfig(base, run: sessions),
                                                      options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        else { return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(teamRun.team)) }
+        else {
+            launches.cancel(teamRun.team)
+            return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(teamRun.team))
+        }
         let command = resumeTeamCommand(team: teamRun.team, config: String(decoding: data, as: UTF8.self),
                                         path: "\(teamsDir)/\(teamRun.team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)
-        run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))])
+        run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
+            self?.launches.cancel(teamRun.team)
+        }
     }
 
-    private func run(_ failure: String, _ argvs: [[String]]) {
+    private func run(_ failure: String, _ argvs: [[String]], onFailure: @escaping () -> Void = {}) {
         Task {
-            do { try await FocusRunner.run(argvs) } catch { showAlert(failure, error) }
+            do { try await FocusRunner.run(argvs) } catch {
+                onFailure()
+                showAlert(failure, error)
+            }
         }
     }
 

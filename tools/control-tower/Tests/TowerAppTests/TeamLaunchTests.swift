@@ -112,3 +112,21 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     #expect(shellCommandLine(["/bin/sh", "-c", "echo \"$1\" it's", "sh", #"{"a":"b c"}"#])
         == #"'/bin/sh' '-c' 'echo "$1" it'\''s' 'sh' '{"a":"b c"}'"#)
 }
+
+@Test func aTeamIsLaunchedOnceUntilItRunsOrTheWaitRunsOut() {
+    let t0 = Date(timeIntervalSince1970: 1_000)
+    var launches = TeamLaunches()
+    let first = launches.begin("shop", at: t0)
+    let again = launches.begin("shop", at: t0.addingTimeInterval(1))  // a second click while the first launch runs
+    let other = launches.begin("lab", at: t0)  // another team is its own launch
+    #expect(first && !again && other)
+    #expect(launches.pending("shop"))
+    launches.settle(running: ["shop"], now: t0.addingTimeInterval(20))  // the board sees it run
+    #expect(!launches.pending("shop") && launches.pending("lab"))
+    launches.settle(running: [], now: t0.addingTimeInterval(TeamLaunches.wait + 1))  // never came up: the button is back
+    #expect(!launches.pending("lab"))
+    let retry = launches.begin("lab", at: t0.addingTimeInterval(TeamLaunches.wait + 2))
+    #expect(retry)
+    launches.cancel("lab")  // the terminal did not open
+    #expect(!launches.pending("lab"))
+}

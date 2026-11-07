@@ -158,6 +158,11 @@ struct CollapsedTeams: Equatable {
     private func isSearching(_ query: String) -> Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
+/// The teams with a live worker: a team named like one of these cannot be started again.
+func runningTeams(_ board: Board) -> Set<String> {
+    Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))
+}
+
 /// One line of the history list: a session alone, or the ended sessions of one my-team team.
 enum HistoryItem: Equatable {
     case session(HistorySession)
@@ -304,8 +309,7 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
             && filter.shows(h)
             && hit([h.title, h.workspace, h.branch, h.member?.team])
     }
-    let running = Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))
-    let items = historyLines(past, runs: teamRuns(history), running: running)
+    let items = historyLines(past, runs: teamRuns(history), running: runningTeams(board))
     let queue = all.filter(\.session.myTurn).enumerated().sorted { a, b in
         switch (parseISO(a.element.session.since), parseISO(b.element.session.since)) {
         case let (x?, y?) where x != y: x < y

@@ -583,15 +583,17 @@ private func isoOf(_ d: Date) -> String { d.formatted(.iso8601) }
     #expect(TeamHeader.workerInset(1) == 44 - NSFont.preferredFont(forTextStyle: .body).pointSize)
 }
 
-private func teamHistory(_ id: String, team: String?, worker: String, at: String) -> HistorySession {
-    HistorySession(id: id, agent: .claude, title: "\(worker) title", workspace: "/Users/me/proj", branch: nil, createdAt: nil,
-                   updatedAt: at, lastPrompt: nil, transcriptPath: "/t/\(id).jsonl", live: false,
-                   resumeCommand: ["claude", "--resume", id], member: team.map { TeamWorker(team: $0, worker: worker) })
+private func teamHistory(_ id: String, team: String?, worker: String, at: String, started: String? = nil,
+                         joined: Bool = false) -> HistorySession {
+    HistorySession(id: id, agent: .claude, title: "\(worker) title", workspace: "/Users/me/proj", branch: nil,
+                   createdAt: started ?? at, updatedAt: at, lastPrompt: nil, transcriptPath: "/t/\(id).jsonl", live: false,
+                   resumeCommand: ["claude", "--resume", id],
+                   member: team.map { TeamWorker(team: $0, worker: worker, joined: joined) })
 }
 
 @Test func endedTeamSessionsShowAsOneTeamInTheHistory() {
     let history = [
-        teamHistory("pm2", team: "shop", worker: "pm", at: "2026-11-02T03:00:00.000Z"),
+        teamHistory("pm2", team: "shop", worker: "pm", at: "2026-11-02T03:00:00.000Z", started: "2026-11-02T01:02:00.000Z"),
         teamHistory("solo", team: nil, worker: "x", at: "2026-11-02T02:00:00.000Z"),
         teamHistory("be", team: "shop", worker: "be", at: "2026-11-02T01:00:00.000Z"),
         teamHistory("lab", team: "lab", worker: "pm", at: "2026-11-01T00:00:00.000Z"),
@@ -599,18 +601,17 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     let running = Board(at: at, teams: [team("lab", [worker("pm", session: session("pane:l:%1", status: .busy))])], loose: [])
     let m = model(running, history: history, filter: .team)
     // one line per team, newest first; a team's sessions inside, newest first
-    #expect(m.historyItems.map(\.id) == ["team:shop", "team:lab"])
-    #expect(m.historyTeams.map(\.name) == ["shop", "lab"] && m.historySingles.isEmpty)
+    #expect(m.historyTeams.map(\.run.team) == ["shop", "lab"] && m.historySingles.isEmpty)
     let shop = m.historyTeams[0], lab = m.historyTeams[1]
     #expect(shop.sessions.map(\.id) == ["pm2", "be"])
     #expect(!shop.running && lab.running)  // a team that runs now has nothing to resume
     // a page counts lines, so a team is never cut in half
     let one = model(running, history: history, filter: .team, historyLimit: 1)
-    #expect(one.historyTeams.map(\.name) == ["shop"] && one.history.map(\.id) == ["pm2", "be"] && one.historyRemaining == 1)
+    #expect(one.historyTeams.map(\.run.team) == ["shop"] && one.history.map(\.id) == ["pm2", "be"] && one.historyRemaining == 1)
     // Claude and Codex show single terminals only: a team's claude workers stay under my-team
     #expect(model(running, history: history, filter: .claude).historyItems.map(\.id) == ["/t/solo.jsonl"])
     // the team's name finds it even when no session title holds it
-    #expect(model(running, history: history, query: "shop", filter: .team).historyItems.map(\.id) == ["team:shop"])
+    #expect(model(running, history: history, query: "shop", filter: .team).historyTeams.map(\.run.team) == ["shop"])
 }
 
 @Test func aTeamsCodexWorkerIsNotACodexTerminal() {
@@ -621,4 +622,20 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     let board = Board(at: at, teams: [], loose: [])
     #expect(model(board, history: [worker, single], filter: .codex).history.map(\.id) == ["solo"])
     #expect(model(board, history: [worker, single], filter: .team).history.map(\.id) == ["cx"])
+}
+
+@Test func eachRunOfATeamIsItsOwnLine() {
+    let history = [
+        teamHistory("b-qa", team: "shop", worker: "qa", at: "2026-11-05T11:00:00.000Z", started: "2026-11-05T10:30:00.000Z",
+                     joined: true),  // add-worker: the run begun last before it
+        teamHistory("b-pm", team: "shop", worker: "pm", at: "2026-11-05T10:00:00.000Z", started: "2026-11-05T09:00:00.000Z"),
+        teamHistory("b-be", team: "shop", worker: "be", at: "2026-11-05T09:30:00.000Z", started: "2026-11-05T09:04:00.000Z"),
+        teamHistory("a-pm", team: "shop", worker: "pm", at: "2026-11-02T10:00:00.000Z", started: "2026-11-02T09:00:00.000Z"),
+    ]
+    let m = model(Board(at: at, teams: [], loose: []), history: history, filter: .team)
+    // workers launched minutes apart are one `my-team start`; days apart, two
+    #expect(m.historyTeams.map { $0.sessions.map(\.id) } == [["b-qa", "b-pm", "b-be"], ["a-pm"]])
+    #expect(m.historyTeams.map(\.run.team) == ["shop", "shop"])
+    #expect(Set(m.historyItems.map(\.id)).count == 2)
+    #expect(m.historyTeams.last?.run.start == parseISO("2026-11-02T09:00:00.000Z"))
 }

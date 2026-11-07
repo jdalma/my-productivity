@@ -174,8 +174,8 @@ struct BoardView: View {
             if !model.historyTeams.isEmpty {
                 Section {
                     // one line a team: its workers' sessions stay out of the list, the line resumes them together
-                    ForEach(model.historyTeams, id: \.name) { t in
-                        TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
+                    ForEach(model.historyTeams, id: \.run) { t in
+                        TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.run) }
                     }
                 }
             }
@@ -408,7 +408,11 @@ private struct TeamHistoryHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(team.name).scaledFont(.callout, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
+            Text(team.run.team).scaledFont(.callout, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
+            if let start = team.run.start {
+                Text(Date(timeIntervalSince1970: start / 1000).formatted(.dateTime.month(.defaultDigits).day().hour().minute()) + " 시작")
+                    .scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
+            }
             Text("워커 \(Set(team.sessions.compactMap { $0.member?.worker }).count)")
                 .scaledFont(.caption1).foregroundStyle(.secondary)
             Spacer(minLength: 8)

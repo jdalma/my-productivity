@@ -101,15 +101,16 @@ final class Tower {
         run("새 팀 터미널을 열지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine([resumeBins[.claude] ?? "claude", newTeamPrompt]))])
     }
 
-    /// Opens a terminal that starts a stopped team again, each claude worker resuming its last session.
-    func resumeTeam(_ team: String) {
-        let sessions = lastSessions(of: team, in: history)
-        guard let base = teamBase(team),
-              let data = try? JSONSerialization.data(withJSONObject: resumeConfig(base, sessions: sessions),
+    /// Opens a terminal that starts one run of a stopped team again, each claude worker resuming its last session.
+    func resumeTeam(_ teamRun: TeamRun) {
+        let runs = teamRuns(history)
+        let sessions = history.filter { runs[$0.transcriptPath] == teamRun }
+        guard let base = teamBase(teamRun.team),
+              let data = try? JSONSerialization.data(withJSONObject: resumeConfig(base, run: sessions),
                                                      options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        else { return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(team)) }
-        let command = resumeTeamCommand(team: team, config: String(decoding: data, as: UTF8.self),
-                                        path: "\(teamsDir)/\(team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)
+        else { return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(teamRun.team)) }
+        let command = resumeTeamCommand(team: teamRun.team, config: String(decoding: data, as: UTF8.self),
+                                        path: "\(teamsDir)/\(teamRun.team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)
         run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))])
     }
 

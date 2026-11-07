@@ -292,10 +292,13 @@ func parseTranscript(_ f: TranscriptFile) -> TranscriptFacts? {
 public struct TeamWorker: Hashable, Sendable {
     public var team: String
     public var worker: String
+    /// Added to a running team (`add-worker`), rather than launched with it by `my-team start`.
+    public var joined: Bool
 
-    public init(team: String, worker: String) {
+    public init(team: String, worker: String, joined: Bool = false) {
         self.team = team
         self.worker = worker
+        self.joined = joined
     }
 }
 
@@ -304,7 +307,7 @@ public struct TeamWorker: Hashable, Sendable {
 func myTeamBootstrap(_ prompt: String) -> TeamWorker? {
     guard prompt.hasPrefix("Team is live.") || prompt.hasPrefix("You just joined team "),
           let m = prompt.firstMatch(of: #//sessions/([^/\s]+)/workers/([^/\s]+)//#) else { return nil }
-    return TeamWorker(team: String(m.1), worker: String(m.2))
+    return TeamWorker(team: String(m.1), worker: String(m.2), joined: prompt.hasPrefix("You just joined team "))
 }
 
 /// Facts → sessions, newest first. The Codex title comes from `codexTitles` (session_index.jsonl), then the first prompt.

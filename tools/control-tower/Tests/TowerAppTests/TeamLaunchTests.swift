@@ -10,37 +10,32 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
                    member: team.map { TeamWorker(team: $0, worker: worker) })
 }
 
-@Test func eachWorkerResumesItsLastClaudeSession() {
-    let history = [
-        session("pm-old", team: "t", worker: "pm", at: "2026-11-01T00:00:00.000Z"),
+@Test func aRunResumesItsWorkersEachInItsLastClaudeSession() throws {
+    // one run's sessions; a worker that left the config since keeps its place, as the run had it
+    let run = [
         session("pm-new", team: "t", worker: "pm", at: "2026-11-02T00:00:00.000Z"),
+        session("pm-old", team: "t", worker: "pm", at: "2026-11-01T00:00:00.000Z"),
         session("core", team: "t", worker: "core", at: "2026-11-01T00:00:00.000Z"),
         session("cx", team: "t", worker: "cx", at: "2026-11-02T00:00:00.000Z", agent: .codex),
-        session("other", team: "u", worker: "pm", at: "2026-11-03T00:00:00.000Z"),
-        session("loose", team: nil, worker: "pm", at: "2026-11-03T00:00:00.000Z"),
     ]
-    #expect(lastSessions(of: "t", in: history) == ["pm": "pm-new", "core": "core"])
-}
-
-@Test func aResumeConfigKeepsTheTeamAndAddsEachWorkersResume() throws {
     let base: [String: Any] = [
-        "team_name": "t",
+        "team_name": "t", "note": "kept",
         "workers": [
             ["name": "pm", "agent_type": "claude", "cwd": "/w", "extra_prompt": "brief",
              "launch_args": ["--plugin-dir", "/p", "--resume", "stale"]],
-            ["name": "core", "agent_type": "claude", "cwd": "/w"],
             ["name": "cx", "agent_type": "codex", "cwd": "/w", "launch_args": ["-m", "x"]],
-            ["name": "fresh", "agent_type": "claude", "cwd": "/w"],
+            ["name": "later", "agent_type": "claude", "cwd": "/w"],  // not in this run
         ],
     ]
-    let config = resumeConfig(base, sessions: ["pm": "pm-new", "core": "core-1", "cx": "cx-1"])
+    let config = resumeConfig(base, run: run)
     let workers = try #require(config["workers"] as? [[String: Any]])
-    #expect(config["team_name"] as? String == "t")
-    #expect(workers[0]["extra_prompt"] as? String == "brief")  // the rest of the config as it was
+    #expect(config["note"] as? String == "kept")
+    #expect(workers.map { $0["name"] as? String } == ["pm", "cx", "core"])
+    #expect(workers[0]["extra_prompt"] as? String == "brief")
     #expect(workers[0]["launch_args"] as? [String] == ["--plugin-dir", "/p", "--resume", "pm-new"])
-    #expect(workers[1]["launch_args"] as? [String] == ["--resume", "core-1"])
-    #expect(workers[2]["launch_args"] as? [String] == ["-m", "x"])  // codex starts afresh
-    #expect(workers[3]["launch_args"] == nil)  // no session: a fresh start
+    #expect(workers[1]["launch_args"] as? [String] == ["-m", "x"])  // codex starts afresh
+    #expect(workers[2]["agent_type"] as? String == "claude" && workers[2]["cwd"] as? String == "/w")
+    #expect(workers[2]["launch_args"] as? [String] == ["--resume", "core"])
 }
 
 @Test func theTeamsConfigIsTheNewestOneThatNamesIt() throws {

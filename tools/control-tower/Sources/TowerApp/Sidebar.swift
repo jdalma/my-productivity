@@ -166,35 +166,65 @@ enum HistoryItem: Equatable {
     var id: String {
         switch self {
         case .session(let h): h.transcriptPath
-        case .team(let t): "team:\(t.name)"
+        case .team(let t): "team:\(t.run.team)@\(t.run.start.map { String(Int($0)) } ?? "?")"
         }
     }
 }
 
-/// A my-team team's ended sessions, found by the prompt my-team typed into each worker first.
+/// One `my-team start` of a team: its name and when the workers it launched began (ms since 1970); nil when
+/// none of them is left in the history, only workers added later.
+struct TeamRun: Hashable {
+    var team: String
+    var start: Double?
+}
+
+/// Each team session's run, by transcript path. Workers `my-team start` launches begin within minutes of each other,
+/// runs hours or days apart (control-tower's history: 5.4 minutes at most within a run), so a start session more
+/// than `gap` after the previous one begins a new run. A worker added later belongs to the run begun last before it.
+func teamRuns(_ history: [HistorySession], gap: Double = 10 * 60_000) -> [String: TeamRun] {
+    var launched: [String: [Double]] = [:]
+    for h in history {
+        if let m = h.member, !m.joined, let t = parseISO(h.createdAt) { launched[m.team, default: []].append(t) }
+    }
+    let begun = launched.mapValues { times in
+        times.sorted().reduce(into: (starts: [Double](), last: -Double.infinity)) { acc, t in
+            if t - acc.last > gap { acc.starts.append(t) }
+            acc.last = t
+        }.starts
+    }
+    var runs: [String: TeamRun] = [:]
+    for h in history {
+        guard let m = h.member else { continue }
+        let start = parseISO(h.createdAt).flatMap { t in begun[m.team]?.last { $0 <= t } }
+        runs[h.transcriptPath] = TeamRun(team: m.team, start: start)
+    }
+    return runs
+}
+
+/// One run of a my-team team in the history: its ended sessions, found by the prompt my-team typed into each worker first.
 struct TeamHistory: Equatable {
-    var name: String
+    var run: TeamRun
     /// Newest first.
     var sessions: [HistorySession]
     /// The team runs now: there is nothing to resume.
     var running: Bool
 }
 
-/// `sessions` (newest first) as list lines: a team's sessions gathered on one line, where its newest one was.
-func historyLines(_ sessions: [HistorySession], running: Set<String>) -> [HistoryItem] {
+/// `sessions` (newest first) as list lines: a team run's sessions gathered on one line, where its newest one was.
+func historyLines(_ sessions: [HistorySession], runs: [String: TeamRun], running: Set<String>) -> [HistoryItem] {
     var lines: [HistoryItem] = []
-    var teamLine: [String: Int] = [:]
+    var runLine: [TeamRun: Int] = [:]
     for h in sessions {
-        guard let team = h.member?.team else {
+        guard let run = runs[h.transcriptPath] else {
             lines.append(.session(h))
             continue
         }
-        if let i = teamLine[team], case .team(var t) = lines[i] {
+        if let i = runLine[run], case .team(var t) = lines[i] {
             t.sessions.append(h)
             lines[i] = .team(t)
         } else {
-            teamLine[team] = lines.count
-            lines.append(.team(TeamHistory(name: team, sessions: [h], running: running.contains(team))))
+            runLine[run] = lines.count
+            lines.append(.team(TeamHistory(run: run, sessions: [h], running: running.contains(run.team))))
         }
     }
     return lines
@@ -275,7 +305,7 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
             && hit([h.title, h.workspace, h.branch, h.member?.team])
     }
     let running = Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))
-    let items = historyLines(past, running: running)
+    let items = historyLines(past, runs: teamRuns(history), running: running)
     let queue = all.filter(\.session.myTurn).enumerated().sorted { a, b in
         switch (parseISO(a.element.session.since), parseISO(b.element.session.since)) {
         case let (x?, y?) where x != y: x < y

@@ -7,29 +7,30 @@ import TowerCore
 
 let teamsDir = NSHomeDirectory() + "/teams"
 
-/// Each claude worker's last ended session in `team`, by worker name. Codex workers start afresh: my-team passes
-/// launch args to codex as options, and its resume is a subcommand.
-func lastSessions(of team: String, in history: [HistorySession]) -> [String: String] {
+/// The config that starts one run of a team again: its workers as that run had them, each with what `base` (the
+/// team's config) gives it, else its agent and folder; each claude worker resuming its last ended session with
+/// `--resume <id>`, which my-team uses for that one launch and keeps out of the team's manifest. Codex workers start
+/// afresh: my-team passes launch args to codex as options, and its resume is a subcommand.
+func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any] {
     var newest: [String: HistorySession] = [:]
-    for h in history where h.member?.team == team && h.agent == .claude && !h.live {
-        guard let worker = h.member?.worker else { continue }
-        if let seen = newest[worker], (parseISO(seen.updatedAt) ?? 0) >= (parseISO(h.updatedAt) ?? 0) { continue }
-        newest[worker] = h
+    for h in run {
+        guard let name = h.member?.worker else { continue }
+        if let seen = newest[name], (parseISO(seen.updatedAt) ?? 0) >= (parseISO(h.updatedAt) ?? 0) { continue }
+        newest[name] = h
     }
-    return newest.mapValues(\.id)
-}
-
-/// `base` with `--resume <id>` in the launch args of each worker that has a session; anything else in the config
-/// stays as it was. my-team uses a `--resume` for that one launch and keeps it out of the team's manifest.
-func resumeConfig(_ base: [String: Any], sessions: [String: String]) -> [String: Any] {
+    let configured = (base["workers"] as? [[String: Any]] ?? []).filter { ($0["name"] as? String).map { newest[$0] != nil } ?? false }
+    let named = Set(configured.compactMap { $0["name"] as? String })
+    let added = newest.keys.filter { !named.contains($0) }.sorted().map { name -> [String: Any] in
+        ["name": name, "agent_type": newest[name]!.agent.rawValue, "cwd": newest[name]!.workspace]
+    }
     var config = base
-    config["workers"] = (base["workers"] as? [[String: Any]] ?? []).map { worker in
-        guard worker["agent_type"] as? String == "claude", let name = worker["name"] as? String, let id = sessions[name]
-        else { return worker }
+    config["workers"] = (configured + added).map { worker in
+        guard worker["agent_type"] as? String == "claude", let name = worker["name"] as? String,
+              let last = newest[name], !last.live, last.agent == .claude else { return worker }
         var args = worker["launch_args"] as? [String] ?? []
         if let i = args.firstIndex(of: "--resume") { args.removeSubrange(i...min(i + 1, args.count - 1)) }
         var w = worker
-        w["launch_args"] = args + ["--resume", id]
+        w["launch_args"] = args + ["--resume", last.id]
         return w
     }
     return config

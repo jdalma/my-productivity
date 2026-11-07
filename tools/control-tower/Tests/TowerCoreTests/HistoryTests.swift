@@ -153,7 +153,7 @@ private func userMessage(_ text: String, at: String) -> String {
     let member = Dictionary(uniqueKeysWithValues: h.history().map { ($0.id, $0.member) })
     #expect(member["ai"] == TeamWorker(team: "shop", worker: "be"))
     #expect(member["named"] == TeamWorker(team: "shop", worker: "be"))
-    #expect(member["joined"] == TeamWorker(team: "shop", worker: "fe"))
+    #expect(member["joined"] == TeamWorker(team: "shop", worker: "fe", joined: true))  // add-worker, not the start
     #expect(member["nopath"] == .some(nil))
     let json = String(decoding: try JSONEncoder().encode(h.history().first { $0.id == "ai" }), as: UTF8.self)
     #expect(!json.contains("shop"))

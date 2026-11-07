@@ -115,7 +115,9 @@ struct BoardView: View {
                         .safeAreaInset(edge: .top, spacing: 0) { sidebarHeader(model) }
                         .frame(height: h.top)
                     SidebarDivider(top: h.top, total: geo.size.height, ratio: $splitRatio)
-                    historyList(model).frame(height: h.bottom)
+                    historyList(model)
+                        .safeAreaInset(edge: .top, spacing: 0) { historyHeader }
+                        .frame(height: h.bottom)
                 }
             }
             .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 520)
@@ -168,20 +170,6 @@ struct BoardView: View {
 
     private func historyList(_ model: SidebarModel) -> some View {
         List(selection: paneSelection(.history)) {
-            Section {} header: {
-                HStack {
-                    Text("기록 · 최근순")
-                    Spacer()
-                    Picker("기록 종류", selection: $filter) {
-                        Text("my-team").tag(HistoryFilter.team)
-                        Text("Claude").tag(HistoryFilter.claude)
-                        Text("Codex").tag(HistoryFilter.codex)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 180)
-                }
-            }
             // my-team teams apart from single terminals, as in the running list above
             if !model.historyTeams.isEmpty {
                 Section {
@@ -254,6 +242,25 @@ struct BoardView: View {
         var c = collapsed
         c.reveal(id, in: board)
         if c != collapsed { storedCollapsed = c.stored }
+    }
+
+    /// The history list's bar, built like the running list's so both line up with the sidebar's edges: a section
+    /// header sits on the list's own insets, which put a fixed-width picker right of the rows below it.
+    private var historyHeader: some View {
+        HStack {
+            Text("기록 · 최근순").scaledFont(.headline, weight: .semibold)
+            Spacer()
+            Picker("기록 종류", selection: $filter) {
+                Text("my-team").tag(HistoryFilter.team)
+                Text("Claude").tag(HistoryFilter.claude)
+                Text("Codex").tag(HistoryFilter.codex)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.bar)
     }
 
     private func sidebarHeader(_ model: SidebarModel) -> some View {

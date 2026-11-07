@@ -31,7 +31,7 @@ private func history(_ title: String, agent: AgentKind = .claude, workspace: Str
                    updatedAt: ago10, lastPrompt: nil, transcriptPath: path, live: live, resumeCommand: ["claude", "--resume", "id"])
 }
 
-private func model(_ board: Board, history: [HistorySession] = [], query: String = "", filter: AgentFilter = .all,
+private func model(_ board: Board, history: [HistorySession] = [], query: String = "", filter: HistoryFilter = .claude,
                    historyLimit: Int = historyPageSize) -> SidebarModel {
     sidebarModel(board: board, history: history, query: query, filter: filter, historyLimit: historyLimit, home: "/Users/me")
 }
@@ -203,7 +203,6 @@ private func model(_ board: Board, history: [HistorySession] = [], query: String
     let hist = [history("", workspace: "/Users/me/proj", path: "/t/1"), history("c", agent: .codex, path: "/t/2")]
     #expect(model(board, history: hist, filter: .claude).history.map(\.transcriptPath) == ["/t/1"])
     #expect(model(board, history: hist, filter: .codex).history.map(\.transcriptPath) == ["/t/2"])
-    #expect(model(board, history: hist).history.count == 2)
     #expect(historyTitle(hist[0]) == "proj")
     #expect(historyTitle(hist[1]) == "c")
 }
@@ -598,19 +597,28 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
         teamHistory("lab", team: "lab", worker: "pm", at: "2026-11-01T00:00:00.000Z"),
     ]
     let running = Board(at: at, teams: [team("lab", [worker("pm", session: session("pane:l:%1", status: .busy))])], loose: [])
-    let m = model(running, history: history)
-    // one line per team, where its newest session would be; a team's sessions inside, newest first
-    #expect(m.historyItems.map(\.id) == ["team:shop", "/t/solo.jsonl", "team:lab"])
-    guard case .team(let shop) = m.historyItems[0], case .team(let lab) = m.historyItems[2] else { Issue.record("teams"); return }
+    let m = model(running, history: history, filter: .team)
+    // one line per team, newest first; a team's sessions inside, newest first
+    #expect(m.historyItems.map(\.id) == ["team:shop", "team:lab"])
+    #expect(m.historyTeams.map(\.name) == ["shop", "lab"] && m.historySingles.isEmpty)
+    let shop = m.historyTeams[0], lab = m.historyTeams[1]
     #expect(shop.sessions.map(\.id) == ["pm2", "be"])
     #expect(!shop.running && lab.running)  // a team that runs now has nothing to resume
-    #expect(m.history.map(\.id) == ["pm2", "be", "solo", "lab"])  // every session listed, for selection
-    // the list shows teams apart from single terminals, each newest first
-    #expect(m.historyTeams.map(\.name) == ["shop", "lab"])
-    #expect(m.historySingles.map(\.id) == ["solo"])
     // a page counts lines, so a team is never cut in half
-    let one = model(running, history: history, historyLimit: 1)
-    #expect(one.historyItems.count == 1 && one.history.map(\.id) == ["pm2", "be"] && one.historyRemaining == 2)
+    let one = model(running, history: history, filter: .team, historyLimit: 1)
+    #expect(one.historyTeams.map(\.name) == ["shop"] && one.history.map(\.id) == ["pm2", "be"] && one.historyRemaining == 1)
+    // Claude and Codex show single terminals only: a team's claude workers stay under my-team
+    #expect(model(running, history: history, filter: .claude).historyItems.map(\.id) == ["/t/solo.jsonl"])
     // the team's name finds it even when no session title holds it
-    #expect(model(running, history: history, query: "shop").historyItems.map(\.id) == ["team:shop"])
+    #expect(model(running, history: history, query: "shop", filter: .team).historyItems.map(\.id) == ["team:shop"])
+}
+
+@Test func aTeamsCodexWorkerIsNotACodexTerminal() {
+    var worker = teamHistory("cx", team: "shop", worker: "cx", at: "2026-11-02T03:00:00.000Z")
+    worker.agent = .codex
+    var single = teamHistory("solo", team: nil, worker: "x", at: "2026-11-02T02:00:00.000Z")
+    single.agent = .codex
+    let board = Board(at: at, teams: [], loose: [])
+    #expect(model(board, history: [worker, single], filter: .codex).history.map(\.id) == ["solo"])
+    #expect(model(board, history: [worker, single], filter: .team).history.map(\.id) == ["cx"])
 }

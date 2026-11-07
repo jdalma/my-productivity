@@ -200,13 +200,23 @@ func historyLines(_ sessions: [HistorySession], running: Set<String>) -> [Histor
     return lines
 }
 
-enum AgentFilter: Hashable {
-    case all, claude, codex
+/// What the history list shows: ended my-team teams, or single terminals of one agent. A team's workers are
+/// never single terminals, whatever agent they ran.
+enum HistoryFilter: Hashable {
+    case team, claude, codex
+
+    func shows(_ h: HistorySession) -> Bool {
+        switch self {
+        case .team: h.member != nil
+        case .claude: h.member == nil && h.agent == .claude
+        case .codex: h.member == nil && h.agent == .codex
+        }
+    }
 }
 
 let historyPageSize = 30
 
-func sidebarModel(board: Board, history: [HistorySession], query: String, filter: AgentFilter, historyLimit: Int,
+func sidebarModel(board: Board, history: [HistorySession], query: String, filter: HistoryFilter, historyLimit: Int,
                   home: String) -> SidebarModel {
     let byTranscript = Dictionary(history.map { ($0.transcriptPath, $0) }, uniquingKeysWith: { a, _ in a })
     let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -261,7 +271,7 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
 
     let past = history.filter { h in
         !listed.contains(h.transcriptPath)
-            && (filter == .all || (filter == .claude) == (h.agent == .claude))
+            && filter.shows(h)
             && hit([h.title, h.workspace, h.branch, h.member?.team])
     }
     let running = Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))
@@ -316,7 +326,8 @@ struct MenuModel: Equatable {
 }
 
 func menuModel(_ board: Board, history: [HistorySession], home: String) -> MenuModel {
-    let side = sidebarModel(board: board, history: history, query: "", filter: .all, historyLimit: 0, home: home)
+    // no history page: the dropdown shows running sessions only
+    let side = sidebarModel(board: board, history: history, query: "", filter: .team, historyLimit: 0, home: home)
     let attached = Set(board.teams.filter(\.attached).map(\.name))
     return MenuModel(
         teams: side.teams.filter { attached.contains($0.name) }.map { t in

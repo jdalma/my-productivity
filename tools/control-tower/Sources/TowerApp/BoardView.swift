@@ -7,7 +7,7 @@ import TowerCore
 struct BoardView: View {
     let tower: Tower
     @State private var query = ""
-    @State private var filter = AgentFilter.all
+    @State private var filter = HistoryFilter.team
     @State private var historyLimit = historyPageSize
     @State private var selection: RowID?
     /// The detail's diff state; here so Esc and ⌘[ ⌘] reach the file view.
@@ -172,10 +172,10 @@ struct BoardView: View {
                 HStack {
                     Text("기록 · 최근순")
                     Spacer()
-                    Picker("에이전트", selection: $filter) {
-                        Text("전체").tag(AgentFilter.all)
-                        Text("Claude").tag(AgentFilter.claude)
-                        Text("Codex").tag(AgentFilter.codex)
+                    Picker("기록 종류", selection: $filter) {
+                        Text("my-team").tag(HistoryFilter.team)
+                        Text("Claude").tag(HistoryFilter.claude)
+                        Text("Codex").tag(HistoryFilter.codex)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()

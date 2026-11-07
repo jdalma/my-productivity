@@ -189,8 +189,6 @@ struct BoardView: View {
                     ForEach(model.historyTeams, id: \.name) { t in
                         TeamHistoryHeader(team: t, now: Date()) { tower.resumeTeam(t.name) }
                     }
-                } header: {
-                    GroupHeader(tag: .team, count: nil, tooltip: "끝난 my-team 팀 \(model.historyTeams.count)개")
                 }
             }
             if !model.historySingles.isEmpty {
@@ -403,7 +401,6 @@ private struct TeamHistoryHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            KindTag(kind: .team, style: .caption1)
             Text(team.name).scaledFont(.callout, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
             Text("워커 \(Set(team.sessions.compactMap { $0.member?.worker }).count)")
                 .scaledFont(.caption1).foregroundStyle(.secondary)

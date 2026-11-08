@@ -746,9 +746,19 @@ struct FullScreenCapable: NSViewRepresentable {
     /// Each write the probe sees, at debug level: kept off the disk unless `log stream --level debug` asks for it.
     private static let log = Logger(subsystem: "local.control-tower", category: "fullscreen")
 
+    /// Whether the board was in full screen when it went away. Closing ends the full screen space, and macOS puts a
+    /// reopened window on the space in view, over a full screen Ghostty; a board closed in full screen goes back.
+    static var defaults = UserDefaults.standard
+    static let fullScreenKey = "boardFullScreen"
+    /// How long after leaving full screen the window must still be up for that to be the user's choice: closing a
+    /// full screen window leaves full screen too, with the window gone.
+    static var settle: Duration = .seconds(1)
+
     private final class Probe: NSView {
         /// SwiftUI writes its own behavior back after the board mounts (T38b log), so each write is undone.
         private var rewrite: NSKeyValueObservation?
+        private var observers: [NSObjectProtocol] = []
+        private var restored = false
 
         override func viewDidMoveToWindow() {
             FullScreenCapable.allow(window)
@@ -757,6 +767,37 @@ struct FullScreenCapable: NSViewRepresentable {
                     FullScreenCapable.log.debug("behavior written: \(window?.collectionBehavior.rawValue ?? 0, privacy: .public)")
                     FullScreenCapable.allow(window)
                 }
+            }
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            restored = false
+            guard let window else { return }
+            let center = NotificationCenter.default
+            observers = [
+                center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main) { _ in
+                    MainActor.assumeIsolated { FullScreenCapable.defaults.set(true, forKey: FullScreenCapable.fullScreenKey) }
+                },
+                center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.keepWindowedIfStillUp() }
+                },
+                center.addObserver(forName: NSWindow.didBecomeMainNotification, object: window, queue: .main) { [weak self, weak window] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, let window, !self.restored else { return }
+                        self.restored = true
+                        if FullScreenCapable.defaults.bool(forKey: FullScreenCapable.fullScreenKey),
+                           !window.styleMask.contains(.fullScreen) {
+                            window.toggleFullScreen(nil)
+                        }
+                    }
+                },
+            ]
+        }
+
+        /// Left full screen: the user's choice if the window is still up a moment later, a close otherwise.
+        private func keepWindowedIfStillUp() {
+            Task { [weak self] in
+                try? await Task.sleep(for: FullScreenCapable.settle)
+                if self?.window?.isVisible == true { FullScreenCapable.defaults.set(false, forKey: FullScreenCapable.fullScreenKey) }
             }
         }
     }

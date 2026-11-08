@@ -54,3 +54,51 @@ private let fullScreenBits: NSWindow.CollectionBehavior = [.fullScreenPrimary, .
     let area = ResizeUpDownCursor.Area(frame: .init(x: 0, y: 0, width: 100, height: 7))
     #expect(area.hitTest(NSPoint(x: 50, y: 3)) == nil)
 }
+
+/// A window that is never shown but says whether it is, and counts the full screen toggles asked of it.
+@MainActor private final class FakeBoardWindow: NSWindow {
+    var shown = false
+    var toggles = 0
+    override var isVisible: Bool { shown }
+    override func toggleFullScreen(_ sender: Any?) { toggles += 1 }
+}
+
+@MainActor private func fakeBoard() -> FakeBoardWindow {
+    FakeBoardWindow(contentRect: .init(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .resizable],
+                    backing: .buffered, defer: true)
+}
+
+/// Closing the board ends its full screen space, and a reopened window lands on the space in view, over a full
+/// screen Ghostty (user report, 2026-11-08). The board goes back to full screen when it was closed in it.
+@MainActor @Test func aBoardClosedInFullScreenReopensInFullScreen() async throws {
+    let suite = "ct-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    FullScreenCapable.defaults = defaults
+    FullScreenCapable.settle = .milliseconds(50)
+    let post = { (name: Notification.Name, w: NSWindow) in NotificationCenter.default.post(name: name, object: w) }
+
+    let first = fakeBoard()
+    first.contentView = FullScreenCapable().makeProbe()
+    post(NSWindow.willEnterFullScreenNotification, first)
+    // closing leaves full screen with the window already gone: the wish stays
+    post(NSWindow.didExitFullScreenNotification, first)
+    try await Task.sleep(for: .milliseconds(150))
+    first.contentView = NSView()
+
+    let reopened = fakeBoard()
+    reopened.contentView = FullScreenCapable().makeProbe()
+    post(NSWindow.didBecomeMainNotification, reopened)
+    post(NSWindow.didBecomeMainNotification, reopened)
+    #expect(reopened.toggles == 1)  // once, when it first comes forward
+
+    // the user leaves full screen and keeps the window: next time it opens as a window
+    reopened.shown = true
+    post(NSWindow.didExitFullScreenNotification, reopened)
+    try await Task.sleep(for: .milliseconds(150))
+    reopened.contentView = NSView()
+    let windowed = fakeBoard()
+    windowed.contentView = FullScreenCapable().makeProbe()
+    post(NSWindow.didBecomeMainNotification, windowed)
+    #expect(windowed.toggles == 0)
+}

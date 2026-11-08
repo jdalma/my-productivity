@@ -639,3 +639,16 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     #expect(Set(m.historyItems.map(\.id)).count == 2)
     #expect(m.historyTeams.last?.run.start == parseISO("2026-11-02T09:00:00.000Z"))
 }
+
+@Test func aWorkerKnowsWhichTeammatesShareItsFolder() {
+    let board = Board(at: at, teams: [team("t", [
+        worker("pm", session: session("pane:t:%1", cwd: "/r")),
+        worker("core", session: session("pane:t:%2", cwd: "/r")),
+        worker("app", session: session("pane:t:%3", cwd: "/r/.worktrees/app")),
+        worker("gone", session: session("pane:t:%4", cwd: "/r"), alive: false),
+    ])], loose: [session("pid:9", cwd: "/r")])
+    let rows = model(board).teams[0].rows
+    let row = { (name: String) in rows.first { $0.worker?.workerName == name }! }
+    #expect(workspaceSharers(row("core"), in: board) == ["pm"])  // a stopped worker or a loose session does not count
+    #expect(workspaceSharers(row("app"), in: board).isEmpty)  // its own worktree: the diff is its own
+}

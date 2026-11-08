@@ -158,6 +158,15 @@ struct CollapsedTeams: Equatable {
     private func isSearching(_ query: String) -> Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
+/// The other live workers of `row`'s team in the same folder: the diff of that folder is theirs as much as its own.
+/// A worker on its own git worktree shares with none.
+func workspaceSharers(_ row: LiveRow, in board: Board) -> [String] {
+    guard let me = row.worker, let team = board.teams.first(where: { $0.name == row.teamName }) else { return [] }
+    return team.workers
+        .filter { $0.alive && $0.workerName != me.workerName && $0.session.cwd == row.session.cwd }
+        .map(\.workerName)
+}
+
 /// The teams with a live worker: a team named like one of these cannot be started again.
 func runningTeams(_ board: Board) -> Set<String> {
     Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))

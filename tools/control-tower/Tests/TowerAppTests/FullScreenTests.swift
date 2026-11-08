@@ -95,7 +95,10 @@ private let fullScreenBits: NSWindow.CollectionBehavior = [.fullScreenPrimary, .
     // the user leaves full screen and keeps the window: next time it opens as a window
     reopened.shown = true
     post(NSWindow.didExitFullScreenNotification, reopened)
-    try await Task.sleep(for: .milliseconds(150))
+    let deadline = Date().addingTimeInterval(2)  // the check runs `settle` later, later still under a loaded run
+    while defaults.bool(forKey: FullScreenCapable.fullScreenKey), Date() < deadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
     reopened.contentView = NSView()
     let windowed = fakeBoard()
     windowed.contentView = FullScreenCapable().makeProbe()

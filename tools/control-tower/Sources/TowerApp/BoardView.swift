@@ -508,6 +508,7 @@ private struct DetailView: View {
     private func live(_ row: LiveRow) -> some View {
         let s = row.session
         let team = row.teamName.flatMap { n in board.teams.first { $0.name == n } }
+        let sharers = workspaceSharers(row, in: board)
         return detailBody(
             title: row.title,
             badges: {
@@ -526,6 +527,8 @@ private struct DetailView: View {
                     "\(t.session) · pane \(t.pane)" + (team.map { $0.attached ? " · attached" : " · detached" } ?? "")
                 } ?? ""),
                 ("메일", row.worker.map { mailSummary([$0], at: board.at) } ?? ""),
+                // a shared folder's diff is not this worker's alone; a worktree per worker splits it
+                ("diff 범위", sharers.isEmpty ? "" : "팀 공유 폴더 (\(sharers.joined(separator: ", "))와 함께)"),
             ],
             workspace: s.cwd,
             conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)])

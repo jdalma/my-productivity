@@ -97,6 +97,8 @@ struct TeamLaunches {
 let newTeamPrompt = """
     ~/teams 에 my-team 팀을 새로 만들고 띄운다. 먼저 나에게 팀의 목적, 필요한 워커(이름·역할·작업 폴더·할 일)를 묻는다. \
     답을 들으면 my-team 스킬의 config 형식으로 ~/teams/<team_name>.json 을 쓴다. 기존 ~/teams/*.json 을 참고하고, \
+    같은 git 저장소를 고치는 워커가 둘 이상이면 워커마다 `git worktree add <저장소>/.worktrees/<워커> -b <team>/<워커>` 로 \
+    worktree를 만들어 그 폴더를 cwd로 쓴다(읽기만 하는 워커는 원래 폴더를 써도 된다). \
     같은 이름의 파일이 있으면 덮어쓰기 전에 묻는다. 내가 확인하면 `my-team start --config <그 파일>` 로 띄운다. \
     띄운 뒤에는 Control Tower 보드에서 그 팀이 보이고, 워커를 더블 클릭하면 터미널로 간다고 알려 준다.
     """

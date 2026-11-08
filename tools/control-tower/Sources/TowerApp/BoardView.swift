@@ -184,7 +184,7 @@ struct BoardView: View {
             if !model.historySingles.isEmpty {
                 Section {
                     ForEach(model.historySingles, id: \.transcriptPath) { h in
-                        HistoryRowView(h: h, now: Date(), home: home).tag(RowID.history(h.transcriptPath))
+                        HistoryRowView(h: h, now: Date(), home: home) { tower.open(h) }.tag(RowID.history(h.transcriptPath))
                     }
                 } header: {
                     Text("단일 터미널").scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).textCase(nil)
@@ -429,12 +429,10 @@ private struct TeamHistoryHeader: View {
                     .help("팀을 띄우는 중: 보드에 실행 중으로 잡히면 끝납니다")
                     .accessibilityLabel("팀을 띄우는 중")
             } else {
-                Button("이어서 띄우기", action: resume)
-                    .buttonStyle(.link)
-                    .scaledFont(.caption1)
+                RunButton(label: "팀 실행", action: resume)
                     .disabled(team.running)
                     .help(team.running ? "이 팀은 지금 실행 중입니다"
-                                       : "새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
+                                       : "실행: 새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
             }
         }
     }
@@ -444,6 +442,8 @@ private struct HistoryRowView: View {
     let h: HistorySession
     let now: Date
     let home: String
+    /// The row's run button, the same as a double click on it; nil leaves it out.
+    var run: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -453,8 +453,26 @@ private struct HistoryRowView: View {
             }
             Spacer(minLength: 8)
             Text(relativeTime(h.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
+            if let run {
+                RunButton(label: "세션 실행", action: run)
+                    .help("실행: 새 Ghostty 창에서 이 세션을 resume합니다(더블 클릭과 같음)")
+            }
         }
         .help(historyTooltip(h, home: home))
+    }
+}
+
+/// ▶: starts what a history line stands for, a team run or a session. The words are its tooltip and label.
+private struct RunButton: View {
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "play.fill").scaledFont(.caption1)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(label)
     }
 }
 

@@ -101,7 +101,9 @@ final class Tower {
 
     /// Opens a terminal where Claude writes a new team's config in `~/teams` with the user and starts it.
     func newTeam() {
-        run("새 팀 터미널을 열지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine([resumeBins[.claude] ?? "claude", newTeamPrompt]))])
+        let command = newTeamCommand(teams: teamsDir, claude: resumeBins[.claude] ?? "claude")
+        // the window opens in the home folder; the command makes ~/teams and moves there
+        run("새 팀 터미널을 열지 못함", [planTerminal(in: NSHomeDirectory(), commandLine: shellCommandLine(command))])
     }
 
     /// Opens a terminal that starts one run of a stopped team again, each claude worker resuming its last session.

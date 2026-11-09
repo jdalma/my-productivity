@@ -57,15 +57,18 @@ private func modified(_ path: String) -> Date {
 
 /// Writes the config, starts the team, and attaches this terminal to the team's tmux session. A team that already
 /// runs (a second click, or one from before the board restarted) is only attached: two `my-team start` of one team
-/// race and leave a tmux session no manifest names. On a failure the window stays open on the error until Enter.
+/// race and leave a tmux session no manifest names. A session name that cannot be read stops it: `attach -t ""`
+/// would attach to the most recent session, another team's (R48). On a failure the window stays open until Enter.
 func resumeTeamCommand(team: String, config: String, path: String, myTeam: String, tmux: String) -> [String] {
     let script = """
         alive=$("$3" status --team "$5" --json 2>/dev/null | plutil -extract team_alive raw -o - - 2>/dev/null)
         if [ "$alive" = true ]; then echo '이미 실행 중인 팀입니다. 그 세션에 붙습니다.'
-        else printf '%s\\n' "$1" > "$2" && "$3" start --config "$2" \
+        else mkdir -p "$(dirname "$2")" && printf '%s\\n' "$1" > "$2" && "$3" start --config "$2" \
             || { echo; echo '팀을 띄우지 못했습니다. Enter로 닫기'; read -r _; exit 1; }
         fi
-        exec "$4" attach -t "$("$3" status --team "$5" --json | plutil -extract session raw -o - -)"
+        s=$("$3" status --team "$5" --json 2>/dev/null | plutil -extract session raw -o - - 2>/dev/null)
+        [ -n "$s" ] || { echo; echo '팀의 tmux 세션을 찾지 못해 붙지 않습니다. Enter로 닫기'; read -r _; exit 1; }
+        exec "$4" attach -t "$s"
         """
     return ["/bin/sh", "-c", script, "sh", config, path, myTeam, tmux, team]
 }
@@ -93,10 +96,16 @@ struct TeamLaunches {
     }
 }
 
+/// The new-team terminal's command: makes `teams` when the machine has none yet, and starts Claude in it.
+func newTeamCommand(teams: String, claude: String) -> [String] {
+    ["/bin/sh", "-c", #"mkdir -p "$1" && cd "$1" && exec "$2" "$3""#, "sh", teams, claude, newTeamPrompt]
+}
+
 /// What Claude is asked first in a new-team terminal.
 let newTeamPrompt = """
     ~/teams 에 my-team 팀을 새로 만들고 띄운다. 먼저 나에게 팀의 목적, 필요한 워커(이름·역할·작업 폴더·할 일)를 묻는다. \
-    답을 들으면 my-team 스킬의 config 형식으로 ~/teams/<team_name>.json 을 쓴다. 기존 ~/teams/*.json 을 참고하고, \
+    답을 들으면 my-team 스킬의 config 형식으로 ~/teams/<team_name>.json 을 쓴다. 기존 ~/teams/*.json 을 참고하되 \
+    보드가 이어 띄우기용으로 쓴 *.resume.json 은 옛 세션 id가 들어 있으니 참고하지 않고, \
     같은 git 저장소를 고치는 워커가 둘 이상이면 워커마다 `git worktree add <저장소>/.worktrees/<워커> -b <team>/<워커>` 로 \
     worktree를 만들어 그 폴더를 cwd로 쓴다(읽기만 하는 워커는 원래 폴더를 써도 된다). \
     같은 이름의 파일이 있으면 덮어쓰기 전에 묻는다. 내가 확인하면 `my-team start --config <그 파일>` 로 띄운다. \

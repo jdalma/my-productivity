@@ -71,8 +71,14 @@ public let resumeBins: [AgentKind: String] = [
 
 /// Our child PATH plus `~/.local/bin`. A Ghostty window opened via `open` gets launchd's, which lacks the `node` that
 /// `codex` (`#!/usr/bin/env node`) and Claude's MCP servers need, and the `claude` that `my-team start` looks up.
-public let resumePath = (childEnvironment(base: ProcessInfo.processInfo.environment, extra: [:])["PATH"] ?? "")
-    + ":\(homeDir)/.local/bin"
+public let resumePath = pathWithClaude(childEnvironment(base: ProcessInfo.processInfo.environment, extra: [:])["PATH"] ?? "",
+                                       home: homeDir)
+
+/// `path` with `~/.local/bin`, where claude installs itself, last; an empty `path` adds no empty entry, which a
+/// shell reads as the current folder.
+public func pathWithClaude(_ path: String, home: String) -> String {
+    ([path, "\(home)/.local/bin"]).filter { !$0.isEmpty }.joined(separator: ":")
+}
 
 /// The argv that opens a new Ghostty window in the session's workspace and resumes it there,
 /// through `/usr/bin/env PATH=…` so no shell is involved.

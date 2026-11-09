@@ -130,3 +130,72 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     launches.cancel("lab")  // the terminal did not open
     #expect(!launches.pending("lab"))
 }
+
+// MARK: - the scripts the board's terminals run, against stand-in my-team, tmux and claude
+
+/// A folder of stand-in programs that log their arguments, removed when the test ends.
+private final class Stubs {
+    let dir = NSTemporaryDirectory() + "stubs-\(UUID().uuidString)"
+    var log: String { (try? String(contentsOfFile: "\(dir)/log", encoding: .utf8)) ?? "" }
+
+    init(status: String) throws {
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try stub("my-team", "case \"$1\" in status) printf '%s' '\(status)';; esac")
+        try stub("tmux", "")
+        try stub("claude", "pwd >> \"$(dirname \"$0\")/log\"")
+    }
+
+    private func stub(_ name: String, _ body: String) throws {
+        let path = "\(dir)/\(name)"
+        try "#!/bin/sh\necho \"\(name) $*\" >> \"$(dirname \"$0\")/log\"\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+    }
+
+    /// Runs `argv` with stdin closed, so a `read` returns at once; its exit status.
+    func run(_ argv: [String]) throws -> Int32 {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: argv[0])
+        p.arguments = Array(argv.dropFirst())
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        return p.terminationStatus
+    }
+
+    deinit { try? FileManager.default.removeItem(atPath: dir) }
+}
+
+@Test func aTeamWhoseSessionCannotBeFoundIsNotAttachedToAnother() throws {
+    // `tmux attach -t ""` attaches to the most recent session: another team's (R48)
+    let stubs = try Stubs(status: #"{"team_alive":false}"#)
+    let path = "\(stubs.dir)/teams/t.resume.json"  // ~/teams may not exist yet
+    let status = try stubs.run(resumeTeamCommand(team: "t", config: #"{"team_name":"t"}"#, path: path,
+                                                 myTeam: "\(stubs.dir)/my-team", tmux: "\(stubs.dir)/tmux"))
+    #expect(status != 0)
+    #expect(stubs.log.contains("my-team start --config \(path)"))  // the folder was made and the config written
+    #expect(FileManager.default.fileExists(atPath: path))
+    #expect(!stubs.log.contains("tmux attach"))
+}
+
+@Test func aStartedTeamIsAttachedByItsSessionName() throws {
+    let stubs = try Stubs(status: #"{"team_alive":false,"session":"my-team-t-abc:0"}"#)
+    let status = try stubs.run(resumeTeamCommand(team: "t", config: "{}", path: "\(stubs.dir)/t.resume.json",
+                                                 myTeam: "\(stubs.dir)/my-team", tmux: "\(stubs.dir)/tmux"))
+    #expect(status == 0)
+    #expect(stubs.log.contains("tmux attach -t my-team-t-abc:0"))
+}
+
+@Test func aNewTeamTerminalMakesTheTeamsFolderAndStartsThere() throws {
+    let stubs = try Stubs(status: "")
+    let teams = "\(stubs.dir)/teams"
+    #expect(try stubs.run(newTeamCommand(teams: teams, claude: "\(stubs.dir)/claude")) == 0)
+    #expect(stubs.log.contains("claude \(newTeamPrompt)"))
+    #expect(stubs.log.contains(teams))  // claude ran inside it
+    #expect(newTeamPrompt.contains(".resume.json"))  // told to leave the board's resume configs out
+}
+
+@Test func theClaudeFolderIsAddedWithoutAnEmptyEntry() {
+    #expect(pathWithClaude("", home: "/h") == "/h/.local/bin")  // an empty entry would mean the current folder
+    #expect(pathWithClaude("/a:/b", home: "/h") == "/a:/b:/h/.local/bin")
+}

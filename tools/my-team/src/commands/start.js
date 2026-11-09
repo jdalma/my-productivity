@@ -237,6 +237,7 @@ export async function runStart(opts) {
 
         const startConfig = {
             teamName: config.team_name,
+            workerName: w.name,
             launchBinary: agentBin,
             launchArgs,
             envVars: {
@@ -246,9 +247,13 @@ export async function runStart(opts) {
                 ...(w.env || {}),
             },
         };
-        await spawnWorkerInPane(session.sessionName, pane.paneId, startConfig);
+        const launched = await spawnWorkerInPane(session.sessionName, pane.paneId, startConfig);
         const argsHint = launchArgs.length > 0 ? ` args=[${launchArgs.join(' ')}]` : '';
-        console.log(`[my-team] Spawned worker '${w.name}' in pane ${pane.paneId} (cwd: ${w.cwd}, cli: ${agentBin}${argsHint})`);
+        if (launched === false) {
+            console.warn(`[my-team] worker '${w.name}' pane ${pane.paneId} created but CLI NOT launched (see warning above)`);
+        } else {
+            console.log(`[my-team] Spawned worker '${w.name}' in pane ${pane.paneId} (cwd: ${w.cwd}, cli: ${agentBin}${argsHint})`);
+        }
 
         manifest.workers.push({
             name: w.name,
@@ -288,7 +293,10 @@ export async function runStart(opts) {
     for (const w of manifest.workers) {
         const overlayHint = `${config.state_root}/workers/${w.name}/AGENTS.md`;
         const notice = `Team is live. Follow ${overlayHint} for the peer protocol; wait for user input in this pane or peer messages in your mailbox.`;
-        await sendToWorker(session.sessionName, w.pane_id, notice);
+        const sent = await sendToWorker(session.sessionName, w.pane_id, notice);
+        if (sent === false) {
+            console.warn(`[my-team] startup notice NOT delivered to '${w.name}' (pane ${w.pane_id}). Check that pane, then type: ${notice}`);
+        }
     }
     console.log('[my-team] Startup notices sent. Team is live.');
 

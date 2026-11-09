@@ -65,6 +65,10 @@ export async function runRemoveWorker(opts, deps = {}) {
     //
     // Everyone else learns the worker is gone from the `roster` field of their
     // next mailbox-list, and send-message would reject the name anyway.
+    // Pin the state paths to this team, as every other command does after loading its manifest:
+    // TeamPaths prefers MY_TEAM_STATE_ROOT, which a worker pane carries for its OWN team, so without
+    // this the mailboxes below would be read from the caller's team instead of this one.
+    process.env.MY_TEAM_STATE_ROOT = fresh.state_root;
     const parentDir = fresh.state_root.replace(/\/[^/]+$/, '');
     const waiting = [];
     for (const w of fresh.workers) {

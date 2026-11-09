@@ -64,6 +64,18 @@ my-team monitor my-feature   # peer 메시지 실시간 tail
 my-team shutdown --team my-feature
 ```
 
+**워커별 스킬 스택**: 워커는 기본 plain(전역 스킬만)으로 띄운다. config를 쓰거나 `add-worker`를 호출하기 전에 `$HOME/IdeaProjects/my-claude-plugin/stack/CATALOG.md`가 있으면 읽고, 그 §0(팀 설계 절차)부터 따라 워커마다 스택을 골라 `launch_args`(`--plugin-dir` 절대경로)와 `extra_prompt`(사용 규칙)를 조합한다. 파일이 없으면 스택 단계만 건너뛰고 아래 절차는 그대로 따른다.
+
+**사용자가 "이 작업을 할 팀을 만들어줘"라고 할 때의 절차**:
+1. 대상 레포를 조사한다 (README, 의존성, 배포 파일, `git status`·`git log`, 가능하면 테스트). 조사 결과와 함께 팀을 제안한다. 목표가 모호하면 팀을 짜기 전에 번호 선택지로 묻는다.
+2. config는 `~/teams/<team>.json`에 쓴다 (레포 밖, 기존 팀 config와 같은 위치). `my-team start --config <path> --dry-run`으로 검증한다.
+3. 권한 우회 플래그(`--dangerously-skip-permissions`) 여부를 사용자에게 묻는다. 클라우드 CLI·운영 시스템에 닿는 팀이면 그 위험을 함께 적는다.
+4. `my-team start` 출력의 경고를 확인한다. my-team은 pane이 질문(셸 `[Y/n]`, CLI 업데이트 메뉴 `› 1. ...`)을 띄우고 있으면 입력·Enter를 보내지 않고 경고한다:
+   - `is waiting on a shell prompt` → 그 pane에서 사용자가 답하면 my-team이 이어서 워커를 띄운다(`MY_TEAM_SHELL_READY_TIMEOUT_MS`, 기본 30초). 시간 안에 답이 없으면 `NOT launched`와 함께 실행 명령이 출력된다 → 답한 뒤 그 명령을 pane에 입력한다.
+   - `startup notice NOT delivered` → 그 pane의 질문에 답한 뒤 경고에 찍힌 notice 문장을 입력한다. CLI 업데이트 여부는 사용자가 정한다(업데이트하면 CLI가 종료되므로 같은 명령으로 재실행).
+   - 경고가 없어도 `tmux capture-pane -p -t <pane>`으로 각 pane을 한 번 훑는다 (notice가 입력창에 남아 제출되지 않았으면 Enter).
+   - 마지막으로 `my-team status --team <team>`에서 전원 alive를 확인하고 보고한다.
+
 **정리는 반드시 `my-team shutdown`으로**: state를 비우는 건 `shutdown`뿐이다. `tmux kill-session`으로 세션만 죽이면 state 디렉토리가 남아, 같은 `team_name`으로 다시 `start`할 때 이전 run의 `events.jsonl` / `archive` / `mailbox`를 그대로 상속한다.
 
 **도중 작업 지시**: `my-team msg` / `my-team add-task` 명령은 없다. 사용자가 워커한테 추가 일감을 줄 때는 그 워커의 tmux pane에 직접 입력한다. 워커끼리 일감을 위임할 때는 `my-team api send-message`로 peer 메시지를 보낸다.

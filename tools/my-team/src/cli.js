@@ -86,9 +86,10 @@ async function main() {
     program
         .command('status')
         .description('Show team state, workers, tasks')
-        .requiredOption('--team <name>', 'team name')
+        .option('--team <name>', 'team name (required unless --all)')
         .option('--state-root <path>', 'override state root')
         .option('--json', 'JSON output')
+        .option('--all', 'every team under the state base (requires --json)')
         .action(async (opts) => {
             await runStatus(opts);
         });

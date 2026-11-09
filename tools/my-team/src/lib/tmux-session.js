@@ -362,11 +362,60 @@ export async function addWorkerPane(sessionName, anchorPaneId, worker, _options 
 /**
  * Spawn a worker CLI in a specific pane.
  */
-export async function spawnWorkerInPane(_sessionName, paneId, config) {
+export async function spawnWorkerInPane(_sessionName, paneId, config, opts = {}) {
     validateTeamName(config.teamName);
     const startCmd = buildWorkerStartCommand(config);
-    await tmuxExecAsync(['send-keys', '-t', paneId, '-l', startCmd]);
-    await tmuxExecAsync(['send-keys', '-t', paneId, 'Enter']);
+    // Let the pane's shell finish its rc files before typing: an rc question
+    // ("[Y/n]") reads one key from the tty and would eat the command's first
+    // character. If such a question is up, wait for the user to answer it.
+    const capture = opts.capturePane ?? capturePaneAsync;
+    const settled = await waitForPaneSettled(paneId, capture, opts);
+    if (paneHasChoicePrompt(settled)) {
+        console.warn(`[my-team] pane ${paneId} (worker '${config.workerName ?? '?'}') is waiting on a shell prompt: ${lastLine(settled)} — answer it in that pane; waiting before launching the worker...`);
+        if (!await waitForChoicePromptClear(paneId, capture, opts)) {
+            console.warn(`[my-team] worker '${config.workerName ?? '?'}' NOT launched: the prompt in pane ${paneId} was not answered. After answering it, run this in that pane:\n${startCmd}`);
+            return false;
+        }
+    }
+    const exec = opts.tmuxExec ?? tmuxExecAsync;
+    await exec(['send-keys', '-t', paneId, '-l', startCmd]);
+    await exec(['send-keys', '-t', paneId, 'Enter']);
+    return true;
+}
+
+function lastLine(captured) {
+    const lines = captured.split('\n').map((l) => l.trim()).filter(Boolean);
+    return JSON.stringify((lines[lines.length - 1] ?? '').slice(0, 120));
+}
+
+// ponytail: "settled" = two identical non-empty captures in a row. A shell that
+// paints a prompt and asks its rc question later than the settle window (e.g. an
+// instant-prompt theme) can still race; the answer-prompt guard in sendToWorker
+// is the backstop.
+async function waitForPaneSettled(paneId, capture, opts = {}) {
+    const timeoutMs = opts.settleTimeoutMs ?? 5000;
+    const pollMs = opts.pollIntervalMs ?? 300;
+    const deadline = Date.now() + timeoutMs;
+    let prev = null;
+    while (Date.now() < deadline) {
+        const cur = await capture(paneId);
+        if (cur.trim() !== '' && cur === prev) return cur;
+        prev = cur;
+        await sleep(pollMs);
+    }
+    return prev ?? '';
+}
+
+async function waitForChoicePromptClear(paneId, capture, opts = {}) {
+    const envTimeout = Number.parseInt(process.env.MY_TEAM_SHELL_READY_TIMEOUT_MS ?? '', 10);
+    const timeoutMs = opts.promptTimeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
+    const pollMs = opts.pollIntervalMs ?? 300;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        await sleep(pollMs);
+        if (!paneHasChoicePrompt(await capture(paneId))) return true;
+    }
+    return false;
 }
 
 function normalizeTmuxCapture(value) {
@@ -419,6 +468,28 @@ export function paneHasPermissionPrompt(captured) {
     return hasQuestion || hasFooter;
 }
 
+/**
+ * True when the pane is waiting on a question that a stray keystroke would
+ * ANSWER — broader than paneHasPermissionPrompt:
+ *   - a shell y/n prompt on the last line ("[oh-my-zsh] Would you like to
+ *     update? [Y/n]") — it reads ONE key, so typing the worker start command
+ *     loses its first character and leaves the shell stuck at `quote>`;
+ *   - a numbered menu with a highlighted first option ("› 1. Update now" /
+ *     "  2. Skip") — a bare Enter picks option 1 (this is how a startup
+ *     notice once ran a CLI self-update).
+ * The permission modal and the trust prompt also match; callers that handle
+ * those specially must check them first.
+ */
+export function paneHasChoicePrompt(captured) {
+    const lines = captured.split('\n').map((l) => l.replace(/\r/g, '').trim()).filter((l) => l.length > 0);
+    const tail = lines.slice(-14);
+    const last = tail[tail.length - 1] ?? '';
+    if (/[[(]\s*y\s*\/\s*n\s*[\])]\s*[:?]?\s*$/i.test(last)) return true;
+    const highlightedFirst = tail.some((l) => /^[›❯]\s*1\.\s+\S/u.test(l));
+    const secondOption = tail.some((l) => /^2\.\s+\S/.test(l));
+    return highlightedFirst && secondOption;
+}
+
 function paneIsBootstrapping(captured) {
     const lines = captured.split('\n').map((l) => l.replace(/\r/g, '').trim()).filter((l) => l.length > 0);
     return lines.some((l) =>
@@ -461,7 +532,7 @@ export async function waitForPaneReady(paneId, opts = {}) {
         // A permission modal ("❯ 1. Yes") starts with ❯, so paneLooksReady
         // mistakes it for an idle prompt. Treat it as not-ready: messaging into
         // it would lose the text and the Enter would select an option.
-        if (paneLooksReady(captured) && !paneHasActiveTask(captured) && !paneHasPermissionPrompt(captured)) return true;
+        if (paneLooksReady(captured) && !paneHasActiveTask(captured) && !paneHasChoicePrompt(captured)) return true;
         await sleep(pollIntervalMs);
     }
     console.warn(`[tmux-session] waitForPaneReady: pane ${paneId} timed out after ${timeoutMs}ms`);
@@ -574,6 +645,11 @@ export async function sendToWorker(_sessionName, paneId, message) {
         const paneBusy = paneHasActiveTask(initialCapture);
         if (paneHasTrustPrompt(initialCapture)) {
             await sendKey('C-m'); await sleep(120); await sendKey('C-m'); await sleep(200);
+        } else if (paneHasChoicePrompt(initialCapture)) {
+            // Some other question (shell y/n, CLI update menu): our Enter would
+            // answer it. Leave it to the user.
+            console.warn(`[tmux-session] sendToWorker: pane ${paneId} is waiting on a prompt (${lastLine(initialCapture)}); not sending — answer it in that pane`);
+            return false;
         }
 
         await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', message]);
@@ -584,9 +660,14 @@ export async function sendToWorker(_sessionName, paneId, message) {
             // The worker may have raised a permission modal between rounds (e.g.
             // it started acting on the text we just typed). Sending Enter now
             // would pick a modal option, not submit our line — wait it out.
-            if (paneHasPermissionPrompt(await capturePaneAsync(paneId))) {
+            const roundCapture = await capturePaneAsync(paneId);
+            if (paneHasPermissionPrompt(roundCapture)) {
                 if (!await waitForPermissionPromptClear(paneId)) return false;
                 continue;
+            }
+            if (paneHasChoicePrompt(roundCapture)) {
+                console.warn(`[tmux-session] sendToWorker: pane ${paneId} raised a prompt (${lastLine(roundCapture)}); not pressing Enter — answer it in that pane`);
+                return false;
             }
             if (round === 0 && paneBusy) {
                 await sendKey('Tab'); await sleep(80); await sendKey('C-m');

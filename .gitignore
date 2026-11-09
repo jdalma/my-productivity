@@ -8,3 +8,6 @@ docs/handoffs/
 
 # Claude 로컬 작업 디렉토리 (구 handoff dump 위치 포함)
 .claude/
+
+# my-team 워커별 스킬 스택 (서드파티 플러그인 복사본·clone). public 레포에 커밋 금지
+stack/

@@ -150,6 +150,27 @@ test('only the waiting worker and the orchestrator are told about a removal', as
     } finally { cleanup(ctx); }
 });
 
+test('waiting workers are read from the removed team, not the caller\'s MY_TEAM_STATE_ROOT', async () => {
+    // A worker pane carries MY_TEAM_STATE_ROOT for its own team. remove-worker must still read the
+    // mailboxes of the team it removes from.
+    const ctx = setupTeam({
+        workers: [{ name: 'alice', role: 'orchestrator' }, { name: 'bob', role: 'worker' }, { name: 'carol', role: 'worker' }],
+    });
+    seedPendingQuestion(ctx, 'carol', 'bob');
+    const other = mkdtempSync(join(tmpdir(), 'my-team-other-'));
+    const saved = process.env.MY_TEAM_STATE_ROOT;
+    process.env.MY_TEAM_STATE_ROOT = other;
+    const { notified, deps } = spyDeps();
+    try {
+        await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
+        assert.deepEqual(notified.map(([p]) => p).sort(), ['%1', '%3']);
+    } finally {
+        if (saved === undefined) delete process.env.MY_TEAM_STATE_ROOT; else process.env.MY_TEAM_STATE_ROOT = saved;
+        rmSync(other, { recursive: true, force: true });
+        cleanup(ctx);
+    }
+});
+
 test('an unreadable mailbox does not block the removal or the other notices', async () => {
     const ctx = setupTeam({
         workers: [{ name: 'alice', role: 'orchestrator' }, { name: 'bob', role: 'worker' }, { name: 'carol', role: 'worker' }],

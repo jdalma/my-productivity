@@ -250,6 +250,7 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
         // ── Step 4: spawn the worker CLI (full envVars block, like start) ──
         const startConfig = {
             teamName: opts.team,
+            workerName: opts.name,
             launchBinary: AGENT_CLI[opts.agentType].bin,
             launchArgs,
             envVars: {
@@ -258,7 +259,10 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
                 OMC_TEAM_WORKER: `${opts.team}/${opts.name}`,
             },
         };
-        await _spawnWorkerInPane(manifest.session_name, paneId, startConfig);
+        const launched = await _spawnWorkerInPane(manifest.session_name, paneId, startConfig);
+        if (launched === false) {
+            console.warn(`[my-team] '${opts.name}' pane ${paneId} created but CLI NOT launched (see warning above)`);
+        }
 
         // ── Step 5: wait for the pane to be ready ──
         // Best-effort, matching start.js:238 — waitForPaneReady returns false on

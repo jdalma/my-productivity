@@ -1,0 +1,9 @@
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"00000000-0000-4000-8000-000000000002","cwd":"/tmp/example","cli_version":"0.0.0"}}
+{"timestamp":"2026-01-01T00:00:00.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /tmp/example\n\nbe nice"}]}}
+{"timestamp":"2026-01-01T00:00:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/tmp/example</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-01-01T00:00:01.000Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-01-01T00:00:01.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Rename the config loader."}]}}
+{"timestamp":"2026-01-01T00:00:02.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}"}}
+{"timestamp":"2026-01-01T00:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Renamed loadConfig to readConfig."}]}}
+{"timestamp":"2026-01-01T00:00:03.100Z","type":"event_msg","payload":{"type":"agent_message","message":"event copy that must be ignored"}}
+{"timestamp":"2026-01-01T00:00:03.200Z","type":"event_msg","payload":{"type":"task_complete"}}

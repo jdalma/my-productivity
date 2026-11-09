@@ -297,6 +297,7 @@ private func ended(_ agent: AgentKind, live: Bool = false, workspace: String = "
 
 @Test func theResumePathReachesHomebrewWhereNodeLives() {
     #expect(resumePath.split(separator: ":").contains("/opt/homebrew/bin"))
+    #expect(resumePath.split(separator: ":").contains("\(NSHomeDirectory())/.local/bin"))
 }
 
 @Test func aLiveOrPlacelessSessionIsNotResumed() {

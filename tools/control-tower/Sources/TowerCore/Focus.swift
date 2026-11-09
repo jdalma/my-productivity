@@ -69,9 +69,10 @@ public let resumeBins: [AgentKind: String] = [
     .codex: resolveExecutable("codex") ?? "codex",
 ]
 
-/// Our child PATH. A Ghostty window opened via `open` gets launchd's, which lacks the `node` that
-/// `codex` (`#!/usr/bin/env node`) and Claude's MCP servers need.
-public let resumePath = childEnvironment(base: ProcessInfo.processInfo.environment, extra: [:])["PATH"] ?? ""
+/// Our child PATH plus `~/.local/bin`. A Ghostty window opened via `open` gets launchd's, which lacks the `node` that
+/// `codex` (`#!/usr/bin/env node`) and Claude's MCP servers need, and the `claude` that `my-team start` looks up.
+public let resumePath = (childEnvironment(base: ProcessInfo.processInfo.environment, extra: [:])["PATH"] ?? "")
+    + ":\(homeDir)/.local/bin"
 
 /// The argv that opens a new Ghostty window in the session's workspace and resumes it there,
 /// through `/usr/bin/env PATH=…` so no shell is involved.

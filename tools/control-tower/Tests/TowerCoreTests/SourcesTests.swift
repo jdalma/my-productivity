@@ -156,9 +156,10 @@ private func procArgsBuffer(exec: String, argv: [String], env: [String], apple: 
 }
 
 @Test func openFilesGivesTheCwdAndTheOpenRolloutPath() throws {
-    let dir = FileManager.default.temporaryDirectory.appending(path: "ct-\(UUID().uuidString)/sessions/2026/10/29")
+    let root = FileManager.default.temporaryDirectory.appending(path: "ct-\(UUID().uuidString)")
+    let dir = root.appending(path: "sessions/2026/10/29")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+    defer { try? FileManager.default.removeItem(at: root) }
     let rollout = dir.appending(path: "rollout-2026-10-29T21-15-26-aaaa.jsonl")
     FileManager.default.createFile(atPath: rollout.path, contents: Data())
     let fh = try FileHandle(forReadingFrom: rollout)

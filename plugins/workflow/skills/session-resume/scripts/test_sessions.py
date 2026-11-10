@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory() as d:
     started = {}
     def fake_run(cmd, **kw):
         if cmd[0] == "my-team":
-            started.update(json.load(open(cmd[3])), path=cmd[3])
+            started.update(json.load(open(cmd[3])), path=cmd[3], continues="--continue" in cmd)
         raise SystemExit  # osascript 직전에 멈춘다
     real_run, sessions.subprocess.run = sessions.subprocess.run, fake_run
     try:
@@ -70,6 +70,7 @@ with tempfile.TemporaryDirectory() as d:
     assert w["launch_args"] == ["--dangerously-skip-permissions", "--resume", "e"]
     assert w["extra_prompt"] == "PM 브리프" and w["role"] == "orchestrator"
     assert started["state_root"] == str(root2)
+    assert started["continues"], "이어 띄우기는 --continue: 없으면 start가 state를 .bak으로 옮긴다"
     assert "description" not in w, "start.js가 extra_prompt 첫 줄로 채운 description은 되돌려 넘기지 않는다"
     assert not Path(started["path"]).exists(), "임시 config는 start 후 지운다"
 

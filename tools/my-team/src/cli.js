@@ -78,6 +78,7 @@ async function main() {
         .option('--new-window', 'create new tmux window instead of splitting current')
         .option('--detached', 'force detached tmux session')
         .option('--dry-run', 'show plan without spawning')
+        .option('--continue', "keep the team's previous state (mail, work files, events) instead of starting a new team")
         .action(async (opts) => {
             await runStart(opts);
         });

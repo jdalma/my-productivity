@@ -1,72 +1,16 @@
 /**
- * `my-team shutdown` — terminate a running team.
+ * `my-team shutdown` — end a running team's tmux side. Its state_root is left as it is.
  * Implements AC-17, AC-18.
  */
 
-import { unlink, rm, rename } from 'fs/promises';
-import { existsSync } from 'fs';
-import { homedir } from 'os';
-import { normalize, sep } from 'path';
-import { manifestPathForTeam, resolveTeamManifest } from './_manifest.js';
+import { resolveTeamManifest } from './_manifest.js';
 import { setStateRoot } from '../lib/state-root.js';
 import { killTeamSession, killWorkerPanes } from '../lib/tmux-session.js';
-
-/**
- * Guard against wiping a dangerous path. A team's state_root is expected to be
- * a leaf session directory (e.g. ~/.my-team/sessions/<team>), several levels
- * deep and never the home dir or filesystem root. If it looks shallow or maps
- * to a sensitive path, we refuse the recursive wipe and let the caller fall
- * back to deleting only manifest.json.
- *
- * Returns true when `stateRoot` is safe to back up + remove wholesale.
- */
-export function isSafeToWipe(stateRoot) {
-    if (!stateRoot || typeof stateRoot !== 'string') return false;
-    const norm = normalize(stateRoot).replace(/[/\\]+$/, '');
-    if (!norm) return false;
-
-    const home = normalize(homedir());
-    if (norm === home) return false;
-    if (norm === '/' || /^[A-Za-z]:\\?$/.test(norm)) return false; // posix root / windows drive root
-
-    // Require at least 3 path segments below root so we never nuke a top-level
-    // dir. ~/.my-team/sessions/<team> is 5+ on macOS; this is a conservative floor.
-    const segments = norm.split(sep).filter(Boolean);
-    if (segments.length < 3) return false;
-
-    return true;
-}
-
-/**
- * Back up `stateRoot` to `<stateRoot>.bak` (one generation), leaving it gone
- * from its original location. A pre-existing `.bak` is removed first so we keep
- * exactly one prior generation.
- *
- * The user chose to always keep a backup, so if the atomic rename fails (e.g.
- * EXDEV across filesystems) we do NOT delete the state — we preserve it and
- * report the failure. Failure mode is "state kept, overlap persists, user
- * warned", never "state destroyed without a backup".
- *
- * Returns { backedUpTo } on success, or { backedUpTo: null, error } on failure.
- */
-export async function backupAndRemoveStateRoot(stateRoot) {
-    const bakPath = `${stateRoot}.bak`;
-    if (existsSync(bakPath)) {
-        try { await rm(bakPath, { recursive: true, force: true }); } catch { /* ignore */ }
-    }
-    try {
-        await rename(stateRoot, bakPath);
-        return { backedUpTo: bakPath };
-    } catch (err) {
-        return { backedUpTo: null, error: err };
-    }
-}
 
 export async function runShutdown(opts) {
     if (!opts.team) throw new Error('--team is required');
     // Resolve --team as EITHER a team name OR a tmux session name (what
-    // `tmux ls` shows). Adopt the canonical team_name so the unsafe-wipe
-    // manifest path keys off the real team name, not the session-name input.
+    // `tmux ls` shows), and report under the canonical team_name.
     const { manifest, teamName } = resolveTeamManifest(opts.team, opts.stateRoot);
     opts.team = teamName;
     process.env.MY_TEAM_STATE_ROOT = manifest.state_root;
@@ -90,37 +34,7 @@ export async function runShutdown(opts) {
         );
     }
 
-    // Clean up state: back up the whole state_root to <state_root>.bak (one
-    // generation) and remove the original, so re-running `start` with the same
-    // team_name does not inherit this run's events.jsonl / archive / mailbox.
-    const stateRoot = manifest.state_root;
-    if (!existsSync(stateRoot)) {
-        // Already gone (e.g. a second shutdown). Nothing to clean.
-    } else if (!isSafeToWipe(stateRoot)) {
-        // Unsafe path (too shallow / home / root): never wipe wholesale. Remove
-        // only the manifest so the team reads as "not running", and warn.
-        const manifestPath = manifestPathForTeam(opts.team, stateRoot);
-        if (existsSync(manifestPath)) {
-            try { await unlink(manifestPath); } catch { /* ignore */ }
-        }
-        console.warn(
-            `[my-team] state_root looks unsafe to wipe (${stateRoot}); removed manifest only. ` +
-            `Clear remaining state manually if needed.`
-        );
-    } else {
-        const { backedUpTo } = await backupAndRemoveStateRoot(stateRoot);
-        if (backedUpTo) {
-            console.log(`[my-team] State backed up to ${backedUpTo} and cleared.`);
-        } else {
-            // Backup rename failed — state is intentionally kept (the user opted
-            // for always-backup). Overlap will persist until cleared manually.
-            console.warn(
-                `[my-team] Could not back up state_root (${stateRoot}); state was NOT cleared ` +
-                `to avoid data loss. Re-running 'start' with this team_name will inherit old ` +
-                `state — clear it manually if that's a problem.`
-            );
-        }
-    }
-
+    // state_root stays: `start --continue` picks up its mail, work files and events.
+    // The manifest stays too; with the session gone, status reads the team as stopped.
     console.log(`[my-team] Team '${opts.team}' shut down.`);
 }

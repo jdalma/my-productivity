@@ -5,7 +5,7 @@ description: my-team 팀 전체를 shutdown하기 전에 PM(orchestrator)이 모
 
 # my-team handoff — 팀 shutdown 전 상태 수집
 
-`my-team shutdown`은 state_root를 `.bak`으로 치우고 모든 워커의 컨텍스트를 날린다. 코드와 git은 디스크에 남지만 **"무엇을 하던 중이었고, 무엇이 막혔고, 누가 무엇을 결정해야 하는가"는 워커의 머릿속에만 있다.** 이 스킬은 shutdown 전에 그것을 파일로 꺼내 둔다.
+`my-team shutdown`은 모든 워커의 컨텍스트를 날린다(state_root는 남지만, `--continue` 없이 다시 start하면 `.bak`으로 치워진다). 코드와 git은 디스크에 남지만 **"무엇을 하던 중이었고, 무엇이 막혔고, 누가 무엇을 결정해야 하는가"는 워커의 머릿속에만 있다.** 이 스킬은 shutdown 전에 그것을 파일로 꺼내 둔다.
 
 - **config는 건드리지 않는다.** `my-team.json`은 워커의 거시적 역할·워크스페이스를 담는 재사용 정의다. 작업 상태는 config가 아니라 이 스킬이 만드는 묶음(bundle)에만 들어간다.
 - **상태는 워커가 직접 쓴다.** 실패한 시도·암묵적 결정·미커밋 변경의 의도는 그 워커만 안다. PM은 요청하고, 취합하고, 교차 확인한다.
@@ -36,7 +36,7 @@ my-team api mailbox-list --input "{\"team_name\":\"$TEAM\",\"worker\":\"$ME\"}" 
 BUNDLE="$HOME/.my-team/handoffs/$TEAM/$(date +%Y-%m-%d-%H%M%S)"; mkdir -p "$BUNDLE/workers"
 ```
 
-묶음은 state_root 바깥(`~/.my-team/handoffs/<team>/`)에 둔다. state_root 안에 두면 shutdown이 `.bak`으로 옮겨 버린다. 디렉터리명이 날짜·시각이라 `ls -t`로 최신이 찾힌다.
+묶음은 state_root 바깥(`~/.my-team/handoffs/<team>/`)에 둔다. state_root 안에 두면 다음 새 팀 start가 `.bak`으로 옮겨 버린다. 디렉터리명이 날짜·시각이라 `ls -t`로 최신이 찾힌다.
 
 대상은 roster에서 자신을 뺀 전원이다. `add-worker`로 중간 합류한 워커도 포함한다 — 재기동 config에 없을 수 있으므로 takeover가 따로 다룬다.
 
@@ -208,4 +208,4 @@ compacted: false
 - `my-team.json`에 작업 상태를 쓰지 않는다 — config는 재사용 정의다.
 - PM이 미응답 워커의 상태를 추측으로 채우지 않는다 — git 사실만, `미응답` 표시.
 - shutdown을 실행하지 않는다.
-- 회신 메시지에 상태 본문을 싣지 않는다 — 경로와 한 줄만. 메시지는 shutdown과 함께 `.bak`으로 간다.
+- 회신 메시지에 상태 본문을 싣지 않는다 — 경로와 한 줄만. 메시지는 다음 새 팀 start 때 `.bak`으로 간다.

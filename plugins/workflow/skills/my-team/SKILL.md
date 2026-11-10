@@ -60,8 +60,11 @@ my-team monitor my-feature   # peer 메시지 실시간 tail
 #    워커가 add-worker --worktree <branch> 로 peer를 띄운다 (경로 <repo>/.worktrees/<name>)
 #    워커끼리는 my-team api send-message 호출 (워커 LLM이 AGENTS.md에 따라)
 
-# 5. Shutdown (state도 정리: state_root → <state_root>.bak 백업 후 삭제)
+# 5. Shutdown (tmux만 정리, state_root는 남음)
 my-team shutdown --team my-feature
+
+# 6. 같은 팀을 이어서: 메일·work·events를 그대로 쓴다. --continue 없이 start하면 새 팀(이전 state는 .bak으로)
+my-team start --continue --config ./my-team.json
 ```
 
 **워커별 스킬 스택**: 워커는 기본 plain(전역 스킬만)으로 띄운다. config를 쓰거나 `add-worker`를 호출하기 전에 `$HOME/IdeaProjects/my-claude-plugin/stack/CATALOG.md`가 있으면 읽고, 그 §0(팀 설계 절차)부터 따라 워커마다 스택을 골라 `launch_args`(`--plugin-dir` 절대경로)와 `extra_prompt`(사용 규칙)를 조합한다. 파일이 없으면 스택 단계만 건너뛰고 아래 절차는 그대로 따른다.

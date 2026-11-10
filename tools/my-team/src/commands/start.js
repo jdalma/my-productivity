@@ -16,9 +16,10 @@
  */
 
 import { execFileSync } from 'child_process';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, writeFile, rm, rename } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { homedir } from 'os';
+import { join, normalize, sep } from 'path';
 
 import { loadConfig, autoDiscoverConfig, parseInlineWorkerSpec, validateConfig } from '../config/parser.js';
 import { setStateRoot } from '../lib/state-root.js';
@@ -60,6 +61,79 @@ export function stripSessionArgs(args, agentType) {
         }
     }
     return out;
+}
+
+/**
+ * Guard against moving a dangerous path aside. A team's state_root is expected
+ * to be a leaf session directory (e.g. ~/.my-team/sessions/<team>), several
+ * levels deep and never the home dir or filesystem root.
+ *
+ * Returns true when `stateRoot` is safe to move aside wholesale.
+ */
+export function isSafeToWipe(stateRoot) {
+    if (!stateRoot || typeof stateRoot !== 'string') return false;
+    const norm = normalize(stateRoot).replace(/[/\\]+$/, '');
+    if (!norm) return false;
+
+    const home = normalize(homedir());
+    if (norm === home) return false;
+    if (norm === '/' || /^[A-Za-z]:\\?$/.test(norm)) return false; // posix root / windows drive root
+
+    // Require at least 3 path segments below root so we never nuke a top-level
+    // dir. ~/.my-team/sessions/<team> is 5+ on macOS; this is a conservative floor.
+    const segments = norm.split(sep).filter(Boolean);
+    if (segments.length < 3) return false;
+
+    return true;
+}
+
+/**
+ * Back up `stateRoot` to `<stateRoot>.bak` (one generation), leaving it gone
+ * from its original location. A pre-existing `.bak` is removed first so we keep
+ * exactly one prior generation.
+ *
+ * The user chose to always keep a backup, so if the atomic rename fails (e.g.
+ * EXDEV across filesystems) we do NOT delete the state — we preserve it and
+ * report the failure. Failure mode is "state kept, overlap persists, user
+ * warned", never "state destroyed without a backup".
+ *
+ * Returns { backedUpTo } on success, or { backedUpTo: null, error } on failure.
+ */
+export async function backupAndRemoveStateRoot(stateRoot) {
+    const bakPath = `${stateRoot}.bak`;
+    if (existsSync(bakPath)) {
+        try { await rm(bakPath, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    try {
+        await rename(stateRoot, bakPath);
+        return { backedUpTo: bakPath };
+    } catch (err) {
+        return { backedUpTo: null, error: err };
+    }
+}
+
+/**
+ * Readies `stateRoot` for a run. A new team (`keep` false) never inherits a
+ * previous run's mail, work files or events: an existing state_root moves to
+ * <state_root>.bak first, and the start stops if it cannot. `keep` (--continue)
+ * uses it as it is, or starts a new team when there is none.
+ */
+export async function prepareStateRoot(stateRoot, { keep }) {
+    if (keep) {
+        if (!existsSync(stateRoot)) {
+            console.log(`[my-team] --continue: no previous state at ${stateRoot}; starting a new team.`);
+        }
+    } else if (existsSync(stateRoot)) {
+        if (!isSafeToWipe(stateRoot)) {
+            throw new Error(`state_root ${stateRoot} looks unsafe to move aside. Clear it manually, or pass --continue to keep it.`);
+        }
+        const { backedUpTo, error } = await backupAndRemoveStateRoot(stateRoot);
+        if (!backedUpTo) {
+            throw new Error(`Could not move the previous state ${stateRoot} to .bak (${error?.message}); it is kept. Clear it manually, or pass --continue to keep it.`);
+        }
+        console.log(`[my-team] New team: the previous state moved to ${backedUpTo}.`);
+    }
+    await mkdir(stateRoot, { recursive: true });
 }
 
 export function commandExists(cmd) {
@@ -160,7 +234,7 @@ export async function runStart(opts) {
         return { dryRun: true, config };
     }
 
-    await mkdir(config.state_root, { recursive: true });
+    await prepareStateRoot(config.state_root, { keep: Boolean(opts.continue) });
 
     // Build worker specs (name + cwd) for createTeamSession
     const workerSpecs = config.workers.map((w) => ({ name: w.name, cwd: w.cwd }));

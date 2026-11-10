@@ -194,7 +194,8 @@ def resume_team(g):
     with tempfile.NamedTemporaryFile("w", suffix=".json", prefix=f"resume-{manifest['team_name']}-", delete=False) as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     try:
-        subprocess.run(["my-team", "start", "--config", f.name, "--detached"], check=True)
+        # --continue: 메일박스·work를 이어받는다. 없으면 start가 새 팀으로 보고 이전 state를 .bak으로 옮긴다
+        subprocess.run(["my-team", "start", "--config", f.name, "--detached", "--continue"], check=True)
     finally:
         os.unlink(f.name)
     session = json.loads((root / "manifest.json").read_text())["session_name"].split(":")[0]

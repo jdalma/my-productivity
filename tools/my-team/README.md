@@ -66,13 +66,16 @@ my-team remove-worker --team demo --name gamma
 # Workers reach each other via `my-team api send-message` (called from inside
 # their AGENTS.md protocol).
 
-my-team shutdown --team demo     # also clears state (backs up to <state_root>.bak)
+my-team shutdown --team demo     # ends the tmux side; state_root stays
+
+# Later: the same team again, with its mail, work files and events
+my-team start --continue --config ./my-team.json
 ```
 
-> **Always shut down with `my-team shutdown`, not `tmux kill-session`.** Only
-> `shutdown` clears the team's state. If you kill the tmux session directly,
-> the state dir survives and re-running `start` with the same `team_name` will
-> inherit the previous run's `events.jsonl` / `archive` / `mailbox`.
+> **`start` is a new team; `start --continue` picks the last run up.** A plain
+> `start` moves an existing state_root to `<state_root>.bak` and begins empty;
+> `--continue` keeps it, including mail not yet delivered (see "State across
+> runs" below).
 
 > **`description` vs `extra_prompt`** — both optional. `description` is a
 > one-liner shown to *other* workers in the Team Roster, so a worker can
@@ -262,12 +265,12 @@ will actually do. High user attention required.
 
 | Command | Purpose |
 |---------|---------|
-| `start` | Boot a team from config (or inline `--worker name:agent:cwd`) |
+| `start` | Boot a **new** team from config (or inline `--worker name:agent:cwd`); an existing `state_root` moves to `<state_root>.bak` first. `--continue` keeps it instead, so the team picks up its previous mail, work files and events |
 | `status` | Per worker: tmux liveness, self-reported `state` (+ `reason` when blocked), and stuck mail — `spool` (never absorbed), `unread` (absorbed, not consumed), `pending` (questions awaiting a reply, with the oldest age). A worker that stalled without saying so shows up here without opening its pane. A worker is alive only if its team's tmux session exists and holds a pane whose `@worker_name` and pane id both match the manifest (pane ids get reused across teams). `--all --json` (`--all` requires `--json`) reports every team under the state base as `{teams: [...]}` with `team_alive` per team, skipping `*.bak` and `.omc` |
 | `add-worker` | Add one worker to a **running** team mid-session (`--team --name --agent-type --cwd`, optional `--role orchestrator\|worker` — defaults to `worker` in a role-declaring team, optional `--description` for the roster one-liner, optional `--worktree <branch>` to create `<repo>/.worktrees/<name>` from the repo at `--cwd` and boot the worker there) — splits a new pane, registers it in `manifest.workers`, and notifies existing workers. Pass `--launch-arg` (repeatable) for permission-bypass flags; when a worker runs this command itself and passes none, the new worker inherits the caller's flags |
-| `remove-worker` | Remove one worker from a **running** team mid-session (`--team --name`) — the inverse of `add-worker`: takes it off `manifest.workers` (so peers can no longer address it), kills its pane, re-tiles, and tells the remaining workers to stop waiting on it. Its mailbox/archive/`AGENTS.md` and any `--worktree` dir are left on disk — `shutdown` backs up the whole `state_root`, and worktree cleanup stays the user's job |
+| `remove-worker` | Remove one worker from a **running** team mid-session (`--team --name`) — the inverse of `add-worker`: takes it off `manifest.workers` (so peers can no longer address it), kills its pane, re-tiles, and tells the remaining workers to stop waiting on it. Its mailbox/archive/`AGENTS.md` and any `--worktree` dir are left on disk — `state_root` outlives the run, and worktree cleanup stays the user's job |
 | `monitor` | Tail peer messages in real-time |
-| `shutdown` | Terminate a team immediately **and clear its state** — backs up `state_root` to `<state_root>.bak` (one generation), then removes the original so re-running `start` with the same `team_name` starts clean (see "State cleanup" below) |
+| `shutdown` | Terminate a team's tmux session (or its worker panes in split-pane mode) immediately. `state_root` and the manifest stay, so `status` reads the team as stopped and `start --continue` can pick it up (see "State across runs" below) |
 | `api send-message` | **[mutating]** Peer message — drops a spool file, appends sender archive, records `sent_pending`. `to_team` reaches another team by name (role guard applies) |
 | `api mailbox-list` | **[mutating]** List unread inbox plus the team's current `roster` — *absorbs the incoming-spool into the mailbox first*. This absorption is the polling side effect: the name says "list" but it writes. Skip the poll and new messages are never absorbed |
 | `api mailbox-mark-delivered` | **[mutating]** Mark consumed — moves the entry to the archive jsonl, removes it from the inbox |
@@ -341,17 +344,22 @@ The state dir is keyed **only** by `team_name` (`~/.my-team/sessions/<team>`,
 unless you set `state_root` explicitly). Two runs with the same `team_name`
 therefore share this directory.
 
-### State cleanup
+### State across runs
 
-`my-team shutdown` is what clears this directory. It renames `state_root` to
-`<state_root>.bak` (keeping exactly one prior generation) and removes the
-original, so the next `start` with the same `team_name` begins clean instead of
-inheriting the previous run's `events.jsonl` / `archive` / `mailbox`.
+`my-team shutdown` ends the tmux side only; `state_root` stays as it was. What
+the next `start` does with it is the caller's choice:
 
-- **Use `my-team shutdown`, not `tmux kill-session`.** Killing the tmux session
-  directly runs none of this — the state dir survives and the next run overlaps.
-- If the backup rename fails (e.g. across filesystems), `shutdown` keeps the
-  state untouched and warns rather than deleting without a backup.
+- `my-team start --config <file>` is a **new team**. An existing `state_root` is
+  renamed to `<state_root>.bak` (keeping exactly one prior generation) and the
+  run begins empty. If the rename fails (e.g. across filesystems, or a path too
+  shallow to move safely), `start` stops with the state untouched.
+- `my-team start --continue --config <file>` **continues** the team: mailbox,
+  archive, incoming-spool, `work/`, events and docs are used as they are, so mail
+  not yet delivered reaches the workers of the new run. The manifest and each
+  worker's `AGENTS.md` are written afresh. With no previous `state_root`, it
+  starts a new team and says so.
+- Killing the tmux session directly (`tmux kill-session`) leaves the same state
+  behind as `shutdown`.
 - **Known limitation:** `<state_root>.bak` for a team you never re-run lingers
   until you delete it manually. Only one generation is kept per team.
 - This handles *sequential* reuse (shut down, then start again). Running two

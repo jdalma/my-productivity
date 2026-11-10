@@ -8,8 +8,9 @@
  * just a leftover process to kill.
  *
  * State (mailbox/archive/AGENTS.md, and any --worktree dir) is deliberately
- * left on disk: `shutdown` already backs the whole state_root up to `.bak`, and
- * worktree cleanup is the user's job (same rule add-worker documents).
+ * left on disk: state_root outlives the run (`start --continue` reuses it, a new
+ * `start` moves it to `.bak`), and worktree cleanup is the user's job (same rule
+ * add-worker documents).
  */
 
 import { loadManifest, manifestPathForTeam, resolveTeamManifest } from './_manifest.js';

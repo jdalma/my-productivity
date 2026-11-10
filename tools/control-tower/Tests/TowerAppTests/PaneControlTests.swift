@@ -341,3 +341,65 @@ private final class Quiet: TerminalDelegate {
     view.detach()
     #expect(await until { server.run("list-clients").isEmpty })
 }
+
+/// What reaches the stdin of a pane program that writes terminal queries once `go` exists, until it quits.
+@MainActor private func stdinAfterQueries(_ watcher: Watcher) async throws -> String {
+    let server = ScratchServer()
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ct-q-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let go = dir.appendingPathComponent("go").path, got = dir.appendingPathComponent("stdin")
+    // DA1, DSR, DA2, OSC 11 background, kitty keyboard query, focus reporting on
+    server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", """
+        stty raw -echo; while [ ! -e '\(go)' ]; do sleep 0.05; done
+        printf '\\033[c\\033[6n\\033[>c\\033]11;?\\007\\033[?u\\033[?1004h'; (sleep 1.5; kill $$) & exec cat > '\(got.path)'
+        """)
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    let ref = TmuxRef(session: "w", window: "0", pane: pane)
+    let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))
+    let stream = PaneStream(ref: ref, tmux: server.tmux)
+    var screens = 0
+    switch watcher {
+    case .stream:
+        stream.onOutput = { _ in screens += 1 }
+        stream.start()
+        #expect(await until { screens > 0 })
+    case .view:
+        let link = PaneLink()
+        view.attach(stream, link: link)
+        #expect(await until { link.size.width > 0 })
+    }
+    FileManager.default.createFile(atPath: go, contents: nil)
+    #expect(await until(5) { server.run("list-panes", "-a").isEmpty })  // the program quit
+    try await Task.sleep(for: .milliseconds(300))  // anything the view still had queued
+    view.detach()
+    stream.stop()
+    return String(decoding: (try? Data(contentsOf: got)) ?? Data(), as: UTF8.self)
+}
+
+private enum Watcher { case stream, view }
+
+@MainActor @Test func theTerminalViewAnswersNoQueryOfThePaneProgram() async throws {
+    // tmux is the pane's terminal and answers for itself (OSC 11 only while a client is attached, so the
+    // control is a bare control mode client); the view adds nothing of its own
+    let bare = try await stdinAfterQueries(.stream)
+    #expect(bare.contains("\u{1b}[?1;2;4c"))  // tmux's DA1
+    let viewed = try await stdinAfterQueries(.view)
+    #expect(viewed == bare)
+}
+
+@MainActor @Test func whatTheUserTypesAndCommitsThroughTheInputMethodStillReachesThePane() async throws {
+    let server = ScratchServer()
+    server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    let link = PaneLink()
+    let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))
+    view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: link)
+    #expect(await until { link.size.width > 0 })
+    #expect(await until { server.run("display-message", "-p", "-t", pane, "#{pane_current_command}") == "od" })
+    view.send(data: Array("a".utf8)[...])  // SwiftTerm's own input path, as its key handling uses it
+    view.insertText("한", replacementRange: NSRange(location: NSNotFound, length: 0))  // what an IME commits
+    view.send(data: Array(repeating: 0x42, count: 15)[...])
+    #expect(await until { server.run("capture-pane", "-p", "-t", pane).contains("61  ed  95  9c  42") })
+    view.detach()
+}

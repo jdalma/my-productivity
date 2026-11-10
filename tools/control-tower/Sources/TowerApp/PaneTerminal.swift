@@ -137,6 +137,11 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
         if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty { stream?.paste(text) }
     }
 
+    /// What SwiftTerm's terminal writes back by itself (answers to the pane program's queries, focus and mouse
+    /// reports) is dropped: tmux is the pane's terminal and answers for itself, and the app sends a pane nothing
+    /// the user did not type. Typed keys, input method text and pastes come through `send(source: TerminalView)`.
+    override nonisolated func send(source: Terminal, data: ArraySlice<UInt8>) {}
+
     // MARK: TerminalViewDelegate
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) { stream?.send(Array(data)) }

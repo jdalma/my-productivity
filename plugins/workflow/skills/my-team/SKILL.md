@@ -32,14 +32,14 @@ cat > my-team.json <<'EOF'
   "workers": [
     {
       "name": "backend",
-      "cwd": "/Users/me/IdeaProjects/atiissu-backend",
+      "cwd": "/Users/me/IdeaProjects/shop-backend",
       "agent_type": "claude",
       "description": "백엔드 담당 (peers가 보는 한 줄 역할)",
       "extra_prompt": "백엔드 담당. 첫 작업은 주문 API 추가 — POST /orders, 검증 규칙은 ..."
     },
     {
       "name": "order",
-      "cwd": "/Users/me/IdeaProjects/iic-ucp-order",
+      "cwd": "/Users/me/IdeaProjects/order-service",
       "agent_type": "codex",
       "description": "주문 도메인",
       "extra_prompt": "주문 도메인 담당. 첫 작업은 캐시 추가 — Redis로 ..."

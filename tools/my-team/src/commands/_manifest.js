@@ -55,8 +55,8 @@ export function loadManifest(teamName, stateRoot) {
  * Resolve a team manifest from EITHER a team name OR a tmux session name.
  *
  * Callers let users pass `--team` as the team name (the state dir name, e.g.
- * `nudake-project`) or as the tmux session name shown by `tmux ls`
- * (`my-team-nudake-project-mpzgst8p`, with or without a trailing `:0`). A
+ * `demo-project`) or as the tmux session name shown by `tmux ls`
+ * (`my-team-demo-project-mpzgst8p`, with or without a trailing `:0`). A
  * session name cannot be parsed back into a team name — both team names and the
  * base36 suffix may contain hyphens and digits, so the boundary is ambiguous.
  * The only safe mapping is the manifest itself, so:

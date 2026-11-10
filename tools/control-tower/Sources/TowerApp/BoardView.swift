@@ -555,7 +555,8 @@ private struct DetailView: View {
                 ("diff 범위", diffScopeLabel(scope: changes.diff(for: s.cwd)?.scope, sharers: sharers)),
             ],
             workspace: s.cwd,
-            conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)])
+            conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)],
+            terminal: s.tmux)
     }
 
     private func past(_ h: HistorySession) -> some View {
@@ -569,15 +570,19 @@ private struct DetailView: View {
                 ("최근 활동", fullTime(h.updatedAt)),
             ],
             workspace: h.workspace,
-            conversation: [("최근 프롬프트", h.lastPrompt ?? "")])
+            conversation: [("최근 프롬프트", h.lastPrompt ?? "")],
+            terminal: nil)
     }
 
+    /// `terminal`: the tmux pane a live session runs in, shown in place of the recent conversation.
     private func detailBody(title: String, @ViewBuilder badges: () -> some View,
-                            facts: [(String, String)], workspace: String, conversation: [(String, String)]) -> some View {
+                            facts: [(String, String)], workspace: String, conversation: [(String, String)],
+                            terminal: TmuxRef?) -> some View {
         let badges = badges()
         return HStack(spacing: 0) {
             ScrollViewReader { proxy in
-                scrollingBody(title: title, badges: badges, facts: facts, workspace: workspace, conversation: conversation)
+                scrollingBody(title: title, badges: badges, facts: facts, workspace: workspace, conversation: conversation,
+                              terminal: terminal)
                     .accessibilityHidden(changes.history.current != nil)
                     .overlay {
                         // over the diff, which keeps its scroll position underneath
@@ -632,8 +637,8 @@ private struct DetailView: View {
             }
     }
 
-    private func scrollingBody(title: String, badges: some View,
-                               facts: [(String, String)], workspace: String, conversation: [(String, String)]) -> some View {
+    private func scrollingBody(title: String, badges: some View, facts: [(String, String)], workspace: String,
+                               conversation: [(String, String)], terminal: TmuxRef?) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
@@ -651,7 +656,11 @@ private struct DetailView: View {
                 }
                 ChangesView(workspace: workspace, at: board.at, state: changes)
                 let talk = conversation.filter { !$0.1.isEmpty }
-                if !talk.isEmpty {
+                if let terminal {
+                    Divider()
+                    // a new terminal, and a new tmux client, for each pane
+                    PaneTerminal(ref: terminal).id("\(terminal.session) \(terminal.pane)")
+                } else if !talk.isEmpty {
                     Divider()
                     Text("최근 대화").scaledFont(.headline, weight: .semibold)
                     ForEach(talk, id: \.0) { who, text in

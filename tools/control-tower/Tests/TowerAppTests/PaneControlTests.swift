@@ -278,3 +278,45 @@ private final class ScratchServer {
     #expect(await until(15) { ((try? FileManager.default.attributesOfItem(atPath: file.path)[.size]) as? Int) == 1 << 20 })
     stream.stop()
 }
+
+// MARK: - SwiftTerm's side
+
+import SwiftTerm
+
+private final class Quiet: TerminalDelegate {
+    func send(source: Terminal, data: ArraySlice<UInt8>) {}
+}
+
+@Test func aCharacterCutBetweenTwoOutputLinesDrawsAsOneInTheTerminal() {
+    var p = ControlModeParser(pane: "%1")
+    let han = Array("한".utf8)
+    var input = bytes("%output %1 x")
+    input += han[0..<2]
+    input += bytes("\n")
+    let quiet = Quiet()
+    let terminal = Terminal(delegate: quiet)
+    for case .output(let b) in p.feed(input) { terminal.feed(byteArray: b) }
+    var rest = bytes("%output %1 ")
+    rest += han[2...]
+    rest += bytes("y\n")
+    for case .output(let b) in p.feed(rest) { terminal.feed(byteArray: b) }
+    #expect(terminal.getLine(row: 0)?.translateToString(trimRight: true, skipNullCellsFollowingWide: true) == "x한y")
+}
+
+@MainActor @Test func theTerminalViewTakesThePaneSizeAndSendsWhatIsTyped() async throws {
+    let server = ScratchServer()
+    server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    let link = PaneLink()
+    let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))
+    view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: link)
+    #expect(await until { link.size.width > 0 })
+    let cell = link.size.height / 12
+    #expect(cell > 10 && cell < 20)  // 12 rows of a 12-point font
+    #expect(await until { server.run("display-message", "-p", "-t", pane, "#{pane_current_command}") == "od" })
+    // what SwiftTerm hands its delegate for a key press goes to the pane as it is
+    view.send(source: view, data: (Array("가".utf8) + [0x1b] + Array(repeating: 0x42, count: 12))[...])
+    #expect(await until { server.run("capture-pane", "-p", "-t", pane).contains("ea  b0  80  1b  42") })
+    view.detach()
+    #expect(await until { server.run("list-clients").isEmpty })
+}

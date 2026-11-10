@@ -31,3 +31,26 @@ test('a test process without the mark throws before any tmux runs', () => {
     const out = r.stdout + r.stderr;
     assert.match(out, /BLOCKED my-team tests must not reach the real tmux server/, out);
 });
+
+test('with the mark, tmux-utils names the test server itself, so a test outliving its runner never finds the default one (M4)', async () => {
+    const { tmuxSocketArgs } = await import('../../src/lib/tmux-utils.js');
+    assert.deepEqual(tmuxSocketArgs({ MY_TEAM_TEST_TMUX: 'my-team-test-7' }), ['-L', 'my-team-test-7']);
+    assert.deepEqual(tmuxSocketArgs({}), [], 'the CLI uses the server it is in');
+
+    // the runner is gone: no wrapper on PATH, only the mark left. Every call shape still names the socket;
+    // `ls` and `list-panes` on a named socket with no server only say so.
+    const utils = fileURLToPath(new URL('../../src/lib/tmux-utils.js', import.meta.url));
+    const name = `my-team-test-orphan-${process.pid}`;
+    const script = `import { tmuxExec, tmuxShell, tmuxCmdAsync } from ${JSON.stringify(utils)};
+        for (const call of [() => tmuxExec(['ls'], { stdio: 'pipe' }), () => tmuxShell('ls', { stdio: 'pipe' }),
+                            () => tmuxCmdAsync(['list-panes', '-a', '-F', '#{pane_id}'])]) {
+            try { await call(); console.log('NO-ERROR'); } catch (e) { console.log(String(e.stderr || e.message).trim()); }
+        }`;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        env: { ...process.env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin', MY_TEAM_TEST_TMUX: name, NODE_TEST_CONTEXT: 'child-v8' },
+        encoding: 'utf-8',
+    });
+    const lines = r.stdout.trim().split('\n');
+    assert.equal(lines.length, 3, r.stdout + r.stderr);
+    for (const l of lines) assert.match(l, new RegExp(`(no server running on|error connecting to) \\S*/${name}`), l);
+});

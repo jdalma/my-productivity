@@ -13,8 +13,8 @@ import { promisify } from 'util';
 /**
  * Tests run tmux for real (send-keys, set-option, kill-session on fixed ids such as %0 and %9). On the
  * user's server that types into and renames live panes of running teams. Under a test runner, tmux is
- * called only when test/run-isolated.sh set MY_TEAM_TEST_TMUX (it puts a `tmux -L <name>` wrapper first
- * on PATH); a test run any other way (`node --test <file>`, an IDE runner, `node <file>.test.js`) throws.
+ * called only when test/run-isolated.sh set MY_TEAM_TEST_TMUX, the name of its own server; a test run any
+ * other way (`node --test <file>`, an IDE runner, `node <file>.test.js`) throws.
  */
 export function underTestWithoutIsolation(env = process.env, argv = process.argv, execArgv = process.execArgv) {
     const testing = Boolean(env.NODE_TEST_CONTEXT) || execArgv.includes('--test')
@@ -24,8 +24,18 @@ export function underTestWithoutIsolation(env = process.env, argv = process.argv
 
 function assertTestIsolation() {
     if (underTestWithoutIsolation()) {
-        throw new Error('my-team tests must not reach the real tmux server: run them with `npm test` or `sh test/run-isolated.sh <files>`');
+        throw new Error('my-team tests must not reach the real tmux server: run them with `npm test` or `sh test/run-isolated.sh <files>`'
+            + ' (outside a test, NODE_TEST_CONTEXT was inherited from a `node --test` process)');
     }
+}
+
+/**
+ * `-L <name>` for every call of a marked test run, added here rather than by a wrapper on PATH: a test
+ * that outlives run-isolated.sh (its shell killed alone) still names the test server, which is then
+ * "no server", never the default one.
+ */
+export function tmuxSocketArgs(env = process.env) {
+    return env.MY_TEAM_TEST_TMUX ? ['-L', env.MY_TEAM_TEST_TMUX] : [];
 }
 
 export function tmuxEnv() {
@@ -55,7 +65,8 @@ function escapeForCmdSet(value) {
     return value.replace(/"/g, '""');
 }
 
-function resolveTmuxInvocation(args) {
+function resolveTmuxInvocation(tmuxArgs) {
+    const args = [...tmuxSocketArgs(), ...tmuxArgs];
     const resolvedBinary = resolveTmuxBinaryPath();
     if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
         const comspec = process.env.COMSPEC || 'cmd.exe';
@@ -84,16 +95,20 @@ export async function tmuxExecAsync(args, opts) {
     });
 }
 
+function shellTmux() {
+    return ['tmux', ...tmuxSocketArgs().map(quoteShellArg)].join(' ');
+}
+
 export function tmuxShell(command, opts) {
     assertTestIsolation();
     const { stripTmux: _, ...execOpts } = opts ?? {};
-    return execSync(`tmux ${command}`, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
+    return execSync(`${shellTmux()} ${command}`, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
 }
 
 export async function tmuxShellAsync(command, opts) {
     assertTestIsolation();
     const { stripTmux: _, timeout, ...rest } = opts ?? {};
-    return promisify(exec)(`tmux ${command}`, {
+    return promisify(exec)(`${shellTmux()} ${command}`, {
         encoding: 'utf-8', env: resolveEnv(opts),
         ...(timeout !== undefined ? { timeout } : {}), ...rest,
     });

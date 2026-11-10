@@ -107,9 +107,10 @@ private final class ScratchServer {
     }
 
     deinit {
-        let path = run("display-message", "-p", "#{socket_path}")
         run("kill-server")
-        if path.contains(socket) { try? FileManager.default.removeItem(atPath: path) }
+        // where tmux puts a -L socket; asking the server for it fails once a test has ended the server
+        let dir = ProcessInfo.processInfo.environment["TMUX_TMPDIR"] ?? "/tmp"
+        try? FileManager.default.removeItem(atPath: "\(dir)/tmux-\(getuid())/\(socket)")
     }
 }
 

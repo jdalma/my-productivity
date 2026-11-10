@@ -21,6 +21,9 @@ struct ControlModeParser {
     let pane: String
     private var line: [UInt8] = []
     private var reply: [String]?
+    /// The time and command number of the open `%begin`. tmux does not escape a reply's lines, so only the
+    /// `%end`/`%error` with the same two closes it (tmux(1), CONTROL MODE: guard lines).
+    private var guardID: ArraySlice<Substring> = []
 
     init(pane: String) { self.pane = pane }
 
@@ -40,9 +43,10 @@ struct ControlModeParser {
     private mutating func take(_ line: [UInt8]) -> ControlEvent? {
         if reply != nil {
             let text = String(decoding: line, as: UTF8.self)
-            if text.hasPrefix("%end ") || text.hasPrefix("%error ") {
+            let words = text.split(separator: " ")
+            if words.first == "%end" || words.first == "%error", words.dropFirst().prefix(2) == guardID {
                 defer { reply = nil }
-                return .reply(reply ?? [], ok: text.hasPrefix("%end "))
+                return .reply(reply ?? [], ok: words.first == "%end")
             }
             reply?.append(text)
             return nil
@@ -50,7 +54,10 @@ struct ControlModeParser {
         let prefix = Array("%output \(pane) ".utf8)
         if line.starts(with: prefix) { return .output(unescape(line[prefix.count...])) }
         let text = String(decoding: line.prefix(32), as: UTF8.self)
-        if text.hasPrefix("%begin ") { reply = [] }
+        if text.hasPrefix("%begin ") {
+            reply = []
+            guardID = String(decoding: line, as: UTF8.self).split(separator: " ").dropFirst().prefix(2)
+        }
         else if text.hasPrefix("%layout-change ") { return .layoutChanged }
         else if text.hasPrefix("%window-close ") || text.hasPrefix("%unlinked-window-close ") { return .windowClosed }
         else if text == "%exit" || text.hasPrefix("%exit ") { return .exit }

@@ -63,6 +63,26 @@ private func bytes(_ s: String) -> [UInt8] { Array(s.utf8) }
     ])
 }
 
+@Test func aReplyEndsOnlyAtItsOwnGuardLine() {
+    // tmux does not escape a reply's lines: a pane line that looks like %end or %output is still the reply's
+    var p = ControlModeParser(pane: "%0")
+    let events = p.feed(bytes("""
+        %begin 1700000000 7 1
+        top
+        %end 1 2 0
+        %error 1700000000 8 1
+        %output %0 INJECTED
+        bottom
+        %end 1700000000 7 1
+        %output %0 live
+
+        """))
+    #expect(events == [
+        .reply(["top", "%end 1 2 0", "%error 1700000000 8 1", "%output %0 INJECTED", "bottom"], ok: true),
+        .output(bytes("live")),
+    ])
+}
+
 // MARK: - a control mode client against a throwaway tmux server (`tmux -L`), never the user's
 
 import TowerCore
@@ -197,4 +217,23 @@ private final class ScratchServer {
     // before the stream hears that the client exited: each write goes to a pipe nobody reads any more
     for _ in 0..<50 { stream.send(Array("x".utf8)) }
     #expect(await until { gone != nil })
+}
+
+@MainActor @Test func aScreenWithControlModeLinesInItShowsAsItIs() async throws {
+    let server = ScratchServer()
+    server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10",
+               "printf 'top\\n%%end 1 2 0\\n%%output %%0 INJECTED\\nbottom\\n'; cat > /dev/null")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    #expect(await until { server.run("capture-pane", "-p", "-t", pane).contains("bottom") })
+    var shown: [UInt8] = []
+    var outputs = 0
+    let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
+    stream.onOutput = { shown += $0; outputs += 1 }
+    stream.start()
+    #expect(await until { String(decoding: shown, as: UTF8.self).contains("bottom") })
+    try await Task.sleep(for: .milliseconds(200))
+    let lines = String(decoding: shown, as: UTF8.self).components(separatedBy: "\r\n").prefix(4)
+    #expect(Array(lines) == ["\u{1b}[H\u{1b}[2Jtop", "%end 1 2 0", "%output %0 INJECTED", "bottom"])
+    #expect(outputs == 1)  // the first screen only, nothing taken for live output
+    stream.stop()
 }

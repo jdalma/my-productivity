@@ -30,7 +30,8 @@ export async function runShutdown(opts, deps = {}) {
     // A detached session's name is the team's own (it carries a start time), so killing it is
     // always safe. Split-pane panes and a dedicated window live in the user's session, and after
     // a tmux restart their ids may be someone else's: only what is live as this team is killed.
-    const { team_alive, alive } = liveness(manifest, await _listPanes());
+    // When tmux cannot tell, nothing counts as live: only the team's own detached session is killed.
+    const { team_alive, alive } = liveness(manifest, await _listPanes().catch(() => []));
     if (manifest.session_mode === 'split-pane') {
         // Kill worker panes only (preserve user's host pane)
         await _killWorkerPanes({ paneIds: manifest.workers.filter((w) => alive[w.name]).map((w) => w.pane_id), leaderPaneId });

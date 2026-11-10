@@ -112,3 +112,26 @@ test('status --all --json scans the base, skips .bak/.omc/broken manifests; --al
     assert.equal(err.length, 1);
     assert.match(err[0], /^skip broken:/);
 });
+
+test('listPanes: no tmux server means no panes; any other tmux failure is an error, not "nothing runs" (R2)', async () => {
+    const { listPanes, runningByManifest } = await import('../../src/lib/team-liveness.js');
+    // as child_process reports it: the message carries stderr too
+    const fail = (stderr) => async () => { throw Object.assign(new Error(`Command failed: tmux list-panes\n${stderr}`), { stderr }); };
+    assert.deepEqual(await listPanes(fail('no server running on /tmp/tmux-501/default\n')), []);
+    assert.deepEqual(await listPanes(fail('error connecting to /tmp/mt.x/tmux-501/default (No such file or directory)\n')), []);
+    await assert.rejects(listPanes(fail('lost server\n')), /lost server/);
+    await assert.rejects(listPanes(async () => { throw Object.assign(new Error('spawn tmux ETIMEDOUT'), { stderr: '' }); }), /ETIMEDOUT/);
+    const ok = async () => ({ stdout: 'host\t%1\tpm\n' });
+    assert.deepEqual(await listPanes(ok), [{ session: 'host', paneId: '%1', worker: 'pm' }]);
+
+    const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const root = mkdtempSync(join(tmpdir(), 'my-team-r2-'));
+    try {
+        writeFileSync(join(root, 'manifest.json'), JSON.stringify({ session_name: 'host:0', workers: manifest.workers }));
+        await assert.rejects(runningByManifest(root, () => listPanes(fail('lost server\n'))), /lost server/);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

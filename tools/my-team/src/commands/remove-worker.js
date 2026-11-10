@@ -44,7 +44,8 @@ export async function runRemoveWorker(opts, deps = {}) {
     }
     // Who is live, before the roster changes. A stopped team keeps its manifest, and after a tmux
     // restart its pane ids may be another team's panes: only a live worker's pane is killed or typed to.
-    const { alive } = liveness(fresh, await _listPanes());
+    // When tmux cannot tell, nobody counts as live: nothing is killed or typed to.
+    const { alive } = liveness(fresh, await _listPanes().catch(() => []));
     const [removed] = fresh.workers.splice(idx, 1);
 
     // Commit: from here the worker is off the roster and send-message rejects it.

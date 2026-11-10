@@ -8,7 +8,7 @@
   },
   "main": "./src/cli.js",
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "sh test/run-isolated.sh \"test/**/*.test.js\"",
     "test:r2": "node test/r2-verify.mjs"
   },
   "dependencies": {

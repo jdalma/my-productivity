@@ -10,14 +10,17 @@ import { tmuxCmdAsync } from './tmux-utils.js';
 
 /**
  * All panes on the tmux server as {session, paneId, worker}. Empty when no
- * tmux server is running (every team is then dead).
+ * tmux server is running (every team is then dead). Any other failure throws:
+ * an empty list would read as "nothing runs", and start would move a live
+ * team's state aside.
  */
-export async function listPanes() {
+export async function listPanes(run = tmuxCmdAsync) {
     let stdout;
     try {
-        ({ stdout } = await tmuxCmdAsync(['list-panes', '-a', '-F', '#{session_name}\t#{pane_id}\t#{@worker_name}']));
-    } catch {
-        return [];
+        ({ stdout } = await run(['list-panes', '-a', '-F', '#{session_name}\t#{pane_id}\t#{@worker_name}']));
+    } catch (err) {
+        if (/no server running|error connecting to/.test(err.stderr ?? '')) return [];
+        throw err;
     }
     return stdout.split('\n').filter(Boolean).map((line) => {
         const [session, paneId, worker] = line.split('\t');

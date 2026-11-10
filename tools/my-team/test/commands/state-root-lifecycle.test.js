@@ -276,3 +276,19 @@ test('a new start is refused while the team of the same state_root runs, and its
         rmSync(base, { recursive: true, force: true });
     }
 });
+
+test('a new start is refused when tmux cannot say whether the team runs, and its state stays (R2)', async () => {
+    const { base, stateRoot } = splitTeam();
+    const config = join(base, 'demo.json');
+    writeFileSync(config, JSON.stringify({ team_name: 'demo-team', state_root: stateRoot,
+        workers: [{ name: 'pm', agent_type: 'claude', cwd: tmpdir() }] }));
+    try {
+        await assert.rejects(runStart({ config }, { listPanes: async () => { throw new Error('lost server'); } }), /lost server/);
+        assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL);
+        assert.equal(existsSync(`${stateRoot}.bak`), false);
+    } finally {
+        delete process.env.MY_TEAM_STATE_ROOT_BASE;
+        delete process.env.MY_TEAM_STATE_ROOT;
+        rmSync(base, { recursive: true, force: true });
+    }
+});

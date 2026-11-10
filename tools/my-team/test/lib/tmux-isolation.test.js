@@ -34,8 +34,12 @@ test('a test process without the mark throws before any tmux runs', () => {
 
 test('with the mark, tmux-utils names the test server itself, so a test outliving its runner never finds the default one (M4)', async () => {
     const { tmuxSocketArgs } = await import('../../src/lib/tmux-utils.js');
-    assert.deepEqual(tmuxSocketArgs({ MY_TEAM_TEST_TMUX: 'my-team-test-7' }), ['-L', 'my-team-test-7']);
-    assert.deepEqual(tmuxSocketArgs({}), [], 'the CLI uses the server it is in');
+    const cli = ['node', '/usr/local/bin/my-team'];
+    assert.deepEqual(tmuxSocketArgs({ NODE_TEST_CONTEXT: 'child-v8', MY_TEAM_TEST_TMUX: 'my-team-test-7' }, cli, []), ['-L', 'my-team-test-7']);
+    assert.deepEqual(tmuxSocketArgs({ MY_TEAM_TEST_TMUX: 'my-team-test-7' }, ['node', '/r/x.test.js'], []), ['-L', 'my-team-test-7']);
+    assert.deepEqual(tmuxSocketArgs({}, cli, []), [], 'the CLI uses the server it is in');
+    // a mark leaked out of a test run is ignored: the CLI still sees the user's server, its teams alive (R5)
+    assert.deepEqual(tmuxSocketArgs({ MY_TEAM_TEST_TMUX: 'stray' }, cli, []), []);
 
     // the runner is gone: no wrapper on PATH, only the mark left. Every call shape still names the socket;
     // `ls` and `list-panes` on a named socket with no server only say so.

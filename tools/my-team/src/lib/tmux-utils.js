@@ -16,10 +16,12 @@ import { promisify } from 'util';
  * called only when test/run-isolated.sh set MY_TEAM_TEST_TMUX, the name of its own server; a test run any
  * other way (`node --test <file>`, an IDE runner, `node <file>.test.js`) throws.
  */
+function underTest(env, argv, execArgv) {
+    return Boolean(env.NODE_TEST_CONTEXT) || execArgv.includes('--test') || /\.test\.[cm]?js$/.test(argv[1] ?? '');
+}
+
 export function underTestWithoutIsolation(env = process.env, argv = process.argv, execArgv = process.execArgv) {
-    const testing = Boolean(env.NODE_TEST_CONTEXT) || execArgv.includes('--test')
-        || /\.test\.[cm]?js$/.test(argv[1] ?? '');
-    return testing && !env.MY_TEAM_TEST_TMUX;
+    return underTest(env, argv, execArgv) && !env.MY_TEAM_TEST_TMUX;
 }
 
 function assertTestIsolation() {
@@ -32,10 +34,11 @@ function assertTestIsolation() {
 /**
  * `-L <name>` for every call of a marked test run, added here rather than by a wrapper on PATH: a test
  * that outlives run-isolated.sh (its shell killed alone) still names the test server, which is then
- * "no server", never the default one.
+ * "no server", never the default one. Outside a test the mark is ignored: leaked into a real run, it
+ * would hide the user's server and its live teams.
  */
-export function tmuxSocketArgs(env = process.env) {
-    return env.MY_TEAM_TEST_TMUX ? ['-L', env.MY_TEAM_TEST_TMUX] : [];
+export function tmuxSocketArgs(env = process.env, argv = process.argv, execArgv = process.execArgv) {
+    return env.MY_TEAM_TEST_TMUX && underTest(env, argv, execArgv) ? ['-L', env.MY_TEAM_TEST_TMUX] : [];
 }
 
 export function tmuxEnv() {

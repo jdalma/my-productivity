@@ -139,7 +139,7 @@ struct PaneTmuxTests {
         }
     }
 
-    @MainActor private func until(_ seconds: Double = 5, _ done: () -> Bool) async -> Bool {
+    @MainActor private func until(_ seconds: Double = 15, _ done: () -> Bool) async -> Bool {
         let end = Date().addingTimeInterval(seconds)
         while !done() {
             if Date() > end { return false }

@@ -23,10 +23,12 @@ public struct HistorySession: Codable, Hashable, Sendable {
     public var resumeCommand: [String]
     /// The my-team worker this session was, from the prompt my-team typed first. The board's own; not in the JSON.
     public var member: TeamWorker?
+    /// The transcript's size in bytes, from the stat the listing makes anyway; nil when unknown. Not in the JSON.
+    public var size: Int?
 
     public init(id: String, agent: AgentKind, title: String, workspace: String, branch: String?, createdAt: String?,
                 updatedAt: String, lastPrompt: String?, transcriptPath: String, live: Bool, resumeCommand: [String],
-                member: TeamWorker? = nil) {
+                member: TeamWorker? = nil, size: Int? = nil) {
         self.id = id
         self.agent = agent
         self.title = title
@@ -39,6 +41,7 @@ public struct HistorySession: Codable, Hashable, Sendable {
         self.live = live
         self.resumeCommand = resumeCommand
         self.member = member
+        self.size = size
     }
 
     enum CodingKeys: String, CodingKey {
@@ -80,6 +83,8 @@ struct TranscriptFacts: Hashable, Sendable {
     var branch: String?
     var createdAt: String?
     var updatedAt: String?
+    /// The file's size when parsed: the cache re-parses whenever it changes.
+    var size: Int?
 }
 
 struct HistoryRoots {
@@ -285,7 +290,7 @@ let historyCache = HistoryCache()
 func parseTranscript(_ f: TranscriptFile) -> TranscriptFacts? {
     let (head, tail) = headAndTail(f.path, size: f.size)
     let facts = f.agent == .claude ? claudeFacts(path: f.path, head: head, tail: tail) : codexFacts(path: f.path, head: head, tail: tail)
-    return facts.map { var x = $0; x.updatedAt = x.updatedAt ?? isoString(f.mtime); return x }
+    return facts.map { var x = $0; x.updatedAt = x.updatedAt ?? isoString(f.mtime); x.size = f.size; return x }
 }
 
 /// A my-team team and one of its workers, by name.
@@ -323,7 +328,7 @@ func historySessions(_ facts: [TranscriptFacts], codexTitles: [String: String],
             createdAt: f.createdAt, updatedAt: f.updatedAt ?? "", lastPrompt: f.lastPrompt.map(oneLine),
             transcriptPath: f.path, live: liveTranscripts.contains(f.path),
             resumeCommand: f.agent == .claude ? ["claude", "--resume", f.id] : ["codex", "resume", f.id],
-            member: member
+            member: member, size: f.size
         )
     }
     let keyed = sessions.enumerated().map { (time: parseISO($1.updatedAt) ?? 0, offset: $0, session: $1) }

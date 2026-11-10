@@ -94,7 +94,8 @@ private func userMessage(_ text: String, at: String) -> String {
     #expect(s == HistorySession(
         id: "s1", agent: .claude, title: "first", workspace: "/w/app", branch: "feat/x",
         createdAt: "2026-11-01T01:00:00.000Z", updatedAt: "2026-11-01T03:00:00.000Z", lastPrompt: "second prompt",
-        transcriptPath: path, live: false, resumeCommand: ["claude", "--resume", "s1"]))
+        transcriptPath: path, live: false, resumeCommand: ["claude", "--resume", "s1"],
+        size: try FileManager.default.attributesOfItem(atPath: path)[.size] as? Int))
 }
 
 @Test func claudeWorkspaceIsTheCwdTheTranscriptIsFiledUnderNotALaterCd() throws {
@@ -331,4 +332,31 @@ private func ended(_ agent: AgentKind, live: Bool = false, workspace: String = "
     #expect(displayState(s) == .permission(since: "S"))
     s = session(status: .unknown, myTurn: false)
     #expect(displayState(s) == .idle(since: s.since))
+}
+
+@Test func aSessionCarriesItsTranscriptSize() throws {
+    let h = try Homes()
+    defer { try? FileManager.default.removeItem(atPath: h.dir) }
+    let claude = try h.claude("s1", [user("first")])
+    let codex = try h.codex("c1", [meta("c1", originator: "codex_cli_rs")])
+    let size = { (p: String) in try FileManager.default.attributesOfItem(atPath: p)[.size] as? Int }
+    let byPath = Dictionary(uniqueKeysWithValues: h.history().map { ($0.transcriptPath, $0.size) })
+    #expect(byPath[claude] == (try size(claude)))
+    #expect(byPath[codex] == (try size(codex)))
+
+    // grown since the last refresh: the cache's facts are new, and so is the size
+    let cache = HistoryCache()
+    _ = collectHistory(board: Board(at: "", teams: [], loose: []), roots: h.roots, cache: cache)
+    try (String(contentsOfFile: claude, encoding: .utf8) + user("more") + "\n").write(toFile: claude, atomically: true, encoding: .utf8)
+    let grown = collectHistory(board: Board(at: "", teams: [], loose: []), roots: h.roots, cache: cache)
+    #expect(grown.first { $0.transcriptPath == claude }?.size == (try size(claude)))
+}
+
+@Test func theSizeStaysOutOfTheJSON() throws {
+    var s = HistorySession(id: "s", agent: .claude, title: "t", workspace: "/w", branch: nil, createdAt: nil, updatedAt: "",
+                           lastPrompt: nil, transcriptPath: "/t.jsonl", live: false, resumeCommand: [])
+    s.size = 1234
+    let keys = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any]).keys
+    #expect(Set(keys) == ["id", "agent", "title", "workspace", "branch", "created_at", "updated_at", "last_prompt",
+                          "transcript_path", "live", "resume_command"])
 }

@@ -230,6 +230,24 @@ struct TeamHistory: Equatable {
     var sessions: [HistorySession]
     /// The team runs now: there is nothing to resume.
     var running: Bool
+
+    /// The run's transcripts together; nil when none has a size.
+    var size: Int? {
+        let known = sessions.compactMap(\.size)
+        return known.isEmpty ? nil : known.reduce(0, +)
+    }
+
+    /// Each worker's transcripts together, biggest first.
+    var workerSizes: [(worker: String, size: Int)] {
+        var by: [String: Int] = [:]
+        for h in sessions { if let w = h.member?.worker, let n = h.size { by[w, default: 0] += n } }
+        return by.map { (worker: $0.key, size: $0.value) }.sorted { $0.size != $1.size ? $0.size > $1.size : $0.worker < $1.worker }
+    }
+}
+
+/// "1.2 MB", as Finder shows a file's size.
+func transcriptSizeLabel(_ bytes: Int?) -> String? {
+    bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
 }
 
 /// `sessions` (newest first) as list lines: a team run's sessions gathered on one line, where its newest one was.

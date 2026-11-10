@@ -420,6 +420,10 @@ private struct TeamHistoryHeader: View {
             Text("워커 \(Set(team.sessions.compactMap { $0.member?.worker }).count)")
                 .scaledFont(.caption1).foregroundStyle(.secondary)
             Spacer(minLength: 8)
+            if let size = transcriptSizeLabel(team.size) {
+                Text(size).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
+                    .help(team.workerSizes.map { "\($0.worker) \(transcriptSizeLabel($0.size) ?? "")" }.joined(separator: "\n"))
+            }
             if let newest = team.sessions.first {
                 Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
             }
@@ -452,6 +456,9 @@ private struct HistoryRowView: View {
                 Text(historySubtitle(h)).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
+            if let size = transcriptSizeLabel(h.size) {
+                Text(size).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
+            }
             Text(relativeTime(h.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
             if let run {
                 RunButton(label: "세션 실행", action: run)

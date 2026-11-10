@@ -660,3 +660,21 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     #expect(diffScopeLabel(scope: "", sharers: ["pm"]) == "팀 공유 폴더 (pm와 함께)")
     #expect(diffScopeLabel(scope: "backend", sharers: ["pm", "qa"]) == "저장소의 backend/ 아래만 · 팀 공유 폴더 (pm, qa와 함께)")
 }
+
+@Test func aTeamRunShowsTheSumOfItsWorkersTranscripts() {
+    func sized(_ id: String, _ worker: String, _ size: Int?) -> HistorySession {
+        var h = teamHistory(id, team: "t", worker: worker, at: "2026-11-02T09:00:00.000Z")
+        h.size = size
+        return h
+    }
+    let team = TeamHistory(run: TeamRun(team: "t", start: nil),
+                           sessions: [sized("1", "pm", 1_000), sized("2", "core", 5_000), sized("3", "core", 2_000), sized("4", "qa", nil)],
+                           running: false)
+    #expect(team.size == 8_000)  // a transcript gone from disk counts nothing
+    #expect(team.workerSizes.map(\.worker) == ["core", "pm"])  // biggest first; qa has no size
+    #expect(team.workerSizes.map(\.size) == [7_000, 1_000])
+    #expect(TeamHistory(run: team.run, sessions: [sized("4", "qa", nil)], running: false).size == nil)
+
+    #expect(transcriptSizeLabel(nil) == nil)
+    #expect(transcriptSizeLabel(1_200_000) == ByteCountFormatter.string(fromByteCount: 1_200_000, countStyle: .file))
+}

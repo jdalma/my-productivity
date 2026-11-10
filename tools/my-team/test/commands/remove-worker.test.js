@@ -61,12 +61,18 @@ function seedPendingQuestion(ctx, from, to) {
 
 const readManifest = (ctx) => JSON.parse(readFileSync(join(ctx.stateRoot, 'manifest.json'), 'utf-8'));
 
-function spyDeps() {
+/** Every worker of the team live in its session, as `tmux list-panes -a` would show it. */
+const livePanes = (ctx) => async () => readManifest(ctx).workers.map((w) => ({
+    session: 'test-session', paneId: w.pane_id, worker: w.name,
+}));
+
+function spyDeps(ctx) {
     const killed = [];
     const notified = [];
     return {
         killed, notified,
         deps: {
+            listPanes: livePanes(ctx),
             killPane: async (id) => { killed.push(id); },
             sendToWorker: async (_s, paneId, msg) => { notified.push([paneId, msg]); return true; },
         },
@@ -75,7 +81,7 @@ function spyDeps() {
 
 test('removes the worker from the roster, kills its pane, notifies the rest', async () => {
     const ctx = setupTeam();
-    const { killed, notified, deps } = spyDeps();
+    const { killed, notified, deps } = spyDeps(ctx);
     try {
         const res = await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
         assert.equal(res.pane_id, '%2');
@@ -90,7 +96,7 @@ test('removes the worker from the roster, kills its pane, notifies the rest', as
 
 test('rejects an unknown worker without touching the manifest or any pane', async () => {
     const ctx = setupTeam();
-    const { killed, deps } = spyDeps();
+    const { killed, deps } = spyDeps(ctx);
     try {
         await assert.rejects(
             () => runRemoveWorker({ team: 't1', name: 'nobody' }, deps),
@@ -107,7 +113,7 @@ test('never kills the leader pane', async () => {
     const m = readManifest(ctx);
     m.workers[0].pane_id = m.leader_pane;
     writeFileSync(join(ctx.stateRoot, 'manifest.json'), JSON.stringify(m), 'utf-8');
-    const { killed, deps } = spyDeps();
+    const { killed, deps } = spyDeps(ctx);
     try {
         await runRemoveWorker({ team: 't1', name: 'alice' }, deps);
         assert.deepEqual(killed, []);
@@ -117,9 +123,10 @@ test('never kills the leader pane', async () => {
 
 test('a failing departure notice does not undo the removal', async () => {
     const ctx = setupTeam();
-    const { killed } = spyDeps();
+    const { killed } = spyDeps(ctx);
     try {
         await runRemoveWorker({ team: 't1', name: 'bob' }, {
+            listPanes: livePanes(ctx),
             killPane: async (id) => { killed.push(id); },
             sendToWorker: async () => { throw new Error('pane busy'); },
         });
@@ -139,7 +146,7 @@ test('only the waiting worker and the orchestrator are told about a removal', as
         ],
     });
     seedPendingQuestion(ctx, 'carol', 'bob');
-    const { notified, deps } = spyDeps();
+    const { notified, deps } = spyDeps(ctx);
     try {
         await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
         const panes = notified.map(([p]) => p).sort();
@@ -160,7 +167,7 @@ test('waiting workers are read from the removed team, not the caller\'s MY_TEAM_
     const other = mkdtempSync(join(tmpdir(), 'my-team-other-'));
     const saved = process.env.MY_TEAM_STATE_ROOT;
     process.env.MY_TEAM_STATE_ROOT = other;
-    const { notified, deps } = spyDeps();
+    const { notified, deps } = spyDeps(ctx);
     try {
         await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
         assert.deepEqual(notified.map(([p]) => p).sort(), ['%1', '%3']);
@@ -177,12 +184,36 @@ test('an unreadable mailbox does not block the removal or the other notices', as
     });
     mkdirSync(join(ctx.stateRoot, 'mailbox'), { recursive: true });
     writeFileSync(join(ctx.stateRoot, 'mailbox', 'carol.json'), '{ not json', 'utf-8');
-    const { notified, deps } = spyDeps();
+    const { notified, deps } = spyDeps(ctx);
     try {
         await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
         assert.deepEqual(readManifest(ctx).workers.map((w) => w.name), ['alice', 'carol']);
         // carol's mailbox is unreadable so she cannot be classified as waiting;
         // the orchestrator is still notified.
         assert.deepEqual(notified.map(([p]) => p), ['%1']);
+    } finally { cleanup(ctx); }
+});
+
+test('a stopped team: the roster is fixed, but no pane is killed and nobody is typed to (M1)', async () => {
+    // after shutdown and a tmux restart, the manifest's pane ids belong to another team's live panes
+    const ctx = setupTeam();
+    const { killed, notified, deps } = spyDeps(ctx);
+    deps.listPanes = async () => [1, 2, 3].map((i) => ({ session: 'my-team-other-zz', paneId: `%${i}`, worker: `x${i}` }));
+    try {
+        await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
+        assert.deepEqual(readManifest(ctx).workers.map((w) => w.name), ['alice', 'carol']);
+        assert.deepEqual(killed, []);
+        assert.deepEqual(notified, []);
+    } finally { cleanup(ctx); }
+});
+
+test('a worker whose pane is gone is not killed; only live workers hear about the removal', async () => {
+    const ctx = setupTeam();
+    const { killed, notified, deps } = spyDeps(ctx);
+    deps.listPanes = async () => [{ session: 'test-session', paneId: '%1', worker: 'alice' }];
+    try {
+        await runRemoveWorker({ team: 't1', name: 'bob' }, deps);
+        assert.deepEqual(killed, []);
+        assert.deepEqual(notified.map(([pane]) => pane), ['%1']);
     } finally { cleanup(ctx); }
 });

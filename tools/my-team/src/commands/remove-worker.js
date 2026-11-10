@@ -18,11 +18,13 @@ import { atomicWriteJson } from '../lib/fs-utils.js';
 import { applyTeamLayout, sendToWorker } from '../lib/tmux-session.js';
 import { readMailboxFile } from '../lib/tmux-comm.js';
 import { tmuxExecAsync } from '../lib/tmux-utils.js';
+import { listPanes, liveness } from '../lib/team-liveness.js';
 
 export async function runRemoveWorker(opts, deps = {}) {
     const {
         sendToWorker: _sendToWorker = sendToWorker,
         killPane: _killPane = (id) => tmuxExecAsync(['kill-pane', '-t', id]),
+        listPanes: _listPanes = listPanes,
     } = deps;
 
     if (!opts.team) throw new Error('--team is required');
@@ -40,6 +42,9 @@ export async function runRemoveWorker(opts, deps = {}) {
     if (idx === -1) {
         throw new Error(`Worker '${opts.name}' is not in team '${opts.team}'.`);
     }
+    // Who is live, before the roster changes. A stopped team keeps its manifest, and after a tmux
+    // restart its pane ids may be another team's panes: only a live worker's pane is killed or typed to.
+    const { alive } = liveness(fresh, await _listPanes());
     const [removed] = fresh.workers.splice(idx, 1);
 
     // Commit: from here the worker is off the roster and send-message rejects it.
@@ -48,7 +53,7 @@ export async function runRemoveWorker(opts, deps = {}) {
     // Kill the pane. Never the leader — a worker's pane_id can equal
     // leader_pane in split-pane mode only for the host, which is not a worker,
     // but guard anyway so we never take out the user's own pane.
-    const killable = removed.pane_id && removed.pane_id !== fresh.leader_pane;
+    const killable = alive[removed.name] && removed.pane_id && removed.pane_id !== fresh.leader_pane;
     if (killable) {
         try { await _killPane(removed.pane_id); } catch { /* already gone */ }
         try { await applyTeamLayout(fresh.session_name); } catch { /* cosmetic */ }
@@ -91,11 +96,12 @@ export async function runRemoveWorker(opts, deps = {}) {
     const notice =
         `Worker '${opts.name}' finished its assignment and has LEFT team '${opts.team}'. `
         + 'Do not send it messages; if you were waiting on a reply from it, stop waiting and proceed.';
-    for (const w of recipients) {
+    for (const w of recipients.filter((r) => alive[r.name])) {
         try { await _sendToWorker(fresh.session_name, w.pane_id, notice); } catch { /* best effort */ }
     }
 
-    const paneNote = killable ? `pane ${removed.pane_id} killed` : `pane ${removed.pane_id} kept (leader)`;
+    const paneNote = killable ? `pane ${removed.pane_id} killed`
+        : alive[removed.name] ? `pane ${removed.pane_id} kept (leader)` : 'no live pane';
     console.log(`[my-team] Removed worker '${opts.name}' from team '${opts.team}' (${paneNote}). State kept under ${fresh.state_root}.`);
     return { name: opts.name, pane_id: removed.pane_id };
 }

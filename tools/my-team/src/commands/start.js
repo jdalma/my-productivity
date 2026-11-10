@@ -32,6 +32,7 @@ import {
     generateWorkerOverlay, ensureWorkerStateDir,
 } from '../lib/worker-bootstrap.js';
 import { atomicWriteJson } from '../lib/fs-utils.js';
+import { listPanes, runningByManifest } from '../lib/team-liveness.js';
 
 /** AGENT_TYPE → CLI binary name + install hint. */
 export const AGENT_CLI = {
@@ -203,15 +204,16 @@ export function validateAgentCLIs(config) {
     }
 }
 
-export async function runStart(opts) {
+export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
     const callerCwd = process.cwd();
     const config = resolveConfig(opts, callerCwd);
 
     // AC-29: agent CLI existence
     validateAgentCLIs(config);
 
-    // AC-28: refuse if already running
-    if (isTeamAlreadyRunning(config.team_name)) {
+    // AC-28: refuse if already running. The session name finds a detached team; the manifest
+    // finds one in split-pane or window mode, which lives in the user's own session.
+    if (isTeamAlreadyRunning(config.team_name) || await runningByManifest(config.state_root, panes)) {
         throw new Error(
             `Team '${config.team_name}' is already running. Use 'my-team shutdown --team ${config.team_name}' first.`
         );

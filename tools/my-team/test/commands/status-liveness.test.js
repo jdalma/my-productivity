@@ -7,7 +7,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { liveness, teamDirs } from '../../src/commands/status.js';
+import { teamDirs } from '../../src/commands/status.js';
+import { liveness, runningByManifest } from '../../src/lib/team-liveness.js';
 
 const manifest = {
     session_name: 'my-team-dead-abc:0',
@@ -32,6 +33,33 @@ test('live session: alive only when @worker_name and pane id both match', () => 
         { session: 'my-team-dead-abc', paneId: '%9', worker: 'dev' },
     ];
     assert.deepEqual(liveness(manifest, panes), { team_alive: true, alive: { pm: true, dev: false } });
+});
+
+test('a split-pane team after shutdown: the host session lives on, the team does not (M2)', () => {
+    const split = { session_name: 'host:0', workers: manifest.workers };
+    const panes = [{ session: 'host', paneId: '%0', worker: '' }];
+    assert.deepEqual(liveness(split, panes), { team_alive: false, alive: { pm: false, dev: false } });
+});
+
+test('a session with only its host pane left is not a live team', () => {
+    const panes = [{ session: 'my-team-dead-abc', paneId: '%0', worker: '' }];
+    assert.equal(liveness(manifest, panes).team_alive, false);
+});
+
+test('a running split-pane team is found from its manifest, so a new start is refused (M3)', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const root = mkdtempSync(join(tmpdir(), 'my-team-running-'));
+    try {
+        assert.equal(await runningByManifest(root, async () => []), false, 'no manifest: nothing runs');
+        writeFileSync(join(root, 'manifest.json'), JSON.stringify({ session_name: 'host:0', workers: manifest.workers }));
+        const live = [{ session: 'host', paneId: '%0', worker: '' }, { session: 'host', paneId: '%1', worker: 'pm' }];
+        assert.equal(await runningByManifest(root, async () => live), true);
+        assert.equal(await runningByManifest(root, async () => [live[0]]), false, 'stopped: host pane only');
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
 });
 
 test('no tmux server → everything dead', () => {

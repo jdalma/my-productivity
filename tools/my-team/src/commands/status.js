@@ -13,7 +13,7 @@ import { join } from 'path';
 
 import { loadManifest } from './_manifest.js';
 import { getStateRootBase, setStateRoot } from '../lib/state-root.js';
-import { tmuxCmdAsync } from '../lib/tmux-utils.js';
+import { listPanes, liveness } from '../lib/team-liveness.js';
 import { readMailboxFile } from '../lib/tmux-comm.js';
 import { TeamPaths } from '../lib/state-paths.js';
 
@@ -46,42 +46,6 @@ async function mailAndState(teamName, workerName) {
 
 function hoursSince(iso) {
     return Math.round((Date.now() - Date.parse(iso)) / 3_600_000);
-}
-
-/**
- * All panes on the tmux server as {session, paneId, worker}. Empty when no
- * tmux server is running (every team is then dead).
- */
-async function listPanes() {
-    let stdout;
-    try {
-        ({ stdout } = await tmuxCmdAsync(['list-panes', '-a', '-F', '#{session_name}\t#{pane_id}\t#{@worker_name}']));
-    } catch {
-        return [];
-    }
-    return stdout.split('\n').filter(Boolean).map((line) => {
-        const [session, paneId, worker] = line.split('\t');
-        return { session, paneId, worker: (worker ?? '').trim() };
-    });
-}
-
-/**
- * Liveness by (session, @worker_name), not by pane id alone: tmux pane ids are
- * server-global and get reused, so a dead team's manifest can point at another
- * team's live pane. A worker is alive only if its team session exists AND that
- * session holds a pane tagged with the worker's name AND it is the manifest's
- * pane (a re-spawned worker with a new pane id means the manifest is stale).
- */
-export function liveness(manifest, panes) {
-    const session = manifest.session_name.split(':')[0];
-    const inSession = panes.filter((p) => p.session === session);
-    return {
-        team_alive: inSession.length > 0,
-        alive: Object.fromEntries(manifest.workers.map((w) => [
-            w.name,
-            inSession.some((p) => p.worker === w.name && p.paneId === w.pane_id),
-        ])),
-    };
 }
 
 /** Team dirs to scan for `--all`: `.bak` copies and `.omc` are not teams. */

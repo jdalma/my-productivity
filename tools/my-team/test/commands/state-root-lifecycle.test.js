@@ -11,7 +11,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdi
 import { tmpdir, homedir } from 'os';
 import { join } from 'path';
 
-import { isSafeToWipe, backupAndRemoveStateRoot, prepareStateRoot } from '../../src/commands/start.js';
+import { isSafeToWipe, backupAndRemoveStateRoot, prepareStateRoot, runStart } from '../../src/commands/start.js';
 import { runShutdown } from '../../src/commands/shutdown.js';
 
 const MAIL = '{"schema_version":2,"messages":[{"message_id":"m1","body":"not delivered yet"}]}';
@@ -197,6 +197,82 @@ test('a new team refuses to start when the previous state cannot be moved aside'
         assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL, 'nothing lost');
     } finally {
         chmodSync(base, 0o700);
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+function splitTeam() {
+    const { base, stateRoot } = makeStateRoot();
+    writeFileSync(join(stateRoot, 'manifest.json'), JSON.stringify({
+        team_name: 'demo-team', state_root: stateRoot, session_name: 'host:0', session_mode: 'split-pane',
+        leader_pane: '%0', workers: [{ name: 'pm', pane_id: '%1' }, { name: 'dev', pane_id: '%2' }],
+    }), 'utf-8');
+    process.env.MY_TEAM_STATE_ROOT_BASE = base;
+    return { base, stateRoot };
+}
+
+function killSpy(panes) {
+    const killed = [];
+    return {
+        killed,
+        deps: {
+            listPanes: async () => panes,
+            killWorkerPanes: async ({ paneIds }) => { killed.push(...paneIds); },
+            killTeamSession: async (name) => { killed.push(name); },
+        },
+    };
+}
+
+test('shutdown of a stopped split-pane team kills nothing: its pane ids may be other panes now (R1)', async () => {
+    const { base } = splitTeam();
+    const { killed, deps } = killSpy([{ session: 'my-team-other-zz', paneId: '%1', worker: 'x1' }, { session: 'host', paneId: '%0', worker: '' }]);
+    const out = quiet();
+    try {
+        await runShutdown({ team: 'demo-team' }, deps);
+        out.restore();
+        assert.deepEqual(killed, []);
+    } finally {
+        out.restore();
+        delete process.env.MY_TEAM_STATE_ROOT_BASE;
+        delete process.env.MY_TEAM_STATE_ROOT;
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+test('shutdown of a running split-pane team kills its live worker panes only', async () => {
+    const { base } = splitTeam();
+    const { killed, deps } = killSpy([{ session: 'host', paneId: '%0', worker: '' }, { session: 'host', paneId: '%1', worker: 'pm' }]);
+    const out = quiet();
+    try {
+        await runShutdown({ team: 'demo-team' }, deps);
+        out.restore();
+        assert.deepEqual(killed, ['%1']);
+    } finally {
+        out.restore();
+        delete process.env.MY_TEAM_STATE_ROOT_BASE;
+        delete process.env.MY_TEAM_STATE_ROOT;
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+test('a new start is refused while the team of the same state_root runs, and its state stays (M3)', async () => {
+    const { base, stateRoot } = splitTeam();
+    const config = join(base, 'demo.json');
+    writeFileSync(config, JSON.stringify({ team_name: 'demo-team', state_root: stateRoot,
+        workers: [{ name: 'pm', agent_type: 'claude', cwd: tmpdir() }] }));
+    const live = [{ session: 'host', paneId: '%0', worker: '' }, { session: 'host', paneId: '%2', worker: 'dev' }];
+    const out = quiet();
+    try {
+        await assert.rejects(runStart({ config }, { listPanes: async () => live }), /already running/);
+        assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL);
+        assert.equal(existsSync(`${stateRoot}.bak`), false);
+        // stopped: only the host pane is left, so a dry run goes through
+        const plan = await runStart({ config, dryRun: true }, { listPanes: async () => [live[0]] });
+        assert.equal(plan.dryRun, true);
+    } finally {
+        out.restore();
+        delete process.env.MY_TEAM_STATE_ROOT_BASE;
+        delete process.env.MY_TEAM_STATE_ROOT;
         rmSync(base, { recursive: true, force: true });
     }
 });

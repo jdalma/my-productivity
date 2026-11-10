@@ -173,7 +173,8 @@ private final class Stubs {
     let status = try stubs.run(resumeTeamCommand(team: "t", config: #"{"team_name":"t"}"#, path: path,
                                                  myTeam: "\(stubs.dir)/my-team", tmux: "\(stubs.dir)/tmux"))
     #expect(status != 0)
-    #expect(stubs.log.contains("my-team start --config \(path)"))  // the folder was made and the config written
+    // the folder was made and the config written; --continue keeps the stopped team's mail and work files (T51)
+    #expect(stubs.log.contains("my-team start --continue --config \(path)"))
     #expect(FileManager.default.fileExists(atPath: path))
     #expect(!stubs.log.contains("tmux attach"))
 }

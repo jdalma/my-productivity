@@ -55,7 +55,8 @@ private func modified(_ path: String) -> Date {
     (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
 }
 
-/// Writes the config, starts the team, and attaches this terminal to the team's tmux session. A team that already
+/// Writes the config, starts the team with `--continue` (its mail, work files and events as the last run left
+/// them), and attaches this terminal to the team's tmux session. A team that already
 /// runs (a second click, or one from before the board restarted) is only attached: two `my-team start` of one team
 /// race and leave a tmux session no manifest names. A session name that cannot be read stops it: `attach -t ""`
 /// would attach to the most recent session, another team's (R48). On a failure the window stays open until Enter.
@@ -63,7 +64,7 @@ func resumeTeamCommand(team: String, config: String, path: String, myTeam: Strin
     let script = """
         alive=$("$3" status --team "$5" --json 2>/dev/null | plutil -extract team_alive raw -o - - 2>/dev/null)
         if [ "$alive" = true ]; then echo '이미 실행 중인 팀입니다. 그 세션에 붙습니다.'
-        else mkdir -p "$(dirname "$2")" && printf '%s\\n' "$1" > "$2" && "$3" start --config "$2" \
+        else mkdir -p "$(dirname "$2")" && printf '%s\\n' "$1" > "$2" && "$3" start --continue --config "$2" \
             || { echo; echo '팀을 띄우지 못했습니다. Enter로 닫기'; read -r _; exit 1; }
         fi
         s=$("$3" status --team "$5" --json 2>/dev/null | plutil -extract session raw -o - - 2>/dev/null)

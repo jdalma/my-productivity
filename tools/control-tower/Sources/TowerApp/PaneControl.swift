@@ -136,6 +136,8 @@ final class PaneStream {
         do { try p.run() } catch { return end("tmux를 실행하지 못함") }
         process = p
         input = stdin.fileHandleForWriting
+        // a write after the client exited fails with EPIPE instead of killing the app with SIGPIPE
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         asked = [.attach]  // attaching answers with an empty %begin/%end block
         ask(.size, "display-message -p -t \(ref.pane) '#{pane_width} #{pane_height} #{cursor_x} #{cursor_y}'")
         ask(.screen, "capture-pane -p -e -t \(ref.pane)")
@@ -164,7 +166,7 @@ final class PaneStream {
     private func ask(_ kind: Ask, _ command: String) {
         guard let input, !ended else { return }
         asked.append(kind)
-        try? input.write(contentsOf: Data((command + "\n").utf8))
+        do { try input.write(contentsOf: Data((command + "\n").utf8)) } catch { end("tmux 연결이 끊김") }
     }
 
     private func read(_ data: Data) {

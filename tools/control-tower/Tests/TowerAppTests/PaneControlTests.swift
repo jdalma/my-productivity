@@ -183,3 +183,18 @@ private final class ScratchServer {
     missing.start()
     #expect(await until { told != nil })
 }
+
+@MainActor @Test func typingRightAfterTheServerDiesEndsTheStreamAndNotTheApp() async throws {
+    let server = ScratchServer()
+    server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10", "cat > /dev/null")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    var gone: String?
+    let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
+    stream.onGone = { gone = $0 }
+    stream.start()
+    try await Task.sleep(for: .milliseconds(300))
+    server.run("kill-server")
+    // before the stream hears that the client exited: each write goes to a pipe nobody reads any more
+    for _ in 0..<50 { stream.send(Array("x".utf8)) }
+    #expect(await until { gone != nil })
+}

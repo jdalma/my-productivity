@@ -279,6 +279,27 @@ private final class ScratchServer {
     stream.stop()
 }
 
+@MainActor @Test func stoppingRightAfterSendingStillDeliversWhatWasSent() async throws {
+    let server = ScratchServer()
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("ct-stop-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: file) }
+    server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10", "stty raw -echo; cat > '\(file.path)'")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    var screens = 0
+    let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
+    stream.onOutput = { _ in screens += 1 }
+    stream.start()
+    #expect(await until { screens > 0 })
+    #expect(await until { server.run("display-message", "-p", "-t", pane, "#{pane_current_command}") == "cat" })
+    for _ in 0..<200 { stream.send(Array("y".utf8)) }
+    // bigger than a pipe holds, so the paste is still being written when stop() comes
+    stream.paste(String(repeating: "x", count: 200 * 1024))
+    stream.stop()
+    let want = String(repeating: "y", count: 200) + String(repeating: "x", count: 200 * 1024)
+    #expect(await until(10) { (try? String(contentsOf: file, encoding: .utf8)) == want })
+    #expect(await until { server.run("list-clients").isEmpty })
+}
+
 // MARK: - SwiftTerm's side
 
 import SwiftTerm

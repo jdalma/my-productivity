@@ -418,14 +418,14 @@ private struct TeamHistoryHeader: View {
                     .scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
             }
             Text("워커 \(Set(team.sessions.compactMap { $0.member?.worker }).count)")
-                .scaledFont(.caption1).foregroundStyle(.secondary)
+                .scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1).fixedSize()
             Spacer(minLength: 8)
             if let size = transcriptSizeLabel(team.size) {
-                Text(size).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
+                Text(size).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                     .help(team.workerSizes.map { "\($0.worker) \(transcriptSizeLabel($0.size) ?? "")" }.joined(separator: "\n"))
             }
             if let newest = team.sessions.first {
-                Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
+                Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
             }
             if launching {
                 // the spinner the running list shows for "working"; the words are in its tooltip
@@ -457,9 +457,9 @@ private struct HistoryRowView: View {
             }
             Spacer(minLength: 8)
             if let size = transcriptSizeLabel(h.size) {
-                Text(size).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
+                Text(size).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1).fixedSize()
             }
-            Text(relativeTime(h.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary)
+            Text(relativeTime(h.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
             if let run {
                 RunButton(label: "세션 실행", action: run)
                     .help("실행: 새 Ghostty 창에서 이 세션을 resume합니다(더블 클릭과 같음)")

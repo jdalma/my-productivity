@@ -60,12 +60,9 @@ bash -c 'shopt -s nullglob; src="$HOME/IdeaProjects/my-claude-plugin/plugins/wor
 
 > 같은 일을 markdown 스킬로 표현할 수 있으면 CLI 도구나 훅으로 올리지 않는다. (출처: oh-my-openagent의 Skill>MCP>Tool>Hook 원칙 — "런타임 비용 0인 정적 지식 최우선". 본 레포의 경량·명시호출 정체성과 정합.)
 
-## 커맨드 작성 규칙
-
-- **위치**: `plugins/workflow/commands/{name}.md`
-- **frontmatter 필수**: `name`, `description`, `disable-model-invocation: true`
-
 ## 스킬 작성 규칙
+
+커맨드(`commands/`)는 쓰지 않는다. 사용자만 호출하는 것도 스킬로 만들고 `disable-model-invocation: true`를 붙인다.
 
 - **위치**: `plugins/workflow/skills/{name}/SKILL.md`
 - **자동 트리거**: `description` 필드의 텍스트로 매칭 (충분히 구체적으로 작성)

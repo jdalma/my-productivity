@@ -20,7 +20,7 @@
 
 ## 작성 규칙
 
-- 커맨드: `plugins/workflow/commands/<name>.md` — frontmatter(`name`, `description`, `disable-model-invocation: true`) 필수
+- 커맨드는 쓰지 않는다. 사용자만 호출할 것도 스킬로 만들고 `disable-model-invocation: true`를 붙인다
 - 스킬: `plugins/workflow/skills/<name>/SKILL.md` — `description` 필드의 트리거 문구가 자동 매칭에 사용됨
 
 ## 로컬 동기화

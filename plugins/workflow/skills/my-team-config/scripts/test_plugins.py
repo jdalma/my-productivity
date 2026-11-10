@@ -137,6 +137,23 @@ with tempfile.TemporaryDirectory() as d:
     assert "\tupdated " in r, r
     assert json.loads((stack / "ownerM-mono" / "plugins" / "p2" / ".claude-plugin" / "plugin.json").read_text())["version"] == "9"
 
+    # 이미 받은 repo에서 clone 이후 upstream에 생긴 하위 경로를 요청하면 pull한 뒤 받는다
+    write(mono / "plugins" / "p3" / "skills" / "s" / "SKILL.md", "s3"); commit(mono, "4")
+    entries.append({"name": "p3", "description": "added later", "source": {"source": "git-subdir", "url": str(mono), "path": "plugins/p3"}})
+    write(m / ".claude-plugin" / "marketplace.json", json.dumps({"name": "m1", "plugins": entries}))
+    cat = plugins.load_catalog()
+    assert plugins.ensure_one("p3@m1", cat) == ok(stack / "ownerM-mono" / "plugins" / "p3", "fetched")
+    # upstream이 받은 경로를 지우면: 갱신은 fail, catalog는 warn을 낸다
+    sh(mono, "git", "rm", "-rqf", "plugins/p3"); commit(mono, "5")
+    p3 = stack / "ownerM-mono" / "plugins" / "p3"
+    r = plugins.ensure_one(str(p3), cat)
+    assert r.startswith(f"fail {p3}\t") and "삭제" in r, r
+    err = subprocess.run([sys.executable, "-I", plugins.__file__, "catalog"], capture_output=True, text=True, env=os.environ).stderr
+    assert err.startswith(f"warn {p3}\t"), err
+    # id로 다시 요청해도 manifest만 남은 껍데기를 주입하지 않는다
+    r = plugins.ensure_one("p3@m1", cat)
+    assert r.startswith("fail p3@m1\t") and "경로 없음" in r, r
+
     # 갱신: git clone은 pull, 마켓플레이스 복사본은 version이 다르면 재복사, 파생본은 no-upstream
     write(remote / "skills" / "y" / "SKILL.md", "y"); commit(remote, "2")
     r = plugins.ensure_one(str(stack / "cloned"), cat)

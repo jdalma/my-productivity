@@ -129,6 +129,7 @@ codex/gemini/cursor 워커는 이 단계를 건너뛴다 (`--plugin-dir`은 clau
    - `[stack]`: `절대경로 / name / version / description / skills`
    - `[marketplace]`: `id / category / kind / installs / always_on / description` (설치 수 내림차순). stack에 같은 이름이 있는 것, 전역으로 이미 켜진 것은 빠져 있다.
    - 출력은 약 330줄(≈15k token)이다. 한 번만 읽고 워커 전원의 선택에 재사용한다.
+   - stderr의 `warn <경로>`는 받아 둔 plugin이 upstream에서 삭제·이동된 것이다. 사용자에게 보여주고 그 plugin은 후보에서 뺀다.
 2. **큐레이션 메모** — `$STACK/CATALOG.md`가 있으면 §1(고르는 경우·붙이지 않는 경우), §2(사용 규칙 조각), §4(함정)를 읽는다. 메모가 있는 plugin은 **메모가 자동 설명보다 우선**한다. 메모의 "붙이지 않는 경우"에 해당하면 설명이 맞아도 넣지 않는다.
 3. **워커별 선택**
    - 워커의 합류 이유·description과 plugin 설명의 대응을 한 줄로 설명할 수 있는 것만 넣는다. 워커당 0~3개, 0개도 정상이다. 한 워커에 많이 붙이지 않는다 (skill 목록이 커질수록 라우팅이 흐려진다).
@@ -153,7 +154,7 @@ claude 워커별 plugin입니다. 'ok' 또는 "2번 pm-execution 빼줘", "2번�
 5. **확보** — `python3 -I <skill-dir>/scripts/plugins.py ensure <stack 경로 | id>...`
    - stack에 없으면 받고(외부 repo는 `$STACK/<owner>-<repo>`에 기본 branch를 clone, `.git` 유지. 그 자리에 다른 repo의 clone이 있으면 받지 않고 fail), 있으면 **최신으로 갱신**한다 (git은 `pull --ff-only`, 마켓플레이스 복사본은 version이 다르면 재복사).
    - 출력 줄마다 `ok <절대경로>\t<상태>`. 상태가 `updated`면 표에 버전 변화를 한 줄 보고한다. `update-failed`는 현재 버전으로 주입하고 이유를 사용자에게 보여준다 (로컬 변경이 있는 stack은 강제로 덮지 않는다).
-   - `fail <id>\t<이유>`가 있으면 이유를 그대로 보여주고 재시도/제외 중 하나를 묻는다.
+   - `fail <id>\t<이유>`가 있으면 이유를 그대로 보여주고 재시도/제외 중 하나를 묻는다. "갱신 뒤 경로가 없음"은 upstream에서 삭제·이동된 것이므로 재시도하지 말고 다른 plugin을 고른다.
    - stack은 여러 팀이 같이 쓴다. 갱신은 다른 팀이 다음에 띄우는 워커에도 적용된다.
 6. `ok` 경로를 그 워커의 plugin 목록으로 기억해 Step 6에서 쓴다. 새로 받은 plugin은 출처 한 줄을 `$STACK/SOURCES.md`에 덧붙인다 (`- <디렉토리>: <kind>, <url 또는 marketplace> (YYYY-MM-DD 배치)`).
 

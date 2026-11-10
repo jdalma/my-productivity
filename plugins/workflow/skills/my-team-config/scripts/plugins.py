@@ -6,6 +6,7 @@
       [marketplace]  stack에 없는 Claude 마켓플레이스 plugin, 설치 수 내림차순.
                      TSV: name@marketplace / category / kind / installs / always_on_tokens / description
                      전역 enabledPlugins에서 켜진 것(모든 워커에 이미 로드됨)과 command 출처는 뺀다.
+      stderr         warn <절대경로>\t<이유>  받아 둔 plugin 경로가 upstream 갱신으로 사라진 경우
   plugins.py ensure <stack 절대경로 | name@marketplace>...
       stack에 없으면 받고, 있으면 최신으로 갱신한 뒤 주입할 절대경로를 출력한다.
         ok <절대경로>\t<fetched | updated <old>→<new> | up-to-date | no-upstream | update-failed: <이유>>
@@ -15,6 +16,7 @@
 받기 규칙: local 출처는 stack/<name>에 복사, url·git-subdir 출처는 stack/<owner>-<repo>에 기본 branch를 clone(.git 유지).
 plugin.json이 없으면 catalog 항목으로 만들어 둔다(stack 탐색·Claude 로드 모두 이 파일을 본다).
 갱신 규칙: git clone은 `git pull --ff-only`(로컬 변경·분기 시 실패로 두고 강제하지 않음).
+이미 받은 repo에서 없는 하위 경로를 요청하면 먼저 pull한다. 갱신 뒤 경로가 사라졌으면 fail.
 마켓플레이스 local 출처 복사본은 마켓플레이스 쪽 version이 다르면 다시 복사. 그 외 복사본은 no-upstream.
 
 환경변수(테스트용): MY_TEAM_STACK_DIR, MY_TEAM_MARKETPLACES_DIR, MY_TEAM_CLAUDE_SETTINGS, MY_TEAM_PLUGIN_STATS
@@ -57,13 +59,21 @@ def provenance_file(top):
     return top / ".git" / "info" / "my-team-plugins"
 
 
+def present(d):
+    """받아 둔 plugin 경로가 아직 있는지. upstream이 경로를 지워도 만들어 둔 manifest(ignored)는 남으므로,
+    그것만 남은 디렉토리는 없는 것으로 본다.
+    ponytail: manifest 하나뿐인 upstream plugin도 없는 것으로 보인다. 그런 plugin이 생기면 git ls-files로 판정할 것."""
+    own = d / ".claude-plugin" / "plugin.json"
+    return d.is_dir() and any(f != own for f in d.rglob("*") if f.is_file())
+
+
 def plugin_dirs(top):
     """top 하나에서 plugin 디렉토리를 찾는다.
     - 이 스크립트가 받은 repo: 받은 경로만 (같은 repo의 승인 안 된 형제 plugin·fixture를 잡지 않는다)
     - 사용자가 넣은 디렉토리: marketplace.json의 로컬 source들, 최상위 plugin.json, 없으면 skills/만 있는 최상위"""
     prov = provenance_file(top)
     if prov.is_file():
-        return [top / rel for rel in dict.fromkeys(prov.read_text(encoding="utf-8").split()) if (top / rel).is_dir()]
+        return [top / rel for rel in dict.fromkeys(prov.read_text(encoding="utf-8").split()) if present(top / rel)]
     found = []
     mk = read_json(top / ".claude-plugin" / "marketplace.json", {})
     for e in mk.get("plugins", []):
@@ -134,6 +144,11 @@ def cmd_catalog():
     print("[stack]")
     for path, _, name, version, desc in stack:
         print(f"{path}\t{name}\t{version}\t{one_line(desc, 160)}\t{skill_names(path)}")
+    for prov in sorted(STACK.glob("*/.git/info/my-team-plugins")):
+        top = prov.parents[2]
+        for rel in dict.fromkeys(prov.read_text(encoding="utf-8").split()):
+            if not present(top / rel):
+                print(f"warn {top / rel}\t받아 둔 plugin 경로가 없음 (upstream에서 삭제·이동됐을 수 있음)", file=sys.stderr)
     in_stack = {name for _, _, name, _, _ in stack}
     enabled = {k for k, v in (read_json(SETTINGS, {}).get("enabledPlugins") or {}).items() if v}
     st = stats()
@@ -269,7 +284,10 @@ def fetch(pid, catalog):
                 branch = ["--branch", s["ref"]] if s.get("ref") else []
                 replace_dir(top, lambda dest: git("clone", "-q", "--depth", "1", *branch, s["url"], str(dest)))
             path = top / s["path"] if kind == "git-subdir" else top
-            if not path.is_dir():
+            if existed and not present(path):
+                # clone 이후 upstream에 생긴 하위 경로일 수 있다
+                git("-C", str(top), "pull", "--ff-only", "-q")
+            if not present(path):
                 return None, f"repo에 경로 없음: {s.get('path')}"
             rel = path.relative_to(top).as_posix() if path != top else "."
             prov = provenance_file(top)
@@ -311,7 +329,10 @@ def ensure_one(target, catalog):
     else:
         return f"fail {target}\tstack 경로도 마켓플레이스 id도 아님"
     path, top, name, version, _ = row
-    return f"ok {path}\t{update(path, top, name, version, catalog)}"
+    state = update(path, top, name, version, catalog)
+    if provenance_file(top).is_file() and not present(path):
+        return f"fail {target}\t갱신 뒤 경로가 없음 (upstream에서 삭제·이동됨): {path}"
+    return f"ok {path}\t{state}"
 
 
 def cmd_ensure(targets):

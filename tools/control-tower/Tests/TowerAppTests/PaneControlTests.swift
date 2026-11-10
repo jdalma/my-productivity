@@ -237,3 +237,43 @@ private final class ScratchServer {
     #expect(outputs == 1)  // the first screen only, nothing taken for live output
     stream.stop()
 }
+
+@MainActor @Test func liveOutputArrivesInTheOrderThePaneWroteIt() async throws {
+    let server = ScratchServer()
+    server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10", "stty -echo; read x; seq 1 20000; cat > /dev/null")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    var screens = 0
+    var live: [UInt8] = []
+    let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
+    stream.onOutput = { if screens == 0 { screens = 1 } else { live += $0 } }
+    stream.start()
+    #expect(await until { screens == 1 })
+    stream.send([0x0d])
+    #expect(await until(10) { String(decoding: live.suffix(16), as: UTF8.self).contains("20000") })
+    let numbers = String(decoding: live, as: UTF8.self).split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+    #expect(numbers == Array(1...20000))
+    stream.stop()
+}
+
+@MainActor @Test func aBigPasteDoesNotHoldTheMainThreadWhileTmuxIsNotReading() async throws {
+    let server = ScratchServer()
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("ct-paste-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: file) }
+    server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10", "stty raw -echo; head -c 1048576 > '\(file.path)'")
+    let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+    var screens = 0
+    let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
+    stream.onOutput = { _ in screens += 1 }
+    stream.start()
+    #expect(await until { screens > 0 })
+    // a control client hands its stdin to the server, which reads it: stopped, the scratch server reads
+    // nothing and the pipe fills up
+    let tmuxd = try #require(pid_t(server.run("display-message", "-p", "#{pid}")))
+    kill(tmuxd, SIGSTOP)
+    DispatchQueue.global().asyncAfter(deadline: .now() + 2) { kill(tmuxd, SIGCONT) }
+    let started = Date()
+    stream.paste(String(repeating: "x", count: 1 << 20))
+    #expect(Date().timeIntervalSince(started) < 0.5)
+    #expect(await until(15) { ((try? FileManager.default.attributesOfItem(atPath: file.path)[.size]) as? Int) == 1 << 20 })
+    stream.stop()
+}

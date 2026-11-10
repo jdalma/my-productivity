@@ -100,6 +100,9 @@ private func octal(_ digits: ArraySlice<UInt8>) -> UInt8? {
 /// - it sends a pane only the bytes the user typed or pasted into the terminal view, nothing of its own;
 /// - a paste goes through a named buffer that `paste-buffer -d` deletes.
 /// Closing its stdin detaches it; the client also exits when the app does, its stdin closing with it.
+///
+/// The main actor never waits on tmux: commands are written on a queue of their own, so a big paste into a pipe
+/// tmux reads slowly does not hold the UI, and the client's output reaches `read` through one stream, in order.
 @MainActor
 final class PaneStream {
     let ref: TmuxRef
@@ -110,6 +113,10 @@ final class PaneStream {
     private let tmux: [String]
     private var process: Process?
     private var input: FileHandle?
+    /// Writes to `input`, one at a time and in the order asked; it also closes it, after what was asked before.
+    private let writer = DispatchQueue(label: "control-tower.pane-stream.write")
+    /// Ends the stream of the client's output; the reading loop then ends the PaneStream.
+    private var output: AsyncStream<Data>.Continuation?
     private var parser: ControlModeParser
     /// The commands sent and not yet answered, oldest first: tmux answers in order.
     private var asked: [Ask] = []
@@ -133,14 +140,18 @@ final class PaneStream {
         p.standardInput = stdin
         p.standardOutput = stdout
         p.standardError = Pipe()
-        stdout.fileHandleForReading.readabilityHandler = { [weak self] h in
+        let (chunks, output) = AsyncStream.makeStream(of: Data.self)
+        stdout.fileHandleForReading.readabilityHandler = { h in
             let data = h.availableData
-            Task { @MainActor in self?.read(data) }
+            if data.isEmpty { output.finish() } else { output.yield(data) }
         }
-        p.terminationHandler = { [weak self] _ in
-            Task { @MainActor in self?.end("tmux 연결이 끊김") }
-        }
+        p.terminationHandler = { _ in output.finish() }
         do { try p.run() } catch { return end("tmux를 실행하지 못함") }
+        self.output = output
+        Task { [weak self] in
+            for await data in chunks { self?.read(data) }
+            self?.end("tmux 연결이 끊김")
+        }
         process = p
         input = stdin.fileHandleForWriting
         // a write after the client exited fails with EPIPE instead of killing the app with SIGPIPE
@@ -165,20 +176,23 @@ final class PaneStream {
 
     func stop() {
         ended = true
-        try? input?.close()
+        if let input { writer.async { try? input.close() } }
         input = nil
         process?.standardOutput.flatMap { ($0 as? Pipe)?.fileHandleForReading.readabilityHandler = nil }
+        output?.finish()
     }
 
     private func ask(_ kind: Ask, _ command: String) {
         guard let input, !ended else { return }
         asked.append(kind)
-        do { try input.write(contentsOf: Data((command + "\n").utf8)) } catch { end("tmux 연결이 끊김") }
+        let line = Data((command + "\n").utf8), output = output
+        writer.async {
+            do { try input.write(contentsOf: line) } catch { output?.finish() }
+        }
     }
 
     private func read(_ data: Data) {
         guard !ended else { return }
-        if data.isEmpty { return end("tmux 연결이 끊김") }
         for event in parser.feed(data) {
             switch event {
             case .output(let bytes): if showing { onOutput(bytes) }

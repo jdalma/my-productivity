@@ -167,6 +167,14 @@ func workspaceSharers(_ row: LiveRow, in board: Board) -> [String] {
         .map(\.workerName)
 }
 
+/// The detail's "diff 범위": the folder of the repo the diff is limited to, and the teammates whose diff is the
+/// same because they work in the same folder (a worktree per worker splits it).
+func diffScopeLabel(scope: String?, sharers: [String]) -> String {
+    [scope.flatMap { $0.isEmpty ? nil : "저장소의 \($0)/ 아래만" },
+     sharers.isEmpty ? nil : "팀 공유 폴더 (\(sharers.joined(separator: ", "))와 함께)"]
+        .compactMap { $0 }.joined(separator: " · ")
+}
+
 /// The teams with a live worker: a team named like one of these cannot be started again.
 func runningTeams(_ board: Board) -> Set<String> {
     Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))

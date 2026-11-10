@@ -71,6 +71,8 @@ public enum BaseChoice: Hashable, Sendable {
 
 public struct WorkspaceDiff: Hashable, Sendable {
     public var toplevel: String
+    /// The folder the diff is limited to, relative to `toplevel` without a trailing slash; "" for the whole repo.
+    public var scope: String = ""
     public var base: BaseChoice
     /// nil unless the base resolved.
     public var committed: DiffSection?
@@ -90,17 +92,21 @@ public func repoToplevel(at path: String) -> String? {
 
 /// `lineLimit` caps each file on its own: a large file never empties the files after it.
 public func workspaceDiff(at path: String, pinnedBase: String?, lineLimit: Int = 2000) -> WorkspaceDiffResult {
-    guard let top = repoToplevel(at: path) else { return .notARepo }
+    guard let lines = out(.revParse, ["--show-toplevel", "--show-prefix"], in: path)?.split(separator: "\n", omittingEmptySubsequences: false),
+          let top = lines.first.map(String.init)?.nonEmpty else { return .notARepo }
+    let scope = String(lines.dropFirst().first ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     let base = resolveBase(top: top, pinned: pinnedBase)
+    // literal: a folder named with `*`, `:(`, spaces or Hangul is the folder itself
+    let spec = scope.isEmpty ? [] : [":(literal)\(scope)/"]
 
     var committed: DiffSection?
     if case .resolved(let ref, _) = base {
-        committed = DiffSection(files: parseMemo.files(.committed, diffText(.diff, ["\(ref)...HEAD"], top), lineLimit), untracked: [])
+        committed = DiffSection(files: parseMemo.files(.committed, diffText(.diff, ["\(ref)...HEAD"], spec, top), lineLimit), untracked: [])
     }
-    let files = parseMemo.files(.uncommitted, diffText(.diffIndex, ["-p", "HEAD"], top), lineLimit)
-    let untracked = (out(.lsFiles, ["--others", "--exclude-standard", "-z"], in: top) ?? "")
+    let files = parseMemo.files(.uncommitted, diffText(.diffIndex, ["-p", "HEAD"], spec, top), lineLimit)
+    let untracked = (out(.lsFiles, ["--others", "--exclude-standard", "-z", "--"] + spec, in: top) ?? "")
         .split(separator: "\0").map(String.init)
-    return .diff(WorkspaceDiff(toplevel: top, base: base, committed: committed,
+    return .diff(WorkspaceDiff(toplevel: top, scope: scope, base: base, committed: committed,
                                uncommitted: DiffSection(files: files, untracked: untracked,
                                                         newFiles: newFileMemo.files(top: top, paths: untracked, limit: lineLimit))))
 }
@@ -122,8 +128,9 @@ private extension String {
 
 // MARK: - Base resolution
 
-private func diffText(_ cmd: GitRead, _ revs: [String], _ top: String) -> String {
-    out(cmd, ["--no-color", "--no-ext-diff", "--no-textconv", "-M", "--src-prefix=a/", "--dst-prefix=b/"] + revs + ["--"], in: top) ?? ""
+/// `spec` limits the paths; a rename across its edge is a delete inside it or an add inside it.
+private func diffText(_ cmd: GitRead, _ revs: [String], _ spec: [String], _ top: String) -> String {
+    out(cmd, ["--no-color", "--no-ext-diff", "--no-textconv", "-M", "--src-prefix=a/", "--dst-prefix=b/"] + revs + ["--"] + spec, in: top) ?? ""
 }
 
 private func hasRef(_ full: String, _ top: String) -> Bool {

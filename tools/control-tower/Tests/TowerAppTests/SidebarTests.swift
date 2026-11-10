@@ -652,3 +652,11 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     #expect(workspaceSharers(row("core"), in: board) == ["pm"])  // a stopped worker or a loose session does not count
     #expect(workspaceSharers(row("app"), in: board).isEmpty)  // its own worktree: the diff is its own
 }
+
+@Test func theDiffScopeNamesTheFolderItIsLimitedTo() {
+    #expect(diffScopeLabel(scope: nil, sharers: []) == "")
+    #expect(diffScopeLabel(scope: "", sharers: []) == "")  // the whole repo, as before
+    #expect(diffScopeLabel(scope: "backend", sharers: []) == "저장소의 backend/ 아래만")
+    #expect(diffScopeLabel(scope: "", sharers: ["pm"]) == "팀 공유 폴더 (pm와 함께)")
+    #expect(diffScopeLabel(scope: "backend", sharers: ["pm", "qa"]) == "저장소의 backend/ 아래만 · 팀 공유 폴더 (pm, qa와 함께)")
+}

@@ -362,3 +362,79 @@ private func mtime(_ path: String) throws -> Date {
     try write(dir, "n.txt", "one\ntwo\n")
     #expect(try result(dir).uncommitted.newFiles.first?.lines.last?.text == "two")
 }
+
+// MARK: - Scope (T49)
+
+/// A repo on `feature` with a committed, an uncommitted and an untracked change in `a/`, in `odd`, and at the root.
+private func scopedFixture(odd: String = "b") throws -> String {
+    let dir = try fixture()
+    for d in ["a", odd] {
+        try FileManager.default.createDirectory(atPath: "\(dir)/\(d)", withIntermediateDirectories: true)
+        try write(dir, "\(d)/kept.txt", "1\n")
+        try write(dir, "\(d)/edited.txt", "1\n")
+    }
+    try sh(dir, ["add", "-A"])
+    try sh(dir, ["commit", "-q", "-m", "dirs"])
+    try sh(dir, ["switch", "-q", "-c", "feature"])
+    for d in ["a", odd] { try commit(dir, "\(d)/kept.txt", "1\n2\n") }
+    try commit(dir, "a.txt", "1\n2\nTHREE\n4\n5\n")
+    for d in ["a", odd] {
+        try write(dir, "\(d)/edited.txt", "1\n2\n")
+        try write(dir, "\(d)/new.txt", "n\n")
+    }
+    try write(dir, "b.txt", "x\ny\nz\n")
+    try write(dir, "n.txt", "untracked\n")
+    return dir
+}
+
+private func paths(_ d: WorkspaceDiff) -> [String] {
+    ((d.committed?.files ?? []) + d.uncommitted.files + d.uncommitted.newFiles).map(\.path) + d.uncommitted.untracked
+}
+
+@Test func aSubfolderSeesOnlyItsOwnChangesWithRepoPaths() throws {
+    let dir = try scopedFixture()
+    let d = try result("\(dir)/a")
+    #expect(d.toplevel == dir && d.scope == "a")
+    #expect(d.committed?.files.map(\.path) == ["a/kept.txt"])
+    #expect(d.uncommitted.files.map(\.path) == ["a/edited.txt"])
+    #expect(d.uncommitted.untracked == ["a/new.txt"])
+    #expect(d.uncommitted.newFiles.map(\.path) == ["a/new.txt"])
+    #expect(try result("\(dir)/a/").scope == "a")
+}
+
+@Test func theRepoRootSeesEverything() throws {
+    let dir = try scopedFixture()
+    let d = try result(dir)
+    #expect(d.scope == "")
+    #expect(d.committed?.files.map(\.path) == ["a.txt", "a/kept.txt", "b/kept.txt"])
+    #expect(d.uncommitted.files.map(\.path) == ["a/edited.txt", "b.txt", "b/edited.txt"])
+    #expect(d.uncommitted.untracked.sorted() == ["a/new.txt", "b/new.txt", "n.txt"])
+}
+
+@Test func aFolderWithSpacesHangulAndPathspecMagicIsTakenLiterally() throws {
+    let odd = ":(glob)b *한글"
+    let dir = try scopedFixture(odd: odd)
+    let d = try result("\(dir)/\(odd)")
+    #expect(d.scope == odd)
+    #expect(paths(d).sorted() == ["\(odd)/edited.txt", "\(odd)/kept.txt", "\(odd)/new.txt", "\(odd)/new.txt"])
+}
+
+/// A rename across the scope's edge is a delete inside the old folder and an add inside the new one.
+@Test func aRenameOutOfTheFolderIsADeleteThereAndAnAddInTheOther() throws {
+    let dir = try scopedFixture()
+    try sh(dir, ["mv", "a/kept.txt", "b/moved.txt"])
+    let a = try #require(try result("\(dir)/a").uncommitted.files.first { $0.path == "a/kept.txt" })
+    #expect(a.removed == 2 && a.added == 0)
+    let b = try #require(try result("\(dir)/b").uncommitted.files.first { $0.path == "b/moved.txt" })
+    #expect(b.added == 2 && b.removed == 0)
+    let root = try result(dir).uncommitted.files.map(\.path)
+    #expect(root.contains("b/moved.txt") && !root.contains("a/kept.txt"))  // the root still sees one rename
+}
+
+@Test func twoFoldersOfOneRepoNeverMix() throws {
+    let dir = try scopedFixture()
+    for _ in 0..<2 {
+        #expect(paths(try result("\(dir)/a")) == ["a/kept.txt", "a/edited.txt", "a/new.txt", "a/new.txt"])
+        #expect(paths(try result("\(dir)/b")) == ["b/kept.txt", "b/edited.txt", "b/new.txt", "b/new.txt"])
+    }
+}

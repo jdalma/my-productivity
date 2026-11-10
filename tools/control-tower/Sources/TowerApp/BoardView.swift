@@ -545,8 +545,7 @@ private struct DetailView: View {
                     "\(t.session) · pane \(t.pane)" + (team.map { $0.attached ? " · attached" : " · detached" } ?? "")
                 } ?? ""),
                 ("메일", row.worker.map { mailSummary([$0], at: board.at) } ?? ""),
-                // a shared folder's diff is not this worker's alone; a worktree per worker splits it
-                ("diff 범위", sharers.isEmpty ? "" : "팀 공유 폴더 (\(sharers.joined(separator: ", "))와 함께)"),
+                ("diff 범위", diffScopeLabel(scope: changes.diff(for: s.cwd)?.scope, sharers: sharers)),
             ],
             workspace: s.cwd,
             conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)])

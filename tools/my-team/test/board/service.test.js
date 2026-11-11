@@ -1,5 +1,5 @@
 /**
- * The board's write commands (T63c) on the memory store: every row of the transition tables
+ * The board's write commands (T63c) on every store (memory and, where node:sqlite runs, SQLite): every row of the transition tables
  * (rfc/board-design.md §3.1, §3.2), the id rules (§2.8), the lock table (§4.1) and the notices (§6.2).
  */
 
@@ -8,7 +8,32 @@ import assert from 'node:assert/strict';
 
 import { createBoard } from '../../src/board/core/service.js';
 import { nextLetters } from '../../src/board/core/rules.js';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
 import { createMemoryStore } from '../../src/board/store/memory/index.js';
+import { createSqliteStore } from '../../src/board/store/sqlite/index.js';
+
+const hasSqlite = await import('node:sqlite').then(() => true, () => false);
+const STORES = {
+    memory: async () => createMemoryStore(),
+    sqlite: async (t) => {
+        const dir = mkdtempSync(join(tmpdir(), 'mt-board-svc-'));
+        const store = createSqliteStore(join(dir, 'board.db'));
+        await store.open();
+        t.after(async () => { await store.close(); rmSync(dir, { recursive: true, force: true }); });
+        return store;
+    },
+};
+
+/** Registers the test once per store; fn gets setup(options) bound to that store. */
+function both(name, fn) {
+    for (const [kind, make] of Object.entries(STORES)) {
+        const skip = kind === 'sqlite' && !hasSqlite ? 'node:sqlite needs Node >= 22.13' : false;
+        test(`[${kind}] ${name}`, { skip }, (t) => fn((options) => setup(options, () => make(t))));
+    }
+}
 
 const ROSTER = [
     { name: 'pm', role: 'orchestrator' }, { name: 'core', role: 'worker' },
@@ -17,8 +42,8 @@ const ROSTER = [
 const H = (c) => c.repeat(40);
 const BASE = H('0');
 
-function setup({ roster = ROSTER } = {}) {
-    const store = createMemoryStore();
+async function setup({ roster = ROSTER } = {}, makeStore) {
+    const store = await makeStore();
     let tick = 0;
     const now = () => new Date(Date.UTC(2026, 10, 11, 0, 0, tick++)).toISOString();
     const sent = [], events = [];
@@ -80,8 +105,8 @@ function recording(store) {
 
 // §3.1 — tasks
 
-test('add: a task without an assignee is new, with one ready and the assignee is told; only pm adds', async () => {
-    const b = setup();
+both('add: a task without an assignee is new, with one ready and the assignee is told; only pm adds', async (setup) => {
+    const b = await setup();
     assert.equal((await b.as('pm').add({ title: 'a' })).task.state, 'new');
     const r = await b.as('pm').add({ title: 'b', assignee: 'core' });
     assert.deepEqual([r.task.id, r.task.state], ['T2', 'ready']);
@@ -91,9 +116,9 @@ test('add: a task without an assignee is new, with one ready and the assignee is
     await rejects(b.as('pm').add({ title: 'c', assignee: 'ghost' }), 'invalid');
 });
 
-test('assign: from new, ready, doing, changes and held the task goes to ready; both assignees are told', async () => {
+both('assign: from new, ready, doing, changes and held the task goes to ready; both assignees are told', async (setup) => {
     for (const from of ['new', 'ready', 'doing', 'changes', 'held']) {
-        const b = setup();
+        const b = await setup();
         if (from === 'new') await b.as('pm').add({ id: 'T1', title: 't', reviewer: 'rv' });
         else await taskIn(b, from);
         const r = await b.as('pm').assign({ id: 'T1', assignee: 'app' });
@@ -102,8 +127,8 @@ test('assign: from new, ready, doing, changes and held the task goes to ready; b
     }
 });
 
-test('assign: a task in review takes no new assignee, a finished one nothing', async () => {
-    const b = setup();
+both('assign: a task in review takes no new assignee, a finished one nothing', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'review');
     await rejects(b.as('pm').assign({ id: 'T1', assignee: 'app' }), 'invalid-transition');
     await b.as('rv').verdict(judge('T1#1', H('1'), 'approve'));
@@ -111,8 +136,8 @@ test('assign: a task in review takes no new assignee, a finished one nothing', a
     await rejects(b.as('core').assign({ id: 'T1', reviewer: 'app' }), 'forbidden');
 });
 
-test('assign: in review, a new reviewer keeps the state; both reviewers are told', async () => {
-    const b = setup();
+both('assign: in review, a new reviewer keeps the state; both reviewers are told', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'review');
     const r = await b.as('pm').assign({ id: 'T1', reviewer: 'app' });
     assert.deepEqual([r.task.state, r.task.reviewer], ['review', 'app']);
@@ -120,8 +145,8 @@ test('assign: in review, a new reviewer keeps the state; both reviewers are told
     await b.as('app').verdict(judge('T1#1', H('1'), 'approve'));
 });
 
-test('assign: a held task without an assignee goes back to review, and its judge is told', async () => {
-    const b = setup();
+both('assign: a held task without an assignee goes back to review, and its judge is told', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'held');
     const r = await b.as('pm').assign({ id: 'T1' });
     assert.equal(r.task.state, 'review');
@@ -129,19 +154,19 @@ test('assign: a held task without an assignee goes back to review, and its judge
     await b.as('rv').verdict(judge('T1#1', H('1'), 'approve'));
 });
 
-test('take: ready and changes go to doing, by the assignee only', async () => {
-    const b = setup();
+both('take: ready and changes go to doing, by the assignee only', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'ready');
     await rejects(b.as('app').take({ id: 'T1' }), 'forbidden');
     assert.equal((await b.as('core').take({ id: 'T1' })).task.state, 'doing');
     await rejects(b.as('core').take({ id: 'T1' }), 'invalid-transition');
-    const c = setup();
+    const c = await setup();
     await taskIn(c, 'changes');
     assert.equal((await c.as('core').take({ id: 'T1' })).task.state, 'doing', 'no pm step after changes');
 });
 
-test('land: doing goes to review with the review request row; reviewer and pm are told', async () => {
-    const b = setup();
+both('land: doing goes to review with the review request row; reviewer and pm are told', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'doing');
     b.ranges.set(`${BASE}..${H('2')}`, { ancestor: true, commits: [H('1'), H('2')] });
     const r = await b.as('core').land(land('T1', H('2'), { deployed: H('9') }));
@@ -151,8 +176,8 @@ test('land: doing goes to review with the review request row; reviewer and pm ar
     await rejects(b.as('app').land(land('T1', H('2'))), 'forbidden');
 });
 
-test('land again in review: the open landing is superseded, fixes move to the new one, the judge is told again', async () => {
-    const b = setup();
+both('land again in review: the open landing is superseded, fixes move to the new one, the judge is told again', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await b.as('core').take({ id: 'T1' });
     await b.as('core').land(land('T1', H('2'), { closes: ['R1 M1'] }));
@@ -164,9 +189,9 @@ test('land again in review: the open landing is superseded, fixes move to the ne
     await rejects(b.as('rv').verdict(judge('T1#2', H('2'), 'approve')), 'stale-landing');
 });
 
-test('verdict: approve → done, changes → changes, hold → held; pm and the assignee are told', async () => {
+both('verdict: approve → done, changes → changes, hold → held; pm and the assignee are told', async (setup) => {
     for (const [verdict, state] of [['approve', 'done'], ['changes', 'changes'], ['hold', 'held']]) {
-        const b = setup();
+        const b = await setup();
         await taskIn(b, 'review');
         const r = await b.as('rv').verdict(judge('T1#1', H('1'), verdict));
         assert.equal(r.task.state, state, verdict);
@@ -174,21 +199,21 @@ test('verdict: approve → done, changes → changes, hold → held; pm and the 
     }
 });
 
-test('verdict: only the task\'s judge, never the assignee, on the commit of the open landing', async () => {
-    const b = setup();
+both('verdict: only the task\'s judge, never the assignee, on the commit of the open landing', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'review');
     await rejects(b.as('app').verdict(judge('T1#1', H('1'), 'approve')), 'forbidden');
     await rejects(b.as('pm').verdict(judge('T1#1', H('1'), 'approve')), 'forbidden', 'a reviewer is set');
     await rejects(b.as('rv').verdict(judge('T1#1', H('2'), 'approve')), 'stale-landing');
     await rejects(b.as('rv').verdict(judge('T1#1', H('1'), 'maybe')), 'invalid');
-    const c = setup();
+    const c = await setup();
     await taskIn(c, 'review', { reviewer: null });
     await c.as('pm').verdict(judge('T1#1', H('1'), 'approve'));
 });
 
-test('cancel: every unfinished state can be cancelled by pm; the assignee (and in review the judge) is told', async () => {
+both('cancel: every unfinished state can be cancelled by pm; the assignee (and in review the judge) is told', async (setup) => {
     for (const from of ['ready', 'doing', 'review', 'changes', 'held']) {
-        const b = setup();
+        const b = await setup();
         await taskIn(b, from);
         await rejects(b.as('core').cancel({ id: 'T1', findings: 'backlog' }), 'forbidden');
         const r = await b.as('pm').cancel({ id: 'T1', findings: 'backlog' });
@@ -198,15 +223,15 @@ test('cancel: every unfinished state can be cancelled by pm; the assignee (and i
     }
 });
 
-test('cancel: the task\'s own unsettled findings must be settled with it; its unapproved fix of another\'s finding reopens', async () => {
-    const b = setup();
+both('cancel: the task\'s own unsettled findings must be settled with it; its unapproved fix of another\'s finding reopens', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await rejects(b.as('pm').cancel({ id: 'T1' }), 'invalid');
     const r = await b.as('pm').cancel({ id: 'T1', findings: 'rejected' });
     assert.deepEqual(r.findings, ['R1 M1']);
     assert.equal((await b.store.get('finding', 'R1 M1')).state, 'rejected');
 
-    const c = setup();
+    const c = await setup();
     await taskIn(c, 'changes');
     await c.as('pm').add({ id: 'T1a', parent: 'T1', title: 'fix', assignee: 'app', reviewer: 'rv', base: BASE });
     await c.as('app').take({ id: 'T1a' });
@@ -216,8 +241,8 @@ test('cancel: the task\'s own unsettled findings must be settled with it; its un
     assert.equal((await c.as('rv').verdict(judge('T1a#1', H('4'), 'approve')).catch((e) => e)).code, 'invalid-transition', 'a cancelled task\'s landing is not judged');
 });
 
-test('a worker is never the judge of its own task', async () => {
-    const b = setup();
+both('a worker is never the judge of its own task', async (setup) => {
+    const b = await setup();
     await rejects(b.as('pm').add({ title: 't', assignee: 'core', reviewer: 'core' }), 'invalid');
     await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
     await rejects(b.as('pm').assign({ id: 'T1', reviewer: 'core' }), 'invalid');
@@ -229,8 +254,8 @@ test('a worker is never the judge of its own task', async () => {
     await b.as('pm').land(land('T2', H('1')));
 });
 
-test('a team that declares no roles: every worker is pm, so landing needs a reviewer', async () => {
-    const b = setup({ roster: [{ name: 'a' }, { name: 'b' }] });
+both('a team that declares no roles: every worker is pm, so landing needs a reviewer', async (setup) => {
+    const b = await setup({ roster: [{ name: 'a' }, { name: 'b' }] });
     await b.as('b').add({ id: 'T1', title: 't', assignee: 'a', base: BASE });
     await b.as('a').take({ id: 'T1' });
     await rejects(b.as('a').land(land('T1', H('1'))), 'invalid');
@@ -239,20 +264,61 @@ test('a team that declares no roles: every worker is pm, so landing needs a revi
     await b.as('b').verdict(judge('T1#1', H('1'), 'approve'));
 });
 
+both('R68 M1 (a): clearing the reviewer of pm\'s own task in review is refused, so pm cannot approve it', async (setup) => {
+    const b = await setup();
+    await b.as('pm').add({ id: 'T1', title: 'pm work', assignee: 'pm', reviewer: 'rv', base: BASE });
+    await b.as('pm').take({ id: 'T1' });
+    await b.as('pm').land(land('T1', H('1')));
+    await rejects(b.as('pm').assign({ id: 'T1', reviewer: '' }), 'invalid');
+    await rejects(b.as('pm').assign({ id: 'T1', reviewer: null }), 'invalid');
+    await rejects(b.as('pm').verdict(judge('T1#1', H('1'), 'approve')), 'forbidden');
+    assert.equal((await b.store.get('task', 'T1')).state, 'review');
+    await b.as('pm').assign({ id: 'T1', reviewer: 'app' });
+    await b.as('app').verdict(judge('T1#1', H('1'), 'approve'));
+});
+
+both('R68 M1 (b): in a team without roles, an assignee who clears the reviewer still cannot judge its own task', async (setup) => {
+    const b = await setup({ roster: [{ name: 'aa' }, { name: 'bb' }] });
+    await b.as('bb').add({ id: 'T1', title: 't', assignee: 'aa', reviewer: 'bb', base: BASE });
+    await b.as('aa').take({ id: 'T1' });
+    await b.as('aa').land(land('T1', H('1')));
+    await b.as('aa').assign({ id: 'T1', reviewer: null });
+    await rejects(b.as('aa').verdict(judge('T1#1', H('1'), 'approve')), 'forbidden');
+    assert.equal((await b.as('bb').verdict(judge('T1#1', H('1'), 'approve'))).task.state, 'done');
+});
+
+both('R68 M1: a reviewer change that leaves only the assignee to judge is refused, in any state', async (setup) => {
+    const b = await setup({ roster: [{ name: 'pm', role: 'orchestrator' }, { name: 'rv', role: 'worker' }] });
+    await b.as('pm').add({ id: 'T1', title: 't', assignee: 'pm', reviewer: 'rv', base: BASE });
+    await rejects(b.as('pm').assign({ id: 'T1', reviewer: null }), 'invalid');
+});
+
+both('R68 L2: a reviewer can be set from new, ready, doing and changes; the state stays and nobody is told', async (setup) => {
+    for (const from of ['new', 'ready', 'doing', 'changes']) {
+        const b = await setup();
+        if (from === 'new') await b.as('pm').add({ id: 'T1', title: 't' });
+        else await taskIn(b, from);
+        const sent = b.sent.length;
+        const r = await b.as('pm').assign({ id: 'T1', reviewer: 'app' });
+        assert.deepEqual([r.task.state, r.task.reviewer], [from, 'app'], from);
+        assert.equal(b.sent.length, sent, from);
+    }
+});
+
 // §2.8 — ids
 
-test('ids: roots number past every T<n> in use, derived tasks take the next letters, a given id is checked', async () => {
-    const b = setup();
+both('ids: roots number past every T<n> in use, derived tasks take the next letters, a given id is checked', async (setup) => {
+    const b = await setup();
     await b.as('pm').add({ id: 'T59', title: 'r' });
     assert.equal((await b.as('pm').add({ parent: 'T59', title: 'a' })).task.id, 'T59a');
     assert.equal((await b.as('pm').add({ parent: 'T59', title: 'b' })).task.id, 'T59b');
     assert.equal((await b.as('pm').add({ title: 'next' })).task.id, 'T60');
     await rejects(b.as('pm').add({ id: '9x', title: 'x' }), 'invalid');
-    await rejects(b.as('pm').add({ id: 'T59', title: 'again' }), 'conflict');
+    await rejects(b.as('pm').add({ id: 'T59', title: 'again' }), 'invalid', 'R68 L1: an id in use is a mistake, not a race');
 });
 
-test('derived tasks: from a done parent yes, from a cancelled or derived parent no', async () => {
-    const b = setup();
+both('derived tasks: from a done parent yes, from a cancelled or derived parent no', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'done');
     assert.equal((await b.as('pm').add({ parent: 'T1', title: 'after' })).task.id, 'T1a');
     await rejects(b.as('pm').add({ parent: 'T1a', title: 'grandchild' }), 'invalid');
@@ -262,8 +328,8 @@ test('derived tasks: from a done parent yes, from a cancelled or derived parent 
     await rejects(b.as('pm').add({ parent: 'T9', title: 'y' }), 'not-found');
 });
 
-test('ids: a family\'s first verdict is the next R<n>, later ones R<n>a, R<n>b; findings are "<verdict> <code>"', async () => {
-    const b = setup();
+both('ids: a family\'s first verdict is the next R<n>, later ones R<n>a, R<n>b; findings are "<verdict> <code>"', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await b.as('core').take({ id: 'T1' });
     await b.as('core').land(land('T1', H('2'), { closes: ['R1 M1'] }));
@@ -284,8 +350,8 @@ test('ids: letters run a … z, aa, ab … az, ba', () => {
 
 // land's inputs
 
-test('land: base defaults to the family\'s last approved commit, then the task\'s base; commits may leave out other work', async () => {
-    const b = setup();
+both('land: base defaults to the family\'s last approved commit, then the task\'s base; commits may leave out other work', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'done');
     await b.as('pm').add({ id: 'T1a', parent: 'T1', title: 'next', assignee: 'core', reviewer: 'rv' });
     await b.as('core').take({ id: 'T1a' });
@@ -295,7 +361,7 @@ test('land: base defaults to the family\'s last approved commit, then the task\'
     const r = await b.as('core').land(land('T1a', H('5'), { commits: [H('5')] }));
     assert.deepEqual([r.landing.base_commit, r.landing.commits, r.outside_commits], [H('1'), [H('5')], [H('4')]]);
 
-    const c = setup();
+    const c = await setup();
     await c.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
     await c.as('core').take({ id: 'T1' });
     await rejects(c.as('core').land(land('T1', H('1'))), 'invalid', 'no base anywhere');
@@ -308,8 +374,8 @@ test('land: base defaults to the family\'s last approved commit, then the task\'
 
 // §3.2 — findings
 
-test('closes: only open findings of the same family', async () => {
-    const b = setup();
+both('closes: only open findings of the same family', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await taskIn(b, 'changes', { id: 'T2' });
     await b.as('core').take({ id: 'T1' });
@@ -321,8 +387,8 @@ test('closes: only open findings of the same family', async () => {
     await rejects(b.as('core').land(land('T1', H('4'), { closes: ['R1 M1'] })), 'invalid', 'already fixed');
 });
 
-test('findings: pm settles open or fixed ones and reopens settled ones; the reviewer reopens fixed ones; nothing else', async () => {
-    const b = setup();
+both('findings: pm settles open or fixed ones and reopens settled ones; the reviewer reopens fixed ones; nothing else', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await rejects(b.as('rv').finding({ id: 'R1 M1', state: 'backlog' }), 'forbidden');
     await rejects(b.as('core').finding({ id: 'R1 M1', state: 'fixed' }), 'invalid-transition');
@@ -337,11 +403,13 @@ test('findings: pm settles open or fixed ones and reopens settled ones; the revi
     const r = await b.as('rv').finding({ id: 'R1 M1', state: 'open' });
     assert.deepEqual([r.finding.state, r.finding.fixed_in], ['open', null]);
     assert.equal((await b.as('pm').finding({ id: 'R1 M1', state: 'accepted-limit' })).finding.state, 'accepted-limit');
+    await b.as('pm').cancel({ id: 'T1', findings: 'backlog' });
+    await rejects(b.as('pm').finding({ id: 'R1 M1', state: 'open' }), 'invalid', 'R68 L3: no unfinished task in the family to fix it in');
     await rejects(b.as('pm').finding({ id: 'R9 M1', state: 'open' }), 'not-found');
 });
 
-test('findings: a verdict reopens fixed ones; a family with no unfinished task cannot reopen', async () => {
-    const b = setup();
+both('findings: a verdict reopens fixed ones; a family with no unfinished task cannot reopen', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await b.as('core').take({ id: 'T1' });
     await b.as('core').land(land('T1', H('2'), { closes: ['R1 M1'] }));
@@ -350,7 +418,7 @@ test('findings: a verdict reopens fixed ones; a family with no unfinished task c
     assert.deepEqual(r.reopened, ['R1 M1']);
     assert.equal((await b.store.get('finding', 'R1 M1')).state, 'open');
 
-    const c = setup();
+    const c = await setup();
     await taskIn(c, 'changes');
     await c.as('core').take({ id: 'T1' });
     await c.as('core').land(land('T1', H('2'), { closes: ['R1 M1'] }));
@@ -358,8 +426,8 @@ test('findings: a verdict reopens fixed ones; a family with no unfinished task c
     await rejects(c.as('rv').finding({ id: 'R1 M1', state: 'open' }), 'invalid');
 });
 
-test('approve: refused while the family has an open must finding, from any of its tasks', async () => {
-    const b = setup();
+both('approve: refused while the family has an open must finding, from any of its tasks', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'changes');
     await b.as('pm').add({ id: 'T1a', parent: 'T1', title: 'side', assignee: 'app', reviewer: 'rv', base: BASE });
     await b.as('app').take({ id: 'T1a' });
@@ -372,8 +440,8 @@ test('approve: refused while the family has an open must finding, from any of it
 
 // §4.1 — the task row is the lock
 
-test('each command puts version conditions on exactly the rows of §4.1, and every task write raises the task version', async () => {
-    const b = setup();
+both('each command puts version conditions on exactly the rows of §4.1, and every task write raises the task version', async (setup) => {
+    const b = await setup();
     const rec = recording(b.store);
     const as = (who) => b.as(who, { store: rec });
     const last = () => rec.locked.at(-1);
@@ -407,8 +475,8 @@ test('each command puts version conditions on exactly the rows of §4.1, and eve
     assert.ok((await b.store.get('task', 'T1')).version > 5);
 });
 
-test('a resubmit between the reviewer\'s read and write: the approve does not pass on the superseded landing', async () => {
-    const b = setup();
+both('a resubmit between the reviewer\'s read and write: the approve does not pass on the superseded landing', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'review');
     const racing = interleave(b.store, () => b.as('core').land(land('T1', H('2'))));
     await rejects(b.as('rv', { store: racing }).verdict(judge('T1#1', H('1'), 'approve')), 'stale-landing');
@@ -417,8 +485,8 @@ test('a resubmit between the reviewer\'s read and write: the approve does not pa
     assert.equal((await b.store.get('task', 'T1')).state, 'review');
 });
 
-test('a must opened in the family between the read and the write of an approve stops the approve', async () => {
-    const b = setup();
+both('a must opened in the family between the read and the write of an approve stops the approve', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'done');
     await b.as('pm').add({ id: 'T1a', parent: 'T1', title: 'a', assignee: 'core', reviewer: 'rv', base: BASE });
     await b.as('pm').add({ id: 'T1b', parent: 'T1', title: 'b', assignee: 'app', reviewer: 'pm', base: BASE });
@@ -431,8 +499,8 @@ test('a must opened in the family between the read and the write of an approve s
     assert.equal(racing.conflicts, 1, 'the root task lock caught it');
 });
 
-test('a write that keeps losing the race ends as a conflict after 3 attempts; one that wins on retry succeeds', async () => {
-    const b = setup();
+both('a write that keeps losing the race ends as a conflict after 3 attempts; one that wins on retry succeeds', async (setup) => {
+    const b = await setup();
     await taskIn(b, 'ready');
     let n = 0;
     const always = interleave(b.store, () => b.as('pm').assign({ id: 'T1', reviewer: ['app', 'rv'][n++ % 2] }), 3);
@@ -445,16 +513,16 @@ test('a write that keeps losing the race ends as a conflict after 3 attempts; on
 
 // notices and events
 
-test('a failed notice or event is a warning; the change stays', async () => {
-    const b = setup();
+both('a failed notice or event is a warning; the change stays', async (setup) => {
+    const b = await setup();
     const r = await b.as('pm', { notify: async () => { throw new Error('pane gone'); } }).add({ id: 'T1', title: 't', assignee: 'core' });
     assert.equal(r.ok, true);
     assert.match(r.warning, /pane gone/);
     assert.equal((await b.store.get('task', 'T1')).state, 'ready');
 });
 
-test('notes reach their `to`, announcements every other worker; events carry the log seq; nobody is told of their own act', async () => {
-    const b = setup();
+both('notes reach their `to`, announcements every other worker; events carry the log seq; nobody is told of their own act', async (setup) => {
+    const b = await setup();
     await b.as('pm').add({ id: 'T1', title: 't' });
     await b.as('core').note({ id: 'T1', body: 'found x', to: ['pm', 'core'] });
     assert.deepEqual(b.sent.at(-1), { to: ['pm'], ref: 'T1', action: 'note' });

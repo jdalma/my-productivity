@@ -116,6 +116,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             }
             id ??= nextNumbered('T', all);
             if (!TASK_ID.test(id)) fail('invalid', `task id '${id}' must match ${TASK_ID}`);
+            if (input.id && all.includes(id)) fail('invalid', `task ${id} exists`);
             const state = assignee ? 'ready' : 'new';
             const row = {
                 id, parent_id: parent?.id ?? null, title, ticket_path: input.ticket ?? null, state, assignee, reviewer,
@@ -143,6 +144,9 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 fail('invalid', 'give assignee or reviewer');
             }
             if (assignee && assignee === reviewer) fail('invalid', `${assignee} cannot review their own task`);
+            if (input.reviewer !== undefined && assignee && judgesOf({ reviewer }).every((j) => j === assignee)) {
+                fail('invalid', `without a reviewer only ${assignee}, the assignee, could judge ${task.id}; name another reviewer`);
+            }
             const form = input.assignee !== undefined ? 'reassign' : task.state === 'held' ? 'rereview' : 'reviewer';
             const state = move(form, task);
             const patch = { state, assignee, reviewer, ...(form === 'reassign' ? { assigned_at: now() } : {}) };
@@ -238,8 +242,8 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const landing = (await store.get('landing', text(input.landing, 'landing'))) ?? fail('not-found', `no landing ${input.landing}`);
             const task = await getTask(landing.task_id);
             if (landing.superseded_by) fail('stale-landing', `${landing.id} was superseded by ${landing.superseded_by}`);
-            // the judge is never the assignee: add, assign and land refuse that pairing (§3.1)
             if (!judgesOf(task).includes(actor)) fail('forbidden', `${actor} does not judge ${task.id} (${judgesOf(task).join(', ')})`);
+            if (task.assignee === actor) fail('forbidden', `${actor} cannot judge their own work`);
             const verdict = Object.hasOwn(VERDICTS, input.verdict) ? input.verdict : fail('invalid', `verdict must be ${Object.keys(VERDICTS).join(', ')}`);
             move('verdict', task);
             const state = VERDICTS[verdict];
@@ -315,9 +319,9 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             if (rule.who === 'reviewer') {
                 const verdict = await store.get('verdict', f.verdict_id);
                 if (actor !== verdict?.created_by && actor !== task.reviewer) fail('forbidden', `${actor} did not raise ${f.id}`);
-                if (fam.tasks.every((t) => TERMINAL.includes(t.state))) {
-                    fail('invalid', `${fam.root.id}'s family has no open task to fix ${f.id} in; ask pm for a derived task`);
-                }
+            }
+            if (to === 'open' && fam.tasks.every((t) => TERMINAL.includes(t.state))) {
+                fail('invalid', `${fam.root.id}'s family has no unfinished task to fix ${f.id} in; add a derived task first`);
             }
             const patch = { state: to, ...(to === 'open' ? { fixed_in: null } : {}) };
             return {

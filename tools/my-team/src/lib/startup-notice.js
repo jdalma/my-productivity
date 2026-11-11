@@ -9,6 +9,9 @@
 
 import { sendToWorker } from './tmux-session.js';
 
+/** sendToWorker refuses a longer message, and the worker then gets nothing (R2 L2). */
+const SEND_LIMIT = 500;
+
 export function fullNotice(overlayPath) {
     return `Team is live. Follow ${overlayPath} for the peer protocol; wait for user input in this pane or peer messages in your mailbox.`;
 }
@@ -61,9 +64,17 @@ export function startupNotice({ overlayPath, keep, previous, current, agentType,
     const mailLine = waiting ? ` You have ${waiting} waiting message(s): run your mailbox-list.` : '';
     if (previous === current) return mailLine ? `Team is live again; your AGENTS.md is unchanged.${mailLine}` : null;
     const { added, changed, removed } = sectionChanges(previous, current);
-    const parts = [['added', added], ['changed', changed], ['removed', removed]]
-        .filter(([, titles]) => titles.length).map(([what, titles]) => `${what}: ${titles.join(', ')}`);
-    return `Team is live again. Your instructions in ${overlayPath} changed (${parts.join('; ')}): read those sections.${mailLine}`;
+    const titles = [...added.map((t) => ['added', t]), ...changed.map((t) => ['changed', t]), ...removed.map((t) => ['removed', t])];
+    // as many titles as fit in one sendable line, the rest counted; none fit: the full notice
+    for (let shown = titles.length; shown >= 1; shown--) {
+        const parts = ['added', 'changed', 'removed']
+            .map((what) => [what, titles.slice(0, shown).filter(([w]) => w === what).map(([, t]) => t)])
+            .filter(([, ts]) => ts.length).map(([what, ts]) => `${what}: ${ts.join(', ')}`);
+        const more = titles.length - shown ? `; and ${titles.length - shown} more` : '';
+        const line = `Team is live again. Your instructions in ${overlayPath} changed (${parts.join('; ')}${more}): read those sections.${mailLine}`;
+        if (line.length <= SEND_LIMIT) return line;
+    }
+    return fullNotice(overlayPath);
 }
 
 /** Types each worker's notice into its pane, skipping those with none; returns the names not delivered. */

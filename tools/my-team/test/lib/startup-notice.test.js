@@ -101,3 +101,24 @@ test('sendStartupNotices types each notice into its pane and nothing into a pane
     assert.deepEqual(lines('a'), ['hello a']);
     assert.deepEqual(lines('b'), [], 'nothing typed where there is nothing to say');
 });
+
+test('(T66a, R2 L2) many changed sections still make one line within the send limit, and it reaches the pane', async (t) => {
+    const many = (n, body) => Array.from({ length: n }, (_, i) => `## A rather long section title number ${i} for the overlay\n${body}\n`).join('');
+    const line = notice({ previous: `# T\n${many(30, 'old')}`, current: `# T\n${many(30, 'new')}` });
+    assert.ok(line.length <= 500, `${line.length} characters`);
+    assert.match(line, /and \d+ more/);
+    assert.doesNotMatch(line, /\n/);
+    const longPath = startupNotice({ overlayPath: `/${'p'.repeat(480)}/AGENTS.md`, keep: true, previous: '## A\na\n', current: '## A\nb\n',
+        agentType: 'claude', launchArgs: RESUMED, mail: { spool: 0, unread: 0 } });
+    assert.ok(longPath.length <= 500 || longPath.startsWith('Team is live.'), 'when even one title does not fit: the full notice');
+
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'mt-notice-long-')));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const session = `notice-long-${process.pid}`;
+    const log = join(dir, 'typed');
+    tmuxExec(['new-session', '-d', '-s', session, `while IFS= read -r l; do printf '%s\\n' "$l" >> '${log}'; printf '\\033[1A\\033[2K'; done`], { stdio: 'pipe' });
+    t.after(() => { try { tmuxExec(['kill-session', '-t', session], { stdio: 'pipe' }); } catch { /* gone */ } });
+    const pane = tmuxExec(['display-message', '-p', '-t', session, '#{pane_id}'], { stdio: 'pipe' }).trim();
+    assert.deepEqual(await sendStartupNotices(session, [{ name: 'core', pane_id: pane, notice: line }]), []);
+    assert.deepEqual(readFileSync(log, 'utf-8').split('\n').filter(Boolean), [line]);
+});

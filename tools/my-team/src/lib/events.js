@@ -40,6 +40,15 @@ export async function appendMessageEvent(stateRoot, event) {
         // event shape is unchanged.
         ...extra,
     };
+    await writeEvent(stateRoot, entry);
+}
+
+/** One event of another `type` (the tmux shim's refusals, T56), stamped with `ts` like a message. */
+export async function appendEvent(stateRoot, { type, ...fields }) {
+    await writeEvent(stateRoot, { ts: new Date().toISOString(), type, ...fields });
+}
+
+async function writeEvent(stateRoot, entry) {
     const line = JSON.stringify(entry) + '\n';
     const path = eventsLogPath(stateRoot);
     try {

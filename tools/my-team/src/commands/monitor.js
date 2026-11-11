@@ -37,6 +37,7 @@ function formatBody(body) {
 
 function renderEvent(entry) {
     const ts = formatTimestamp(entry.ts);
+    if (entry.type === 'tmux-denied') return `[${ts}] ${entry.worker}: tmux ${(entry.args ?? []).join(' ')} 거부됨\n\n`;
     const header = `[${ts}] ${entry.from} → ${entry.to}`;
     const body = formatBody(entry.body ?? '');
     // Trailing blank line separates this event from the next.

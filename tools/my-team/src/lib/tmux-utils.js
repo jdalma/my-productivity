@@ -3,12 +3,15 @@
  * https://github.com/Yeachan-Heo/oh-my-claudecode
  *
  * Source: dist/cli/tmux-utils.js
- * Modifications: every tmux call first checks `assertTestIsolation` (my-team).
+ * Modifications: every tmux call first checks `assertTestIsolation`, and tmux is the real one, not the
+ * worker's shim (my-team).
  */
 
 import { exec, execFile, execFileSync, execSync, spawnSync } from 'child_process';
 import { basename, isAbsolute, win32 as win32Path } from 'path';
 import { promisify } from 'util';
+
+import { findRealTmux } from './tmux-guard.js';
 
 /**
  * Tests run tmux for real (send-keys, set-option, kill-session on fixed ids such as %0 and %9). On the
@@ -99,7 +102,7 @@ export async function tmuxExecAsync(args, opts) {
 }
 
 function shellTmux() {
-    return ['tmux', ...tmuxSocketArgs().map(quoteShellArg)].join(' ');
+    return [resolveTmuxBinaryPath(), ...tmuxSocketArgs()].map(quoteShellArg).join(' ');
 }
 
 export function tmuxShell(command, opts) {
@@ -134,8 +137,11 @@ export async function tmuxCmdAsync(args, opts) {
     return tmuxExecAsync(args, opts);
 }
 
+let realTmux;
+
+/** Not the shim a worker has first on PATH (T56): my-team's own calls (notifications, panes) are its to make. */
 function resolveTmuxBinaryPath() {
-    if (process.platform !== 'win32') return 'tmux';
+    if (process.platform !== 'win32') return (realTmux ??= findRealTmux() ?? 'tmux');
     try {
         const result = spawnSync('where', ['tmux'], { timeout: 5000, encoding: 'utf8' });
         if (result.status !== 0) return 'tmux';

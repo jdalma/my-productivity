@@ -20,6 +20,7 @@
   "license": "MIT",
   "files": [
     "bin",
+    "shim",
     "src",
     "skills",
     "plugin.json",

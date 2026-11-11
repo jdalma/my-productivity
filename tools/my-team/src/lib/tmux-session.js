@@ -17,6 +17,7 @@ import { join, basename, isAbsolute, win32 } from 'path';
 
 import { validateTeamName, sanitizeName } from './team-name.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from './tmux-utils.js';
+import { SHIM_DIR } from './tmux-guard.js';
 
 export { sanitizeName };
 
@@ -130,7 +131,10 @@ export function buildWorkerStartCommand(config) {
 
     const shellName = basename(shell.replace(/\\/g, '/')).replace(/\.(exe|cmd|bat)$/i, '');
     const isFish = shellName === 'fish';
-    const execArgsCommand = isFish ? 'exec $argv' : 'exec "$@"';
+    // the tmux shim first on PATH, after the rc file has had its say on PATH (T56)
+    const execArgsCommand = isFish
+        ? `set -gx PATH ${shellEscape(SHIM_DIR)} $PATH; exec $argv`
+        : `PATH=${shellEscape(SHIM_DIR)}:"$PATH"; export PATH; exec "$@"`;
 
     let rcFile = '';
     if (process.env.HOME) {

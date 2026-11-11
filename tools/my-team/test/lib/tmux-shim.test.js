@@ -12,10 +12,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-import { tmuxShimVerdict } from '../../src/lib/tmux-guard.js';
+import { findRealTmux, tmuxShimVerdict } from '../../src/lib/tmux-guard.js';
 import { buildWorkerStartCommand } from '../../src/lib/tmux-session.js';
 
 const SHIM_DIR = fileURLToPath(new URL('../../shim', import.meta.url));
@@ -53,6 +53,10 @@ test('-L or -S passes anything, unless it names the default server', () => {
     assert.equal(v(['-S', '/tmp/tmux-501/default', 'kill-server'], { TMUX_TMPDIR: '/tmp/x' }), false, 'a missing TMUX_TMPDIR falls back');
     assert.equal(v(['-S', '/tmp/s/team', 'kill-server'], { TMUX: '/tmp/s/team,123,0' }), false, 'the server the worker is in');
     assert.equal(v(['-S', '/tmp/tmux-501/default', 'ls']), true, 'reading the default server stays allowed');
+    // no socket yet, so realpath cannot say: a name that differs only in case is still taken for the default
+    const gone = { TMUX_TMPDIR: '/nonexistent-t56a' };
+    assert.equal(v(['-S', '/nonexistent-t56a/TMUX-501/DEFAULT', 'kill-server'], gone), false);
+    assert.equal(v(['-L', 'Default', 'kill-server'], gone), false);
 });
 
 test('a worker launches with the shim first on PATH, after its rc file has run', () => {
@@ -63,9 +67,20 @@ test('a worker launches with the shim first on PATH, after its rc file has run',
     assert.ok(path < script.indexOf('exec'), cmd);
 });
 
-function realTmux() {
-    return execFileSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf-8' }).trim();
+/** Not `command -v tmux`: in a worker started since T56 that is the shim, and the wrapper below would call itself (R57 M2). */
+function realTmux(path = process.env.PATH) {
+    const real = findRealTmux(path);
+    assert.ok(real, 'no tmux on PATH');
+    return real;
 }
+
+const LIMIT = { timeout: 15000 };
+
+test('with the shim first on PATH, the tests still find the real tmux, so the wrapper never calls the shim (R57 M2)', () => {
+    const real = realTmux(`${SHIM_DIR}:${process.env.PATH}`);
+    assert.notEqual(real, join(SHIM_DIR, 'tmux'));
+    assert.match(execFileSync(real, ['-V'], { encoding: 'utf-8', ...LIMIT }), /^tmux /);
+});
 
 /** A control server on a socket of the test's own, and a PATH whose only tmux is the shim, then a wrapper to it. */
 function setup(t) {
@@ -78,7 +93,7 @@ function setup(t) {
         `#!/bin/sh\ncase "$1" in -L|-S) exec '${real}' "$@";; esac\nexec '${real}' -S '${ctl}' "$@"\n`);
     chmodSync(join(bin, 'tmux'), 0o755);
     symlinkSync(process.execPath, join(bin, 'node'));
-    const ctlTmux = (...args) => execFileSync(real, ['-S', ctl, ...args], { encoding: 'utf-8' });
+    const ctlTmux = (...args) => execFileSync(real, ['-S', ctl, ...args], { encoding: 'utf-8', ...LIMIT });
     ctlTmux('-f', '/dev/null', 'new-session', '-d', '-s', 'ctl', '-n', 'keep',
         'sh -c \'while IFS= read -r l; do echo "GOT:$l"; done\'');
     const state = join(dir, 'state');
@@ -91,8 +106,8 @@ function setup(t) {
         HOME: process.env.HOME, PATH: `${SHIM_DIR}:${bin}:/usr/bin:/bin`, TMUX_TMPDIR: join(dir, 'gone'),
         MY_TEAM_STATE_ROOT: state, OMC_TEAM_WORKER: 't56/core', MY_TEAM_WORKER: 't56/core',
     };
-    const sh = (script) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf-8' });
-    const ctlAlive = () => spawnSync(real, ['-S', ctl, 'has-session', '-t', 'ctl']).status === 0;
+    const sh = (script) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf-8', ...LIMIT });
+    const ctlAlive = () => spawnSync(real, ['-S', ctl, 'has-session', '-t', 'ctl'], LIMIT).status === 0;
     return { dir, ctl, real, bin, env, sh, ctlTmux, ctlAlive, state };
 }
 
@@ -114,7 +129,10 @@ test('-L <scratch> kill-server passes and ends only that server (b)', (t) => {
     const s = setup(t);
     const name = `mt-shim-b-${process.pid}`;
     execFileSync(s.real, ['-L', name, '-f', '/dev/null', 'new-session', '-d', 'sleep 60']);
-    t.after(() => spawnSync(s.real, ['-L', name, 'kill-server']));
+    t.after(() => {
+        spawnSync(s.real, ['-L', name, 'kill-server'], LIMIT);
+        rmSync(join('/tmp', `tmux-${process.getuid()}`, name), { force: true });  // kill-server leaves the socket file
+    });
     const r = s.sh(`tmux -L ${name} kill-server`);
     assert.equal(r.status, 0, r.stderr);
     assert.notEqual(spawnSync(s.real, ['-L', name, 'has-session']).status, 0);
@@ -176,4 +194,42 @@ test('my-team itself skips the shim: send-message from a worker with the shim on
     assert.equal(existsSync(join(s.state, 'events.jsonl')), false, 'the shim refused nothing');
     const events = readFileSync(join(stateRoot, 'events.jsonl'), 'utf-8');
     assert.doesNotMatch(events, /tmux-denied/);
+});
+
+test('the default server under another name is still the default server: symlink, case, -L paths, -L of $TMUX (R57 M1)', (t) => {
+    const s = setup(t);
+    const uid = process.getuid();
+    // a fake default server in a TMUX_TMPDIR that exists, so no call can fall back to /tmp
+    const tmpdir = join(s.dir, 'td');
+    const sockets = join(tmpdir, `tmux-${uid}`);
+    mkdirSync(sockets, { recursive: true, mode: 0o700 });
+    mkdirSync(join(s.dir, 'l'));
+    symlinkSync(join(sockets, 'default'), join(s.dir, 'l', 'sock'));
+    const fake = { default: join(sockets, 'default'), work: join(sockets, 'work') };
+    const up = (path) => {
+        if (spawnSync(s.real, ['-S', path, 'has-session'], LIMIT).status !== 0) {
+            execFileSync(s.real, ['-S', path, '-f', '/dev/null', 'new-session', '-d', 'sleep 600'], LIMIT);
+        }
+    };
+    const alive = (path) => spawnSync(s.real, ['-S', path, 'has-session'], LIMIT).status === 0;
+    t.after(() => { for (const p of Object.values(fake)) spawnSync(s.real, ['-S', p, 'kill-server'], LIMIT); });
+    const env = { ...s.env, PATH: `${SHIM_DIR}:${dirname(s.real)}:/usr/bin:/bin`, TMUX_TMPDIR: tmpdir };
+    for (const [args, server, extra] of [
+        [['-S', join(s.dir, 'l', 'sock')], 'default'],
+        [['-S', join(tmpdir, `TMUX-${uid}`, 'DEFAULT')], 'default'],
+        [['-L', 'DEFAULT'], 'default'],
+        [['-L', './default'], 'default'],
+        [['-L', `../tmux-${uid}/default`], 'default'],
+        [['-L', 'work'], 'work', { TMUX: `${fake.work},1,0` }],
+    ]) {
+        up(fake[server]);
+        assert.ok(existsSync(sockets), 'the fake socket folder is there');
+        const r = spawnSync('tmux', [...args, 'kill-server'], { env: { ...env, ...extra }, encoding: 'utf-8', ...LIMIT });
+        assert.notEqual(r.status, 0, args.join(' '));
+        assert.match(r.stderr, /거부됨/, args.join(' '));
+        assert.equal(alive(fake[server]), true, args.join(' '));
+    }
+    // a name of its own still passes
+    const r = spawnSync('tmux', ['-L', 'scratch-of-its-own', 'kill-server'], { env, encoding: 'utf-8', ...LIMIT });
+    assert.doesNotMatch(r.stderr, /거부됨/);
 });

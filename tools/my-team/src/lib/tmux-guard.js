@@ -6,7 +6,7 @@
  */
 
 import { accessSync, constants, realpathSync, statSync } from 'fs';
-import { dirname, join, normalize, resolve } from 'path';
+import { basename, dirname, join, normalize, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 export const SHIM_DIR = fileURLToPath(new URL('../../shim', import.meta.url));
@@ -66,13 +66,35 @@ function canonical(path) {
     try { return join(realpathSync(dirname(abs)), abs.slice(dirname(abs).length + 1)); } catch { return normalize(abs); }
 }
 
-/** The sockets a call without -L/-S may reach: the default one, as TMUX_TMPDIR or its /tmp fallback has it, and $TMUX's. */
+/**
+ * A socket as the file system finds it (R57 M1): symlinks followed and names in their stored case, through
+ * realpath.native on the socket or, while it does not exist yet, on its nearest existing folder. Lowercased
+ * as well, so a name that differs only in case is the same socket on a case-insensitive volume (APFS, the
+ * default) and, on a case-sensitive one, is refused when it would have passed: refusing is the safe side.
+ */
+function socketKey(path) {
+    let dir = resolve(path);
+    const rest = [];
+    for (;;) {
+        try { return join(realpathSync.native(dir), ...rest).toLowerCase(); } catch { /* not there yet */ }
+        const up = dirname(dir);
+        if (up === dir) return join(dir, ...rest).toLowerCase();
+        rest.unshift(basename(dir));
+        dir = up;
+    }
+}
+
+/** Where tmux looks for `-L` sockets: under TMUX_TMPDIR, or /tmp when that folder is missing. Both, as the shim cannot tell. */
+function socketDirs(env, uid) {
+    return [env.TMUX_TMPDIR, '/tmp'].filter(Boolean).map((d) => join(d, `tmux-${uid}`));
+}
+
+/** The sockets of the user's server: the default one, and $TMUX's, the server the worker is in. */
 function userSockets(env, uid) {
-    const dirs = [env.TMUX_TMPDIR, '/tmp'].filter(Boolean);
-    const sockets = dirs.map((d) => join(d, `tmux-${uid}`, 'default'));
+    const sockets = socketDirs(env, uid).map((d) => join(d, 'default'));
     const inTmux = (env.TMUX ?? '').split(',')[0];
     if (inTmux) sockets.push(inTmux);
-    return new Set(sockets.map(canonical));
+    return new Set(sockets.map(socketKey));
 }
 
 /** `{ allow }` for a tmux call with `args`, made by a worker whose environment is `env`. */
@@ -82,9 +104,11 @@ export function tmuxShimVerdict(args, env = process.env, uid = process.getuid())
     const { seen, next } = global;
     if (seen.has('V')) return { allow: true };
     const label = seen.get('L'), path = seen.get('S');
-    const ownServer = path !== undefined ? path !== '' && !userSockets(env, uid).has(canonical(path))
-        : label !== undefined && label !== '' && label !== 'default';
-    if (ownServer) return { allow: true };
+    // -S wins over -L in tmux; -L <name> is <dir>/tmux-<uid>/<name>, so `./default` and `DEFAULT` are the default
+    const named = path !== undefined ? (path ? [path] : [])
+        : label ? socketDirs(env, uid).map((d) => join(d, label)) : [];
+    const user = userSockets(env, uid);
+    if (named.length > 0 && named.every((p) => !user.has(socketKey(p)))) return { allow: true };
     if (seen.has('C') || seen.has('c')) return { allow: false };
 
     const rest = args.slice(next);

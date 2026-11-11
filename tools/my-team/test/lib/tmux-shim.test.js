@@ -94,8 +94,11 @@ function setup(t) {
     chmodSync(join(bin, 'tmux'), 0o755);
     symlinkSync(process.execPath, join(bin, 'node'));
     const ctlTmux = (...args) => execFileSync(real, ['-S', ctl, ...args], { encoding: 'utf-8', ...LIMIT });
+    // The pane records each submitted line in a file and erases its echo, as a CLI clears its input line: a
+    // pane that printed the line back would look unsubmitted to sendToWorker, which then retries for seconds (T64)
+    const typed = join(dir, 'typed');
     ctlTmux('-f', '/dev/null', 'new-session', '-d', '-s', 'ctl', '-n', 'keep',
-        'sh -c \'while IFS= read -r l; do echo "GOT:$l"; done\'');
+        `sh -c 'while IFS= read -r l; do printf "%s\\n" "$l" >> ${typed}; printf "\\033[1A\\033[2K"; done'`);
     const state = join(dir, 'state');
     mkdirSync(state);
     t.after(() => {
@@ -108,7 +111,8 @@ function setup(t) {
     };
     const sh = (script) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf-8', ...LIMIT });
     const ctlAlive = () => spawnSync(real, ['-S', ctl, 'has-session', '-t', 'ctl'], LIMIT).status === 0;
-    return { dir, ctl, real, bin, env, sh, ctlTmux, ctlAlive, state };
+    const typedLines = () => (existsSync(typed) ? readFileSync(typed, 'utf-8').split('\n').filter(Boolean) : []);
+    return { dir, ctl, real, bin, env, sh, ctlTmux, ctlAlive, state, typedLines };
 }
 
 test('a worker resolves tmux to the shim', (t) => {
@@ -192,10 +196,12 @@ function notify(t, s, shimDir) {
         encoding: 'utf-8', timeout: 20000,
     });
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.match(s.ctlTmux('capture-pane', '-p', '-S', '-', '-t', pane), /GOT:new-message:alice/);
+    assert.equal(JSON.parse(r.stdout).warning, undefined, r.stdout);
+    assert.deepEqual(s.typedLines(), ['new-message:alice'], 'one trigger reached bob\'s pane');
     assert.equal(existsSync(join(s.state, 'events.jsonl')), false, 'the shim refused nothing');
     const events = readFileSync(join(stateRoot, 'events.jsonl'), 'utf-8');
     assert.doesNotMatch(events, /tmux-denied/);
+    assert.doesNotMatch(events, /trigger-refused/, 'the trigger was not refused');
 }
 
 test('my-team itself skips the shim: send-message from a worker with the shim on PATH still notifies (f)', (t) => {

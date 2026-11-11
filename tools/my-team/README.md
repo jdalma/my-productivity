@@ -11,13 +11,17 @@ Adapted from [`oh-my-claude-sisyphus`](https://github.com/Yeachan-Heo/oh-my-clau
 ## Install
 
 ```bash
-# from this directory
-npm install
-npm link    # exposes the `my-team` binary globally
+# from this directory: installs the committed HEAD (not your working tree) into npm's global prefix
+sh scripts/deploy.sh             # or: sh scripts/deploy.sh <commit>
+my-team --version                # 0.1.0 (<commit>)
 
-# or run directly
-./bin/my-team --help
+# run the working tree without installing it
+npm install && ./bin/my-team --help
 ```
+
+The installed copy is a snapshot of one commit, so editing or committing here does not change the teams
+that are running until you deploy again. First install and update are the same command. `--prefix <dir>`
+installs somewhere else (for a trial). Do not `npm link`: it makes every saved edit live for every team.
 
 Requires:
 - Node.js ≥ 20

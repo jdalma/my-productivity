@@ -10,7 +10,7 @@
  */
 
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -32,7 +32,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 function readVersion() {
     try {
         const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-        return pkg.version;
+        // a deployed copy names its commit (scripts/deploy.sh); a repo checkout has no COMMIT file
+        const commit = existsSync(join(__dirname, '..', 'COMMIT'))
+            ? readFileSync(join(__dirname, '..', 'COMMIT'), 'utf-8').trim().slice(0, 12) : 'working tree';
+        return `${pkg.version} (${commit})`;
     } catch {
         return '0.0.0';
     }

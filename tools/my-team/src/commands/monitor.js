@@ -17,7 +17,7 @@
 
 import { existsSync, openSync, readSync, closeSync, watch, statSync } from 'fs';
 import { loadManifest } from './_manifest.js';
-import { eventsLogPath } from '../lib/events.js';
+import { eventsLogPath, readEvent } from '../lib/events.js';
 
 function formatTimestamp(isoTs) {
     // "2026-05-13T15:42:31.123Z" -> "15:42:31"
@@ -35,16 +35,19 @@ function formatBody(body) {
         .join('\n');
 }
 
-function renderEvent(entry) {
+function renderEvent(raw, team) {
+    const entry = readEvent(raw, team);
     const ts = formatTimestamp(entry.ts);
     if (entry.type === 'tmux-denied') return `[${ts}] ${entry.worker}: tmux ${(entry.args ?? []).join(' ')} 거부됨\n\n`;
+    if (entry.type === 'tool-denied') return `[${ts}] ${entry.worker}: ${entry.tool} ${entry.target} 거부됨 (${entry.rule})\n\n`;
+    if (entry.type !== 'message') return `[${ts}] ${entry.type} (${entry.worker ?? '?'})\n\n`;
     const header = `[${ts}] ${entry.from} → ${entry.to}`;
     const body = formatBody(entry.body ?? '');
     // Trailing blank line separates this event from the next.
     return `${header}\n${body}\n\n`;
 }
 
-function processNewBytes(buffer) {
+function processNewBytes(buffer, team) {
     // Buffer may contain partial last line — return rendered output + remainder.
     const lines = buffer.split('\n');
     const remainder = lines.pop(); // either '' (clean newline) or partial line
@@ -53,7 +56,7 @@ function processNewBytes(buffer) {
         if (!line.trim()) continue;
         try {
             const entry = JSON.parse(line);
-            rendered.push(renderEvent(entry));
+            rendered.push(renderEvent(entry, team));
         } catch {
             // Skip malformed lines silently — events.jsonl should always be valid.
         }
@@ -92,7 +95,7 @@ export async function runMonitor(teamName, opts = {}) {
             readSync(fd, buf, 0, chunkSize, position);
             position = size;
             const text = pending + buf.toString('utf-8');
-            const { output, remainder } = processNewBytes(text);
+            const { output, remainder } = processNewBytes(text, manifest.team_name);
             pending = remainder;
             if (output) process.stdout.write(output);
         } finally {

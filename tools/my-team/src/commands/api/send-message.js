@@ -219,6 +219,7 @@ export async function runApiSendMessage(input, deps = {}) {
 
     const eventExtra = crossTeam ? { to_team: crossTeam.toTeam } : {};
     await appendMessageEvent(manifest.state_root, {
+        team: team_name,
         from: safeFrom,
         to: safeTo,
         body,
@@ -232,6 +233,7 @@ export async function runApiSendMessage(input, deps = {}) {
     // recipient would answer a message its own timeline never recorded.
     if (crossTeam) {
         await appendMessageEvent(crossTeam.toStateRoot, {
+            team: team_name,
             from: safeFrom,
             to: safeTo,
             body,

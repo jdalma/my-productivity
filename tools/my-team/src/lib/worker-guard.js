@@ -165,7 +165,7 @@ function cdTarget(args, dir) {
  */
 function gitCall(args, env, dir) {
     let cdir = dir;
-    const extra = [];
+    const extra = [], config = [];
     const at = (v) => (cdir === null && !isAbsolute(expandHome(v)) ? null : resolve(cdir ?? '/', expandHome(v)));
     for (const key of ['GIT_DIR', 'GIT_WORK_TREE']) if (env[key] !== undefined) extra.push(unknownWord(env[key]) ? null : at(env[key]));
     for (let k = 0; k < args.length; k++) {
@@ -173,7 +173,7 @@ function gitCall(args, env, dir) {
         if (unknownWord(a)) return { sub: undefined };
         if (!a.startsWith('-')) {
             const rest = args.slice(k + 1);
-            return { sub: a, rest, targets: [cdir, ...extra], help: rest.includes('-h') || rest.includes('--help') };
+            return { sub: a, rest, targets: [cdir, ...extra], config, help: rest.includes('-h') || rest.includes('--help') };
         }
         if (GIT_FLAGS.has(a)) continue;
         const name = a.split('=')[0];
@@ -184,6 +184,7 @@ function gitCall(args, env, dir) {
         const folder = unknownWord(value) ? null : at(value);
         if (name === '-C') { cdir = folder; continue; }
         if (name === '--git-dir' || name === '--work-tree') { extra.push(folder); continue; }
+        if (name === '-c' || name === '--config-env') config.push(value.split('=')[0].toLowerCase());
         if (unknownWord(value) || (name === '-c' && /^alias\./i.test(value))) return { sub: undefined };
     }
     return { sub: null, targets: [] };
@@ -279,7 +280,7 @@ export function bashDenial(command, rules, { cwd = null, repoRoot = null } = {})
 function denial(command, rules, start, protectedRepo) {
     const { cmds, subs, ok } = lex(command);
     if (!ok && rules.includes('push') && /\bpush\b/.test(command)) return { rule: 'push', reason: 'an unclosed quote or substitution around push' };
-    let dir = start, moved = false, gitEnvUnknown = false;
+    let dir = start, moved = false, gitEnvUnknown = false, gitConfigUnknown = false;
     const outer = [];
     const judge = (cmd) => {
         if (cmd.text !== undefined) return denial(cmd.text, rules, dir, protectedRepo);
@@ -294,8 +295,11 @@ function denial(command, rules, start, protectedRepo) {
             return null;
         }
         if (['export', 'declare', 'typeset', 'set'].includes(cmd.name)) {
-            // an exported git location reaches every git after it in ways not followed here (R60b L2)
-            if (cmd.name === 'set' || cmd.args.some((a) => /^(GIT_DIR|GIT_WORK_TREE)(=|$)/.test(a))) gitEnvUnknown = true;
+            // an exported git location reaches every git after it in ways not followed here (R60b L2); `set`
+            // exports only with allexport (-a), not with -e, -u, -o pipefail (R60c R1)
+            const allexport = cmd.name === 'set' && cmd.args.some((a, i) => /^-[A-Za-z]*a/.test(a) || (a === '-o' && cmd.args[i + 1] === 'allexport'));
+            if (allexport || cmd.args.some((a) => /^(GIT_DIR|GIT_WORK_TREE)(=|$)/.test(a))) gitEnvUnknown = true;
+            if (allexport || cmd.args.some((a) => /^GIT_CONFIG/.test(a))) gitConfigUnknown = true;
             return null;
         }
         if (SHELLS.has(cmd.name)) {
@@ -313,7 +317,10 @@ function denial(command, rules, start, protectedRepo) {
         if (!rule) return null;
         if (touchesProtected(git.targets, protectedRepo)) return { rule, reason: `git ${git.sub} in the protected repository` };
         // outside it, a push still must stay on this machine (T59c); send-pack and subtree are not read that far
-        if (rule === 'push' && !(git.sub === 'push' && git.targets.length === 1 && pushStaysLocal(git.rest, git.targets[0], protectedRepo))) {
+        // config that can move a push elsewhere (pushurl, insteadOf, pushRemote, push.default) is not followed (R60c R2)
+        const redirected = gitConfigUnknown || Object.keys(cmd.env).some((k) => k.startsWith('GIT_CONFIG'))
+            || git.config.some((k) => /^(remote|url|branch|push)\./.test(k));
+        if (rule === 'push' && (redirected || !(git.sub === 'push' && git.targets.length === 1 && pushStaysLocal(git.rest, git.targets[0], protectedRepo)))) {
             return { rule, reason: `git ${git.sub} to a destination not certainly local` };
         }
         return null;

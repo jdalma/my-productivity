@@ -276,3 +276,26 @@ test('a cd that can fail, a cd in a pipe, an exported GIT_DIR, and a local remot
     assert.equal(deny(`git push ${r.root}/.git HEAD:refs/heads/x`, r.other, ['push']), 'push');
     assert.equal(deny(`git push ${r.bare} HEAD`, r.other, ['push']), null);
 });
+
+test('set only hides git locations with allexport; config that redirects a push makes its destination unknown (R60c)', (t) => {
+    const r = twoRepos(t);
+    const deny = (cmd, cwd, rules = ['push', 'repo-write']) => bashDenial(cmd, rules, { cwd, repoRoot: r.root })?.rule ?? null;
+    // R1: ordinary set options move nothing
+    assert.equal(deny(`set -e; cd ${r.other} && git push ${r.bare} HEAD`, r.root), null);
+    assert.equal(deny(`set -eu; git -C ${r.other} commit -m x`, r.root), null);
+    assert.equal(deny('set -o pipefail; git commit -m x', r.other), null);
+    assert.equal(deny(`set -a; GIT_DIR=${r.root}/.git; git commit -m x`, r.other), 'repo-write', 'allexport exports what follows');
+    assert.equal(deny('set -o allexport; git commit -m x', r.other), 'repo-write');
+    assert.equal(deny('set -ea; git commit -m x', r.other), 'repo-write');
+    // R2: a destination rewritten by config on the command line or in the environment
+    assert.equal(deny(`git -c remote.local.pushurl=https://example.com/x.git push ${r.bare} HEAD`, r.other, ['push']), 'push');
+    assert.equal(deny(`git -c url.https://example.com/.insteadOf=${r.bare} push ${r.bare} HEAD`, r.other, ['push']), 'push');
+    assert.equal(deny(`git -c branch.main.pushRemote=gh push`, r.other, ['push']), 'push');
+    assert.equal(deny(`git -c push.default=current push ${r.bare}`, r.other, ['push']), 'push');
+    assert.equal(deny(`git --config-env=remote.local.pushurl=DEST push ${r.bare} HEAD`, r.other, ['push']), 'push');
+    assert.equal(deny(`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.x.insteadOf GIT_CONFIG_VALUE_0=y git push ${r.bare} HEAD`, r.other, ['push']), 'push');
+    assert.equal(deny(`export GIT_CONFIG_COUNT=1; git push ${r.bare} HEAD`, r.other, ['push']), 'push');
+    // config that does not move a push stays allowed
+    assert.equal(deny('git -c user.name=x commit -m x', r.other), null);
+    assert.equal(deny(`git -c user.name=x push ${r.bare} HEAD`, r.other, ['push']), null);
+});

@@ -280,6 +280,7 @@ will actually do. High user attention required.
 | `api mailbox-mark-delivered` | **[mutating]** Mark consumed — moves the entry to the archive jsonl, removes it from the inbox |
 | `api archive-lookup` | **[pure]** Look up an archived message by id — read-only |
 | `api roster` | **[pure]** Current workers of a team by team name (`{"team_name":"<team>"}`) — name, agent_type, role, description. The manifest is the registry; this is how an orchestrator reads another team's roster before addressing it |
+| `api board-*` | The team board, for a team whose config has `board` (see "Team board" below): **[mutating]** `board-add`, `-assign`, `-take`, `-land`, `-verdict`, `-finding`, `-cancel`, `-note`, `-announce`; **[pure]** `board-inbox`, `board-review-queue`, `board-status`. Full table in `docs/board.md` |
 
 > Internal peer-messaging API called by worker LLMs (do not call manually). The
 > `[mutating]` / `[pure]` tag marks whether a call has a file-write side effect —
@@ -309,6 +310,29 @@ manifest, so a running worker learns the newcomer's name, role and description
 on its next self-poll. `start` and `add-worker` both persist `description` in
 the manifest for that purpose.
 
+## Team board
+
+A team whose config has a `board` item keeps its work on a board instead of in message bodies: tasks,
+review requests, verdicts and findings, notes and announcements. It is a SQLite file in the team's state
+(`<state_root>/board.db`).
+
+```json
+{ "team_name": "shop", "board": { "store": "sqlite" }, "workers": [ … ] }
+```
+
+- pm puts a task on the board with `api board-add` (ticket path, constraints, base commit, reviewer).
+- The assignee runs `board-take`, then `board-land` with the commit when it is done.
+- The reviewer takes requests from `board-review-queue` and judges them with `board-verdict`.
+- After a `changes` verdict, the assignee starts again with `board-take`, with no step through pm.
+- Each change sends the workers it concerns a one-line mailbox notice, `[board] <ref> <action>`, and adds a
+  `board` line to `events.jsonl`.
+- Workers of such a team get a `## Team Board` section in their AGENTS.md. A team without `board` gets the
+  overlay it always had.
+- The board needs Node 22.13 or later. On an older Node, only the board commands fail.
+- No worker approves its own task, or a commit it landed.
+
+Commands, inputs, error codes, states and a full cycle: `docs/board.md`.
+
 ## Parallel work on one repo (`--worktree`)
 
 Any worker (or the user) can split a task across several workers on the same
@@ -334,7 +358,8 @@ peer for itself when its own task splits.
 ```
 ~/.my-team/sessions/<team>/
 ├── manifest.json
-├── events.jsonl              # team timeline: messages and refusals (docs/events-format.md)
+├── events.jsonl              # team timeline: messages, refusals and board changes (docs/events-format.md)
+├── board.db                  # the team board, when the config has `board` (docs/board.md)
 ├── workers/<name>/
 │   ├── AGENTS.md             # per-worker system prompt overlay
 │   ├── status.json           # worker-written {state, reason}; shown by `status`

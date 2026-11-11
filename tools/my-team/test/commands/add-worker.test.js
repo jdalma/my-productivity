@@ -247,6 +247,23 @@ test('success: writes new worker AGENTS.md containing the new roster', async () 
     } finally { cleanup(ctx); }
 });
 
+test('a board team\'s new worker gets the board section; a team without a board does not (T63g)', async () => {
+    const ctx = setupTeam({ workers: ['alice'] });
+    try {
+        const m = readManifest(ctx);
+        m.board = { store: 'sqlite' };
+        writeFileSync(join(ctx.stateRoot, 'manifest.json'), JSON.stringify(m), 'utf-8');
+        await runAddWorker(validOpts(), okDeps());
+        assert.match(readFileSync(join(ctx.stateRoot, 'workers', 'carol', 'AGENTS.md'), 'utf-8'), /## Team Board/);
+        assert.deepEqual(readManifest(ctx).board, { store: 'sqlite' }, 'the manifest keeps its board');
+    } finally { cleanup(ctx); }
+    const plain = setupTeam({ workers: ['alice'] });
+    try {
+        await runAddWorker(validOpts(), okDeps());
+        assert.doesNotMatch(readFileSync(join(plain.stateRoot, 'workers', 'carol', 'AGENTS.md'), 'utf-8'), /Team Board|board-/);
+    } finally { cleanup(plain); }
+});
+
 test('does NOT rewrite existing workers\' AGENTS.md (decision §0 #1)', async () => {
     const ctx = setupTeam({ workers: ['alice'] });
     try {

@@ -120,6 +120,43 @@ function roleGuidance(workerRole, orchestratorNames) {
     return '';
 }
 
+/**
+ * The board section (T63g, rfc/board-design.md §7): only for a board team (config `board`). Work state lives on
+ * the board, not in message bodies; the mailbox carries one-line `[board]` notices and questions. Every worker
+ * gets the worker and reviewer parts (a reviewer is set per task); an orchestrator, or anyone in a team that
+ * declares no roles, also gets the pm part.
+ */
+function boardGuidance(teamName, workerName, workerRole) {
+    const api = (command, input) => formatOmcCliInvocation(`team api ${command} --input "${JSON.stringify({ team_name: teamName, ...input }).replaceAll('"', '\\"')}" --json`);
+    const lines = [
+        '## Team Board',
+        'This team keeps its work on a board (`my-team api board-*`). The board holds the state: who does what, what waits for review, which findings are open. Messages carry only notices and questions.',
+        '',
+        'As a worker:',
+        `- A message whose body starts with \`[board]\` is a notice: mark it delivered and read your board — \`${api('board-inbox', {})}\`. Pass the returned \`cursor\` as \`since\` next time.`,
+        `- Start a task assigned to you: \`${api('board-take', { id: '<task>' })}\`.`,
+        `- When it is done, record it: \`${api('board-land', { id: '<task>', commit: '<full hash>', check: { cmd: '<command>', result: '<result>' }, focus: ['<what to look at>'], closes: [], report: '<report path>', review_report: '<review report path>' })}\`. The board tells the reviewer and pm. Report state on the board, never in a message body.`,
+        '- A `changes` verdict on your task: read its findings (`board-inbox`, `board-status` with "task") and start fixing with `board-take` without waiting for pm. Close what you fixed with `closes` in your next `board-land`.',
+        '- Questions and decision requests still go by `send-message`, as before.',
+        '',
+        'As a reviewer (the board names you on a task):',
+        `- Take review requests from \`${api('board-review-queue', {})}\`; each row carries the ticket, constraints, commits, focus and open findings.`,
+        `- Judge with \`${api('board-verdict', { landing: '<task#n>', verdict: 'approve|changes|hold', verified_commit: '<commit>', report: '<review report path>', rerun: { cmd: '<command>', result: '<result>' }, findings: [] })}\`. Give each finding a code, severity and a repro command: \`{"code":"M1","severity":"must|should|low","summary":"…","repro":"…"}\`.`,
+    ];
+    if (workerRole === 'orchestrator' || workerRole === null) {
+        lines.push(
+            '',
+            'As pm:',
+            `- Put work on the board, not in a message: \`${api('board-add', { id: '<T…>', title: '<title>', assignee: '<worker>', reviewer: '<worker>', ticket: '<ticket path>', constraints: '<limits, or "없음">', base: '<commit>' })}\`. Give ticket, constraints, base and reviewer; write "없음" when a task has no constraints (an empty one leaves its review request incomplete).`,
+            '- Do not relay review requests or fix requests by message: land and verdict notify the reviewer, the assignee and you.',
+            `- Record user decisions with \`${api('board-announce', { body: '<decision>' })}\`.`,
+            '- Settle findings with `board-finding` (backlog, accepted-limit, rejected); reopening one needs an unfinished task in its family.',
+            `- After a context compaction, recover from \`${api('board-status', {})}\`.`,
+        );
+    }
+    return lines.join('\n');
+}
+
 export function generateWorkerOverlay(params) {
     const { teamName, workerName, agentType, bootstrapInstructions } = params;
     const workerRole = params.workerRole ?? null;
@@ -192,6 +229,8 @@ every \`mailbox-list\` call — trust that over this list when they differ.
   \`\`\`
 
 ${workerRole ? `${roleGuidance(workerRole, orchestratorNames)}
+
+` : ''}${params.board ? `${boardGuidance(teamName, workerName, workerRole)}
 
 ` : ''}## Message Protocol
 Talk to the user: surface output in this pane via your normal stdout. Permission

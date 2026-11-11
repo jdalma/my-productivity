@@ -297,6 +297,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
             instructionStateRoot: config.state_root,
             cwd: w.cwd,
             teamRoster,
+            board: config.board,
         });
         const overlayPath = join(workerDir, 'AGENTS.md');
         await writeFile(overlayPath, overlay, 'utf-8');

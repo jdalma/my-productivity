@@ -115,6 +115,22 @@ my-team은 기본이 **peer-to-peer 모델**이다 (task lifecycle 없음). 채�
 - 다른 워커의 pane에 `tmux send-keys`로 직접 입력 박기 — manifest의 pane id는 사용자의 모니터링용이지 워커간 제어 surface가 아니다.
 - `my-team msg` 호출 — 이 명령은 제거됐다. 사용자→워커는 pane 직접 입력 한 가지뿐.
 
+## 작업판 (team board)
+
+팀 설정에 `board` 항목이 있으면 작업판 사용 팀이다. 작업 상태(누가 무엇을 하는지, 리뷰 대기, 열린 지적)를 메시지 본문이 아니라 `<state_root>/board.db`에 둔다.
+
+```json
+{ "team_name": "shop", "board": { "store": "sqlite" }, "workers": [ … ] }
+```
+
+- pm: `api board-add`로 작업을 올린다(티켓 경로, 제약, base 커밋, reviewer; 제약이 없으면 "없음"). 리뷰 요청과 수정 지시는 메시지로 중계하지 않는다. 사용자 결정은 `board-announce`로 남기고, 대화 압축 뒤에는 `board-status`로 복구한다.
+- 담당: `board-take`로 시작한다. 끝나면 `board-land`(커밋, 확인 명령과 결과, 리뷰 중점, 닫는 지적)로 기록한다. `changes` 판정이 오면 pm을 기다리지 않고 `board-take`로 다시 착수한다.
+- reviewer: `board-review-queue`에서 가져와 `board-verdict`로 판정한다. 지적마다 code, 심각도, 재현 명령을 적는다.
+- 변경마다 관계된 워커에게 메일박스 알림 한 줄(`[board] <ref> <action>`)이 간다. 받은 워커는 `board-inbox`를 읽는다. 질문과 결정 요청은 지금처럼 `send-message`로 한다.
+- 이 팀의 워커 AGENTS.md에는 `## Team Board` 절이 들어간다. `board`가 없는 팀의 AGENTS.md는 그대로다.
+- Node 22.13 이상이 필요하다. 그보다 낮으면 작업판 명령만 `board-unavailable`로 실패한다.
+- 명령표, 오류 코드, 상태 전이, 한 주기 예시는 `tools/my-team/docs/board.md`에 있다.
+
 ## Worker succession (컨텍스트가 찼을 때 워커 교대)
 
 `/clear` 대신 **후임 워커를 옆에 띄우고 전임과 대화하게 한다.** handoff 문서는 압축본이라 버려진 맥락이 있다 — 후임이 문서를 읽고 궁금한 것을 전임에게 직접 묻는 것이 이 절차의 핵심이다.

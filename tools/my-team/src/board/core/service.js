@@ -13,8 +13,8 @@
  *   actor     the worker acting (resolved from MY_TEAM_WORKER by compose)
  *   now       () => ISO time
  *   git       { range(repo, base, commit) => {ancestor, commits} } — land's checks (T63e implements it)
- *   notify    (to[], ref, action) => Promise<string[] warnings>, after the change is applied
  *   event     (fields) => Promise<boolean>, after the change is applied
+ *   notify    (to[], ref, action) => Promise<string[] warnings>, after the event
  */
 
 import {
@@ -58,13 +58,14 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
         const { plan, applied } = await attempt(build);
         const warnings = [];
         const to = [...new Set(plan.notify ?? [])].filter((n) => n && n !== actor);
-        if (to.length) {
-            try { warnings.push(...(await notify(to, plan.ref, plan.action))); } catch (err) { warnings.push(`notify: ${err.message}`); }
-        }
+        // the change's event first, then its notices, so a notice's refusal follows what it was about (T65)
         try {
             const ok = await event({ worker: actor, action: plan.action, kind: plan.kind, ref: plan.ref, log_seq: applied.log_seq, ...(plan.states ?? {}) });
             if (!ok) warnings.push('event not logged');
         } catch (err) { warnings.push(`event: ${err.message}`); }
+        if (to.length) {
+            try { warnings.push(...(await notify(to, plan.ref, plan.action))); } catch (err) { warnings.push(`notify: ${err.message}`); }
+        }
         return { ok: true, ...plan.result(applied), notified: to, ...(warnings.length ? { warning: warnings.join('; ') } : {}) };
     }
 

@@ -259,6 +259,20 @@ export async function sendTmuxTrigger(paneId, triggerType, payload, owner) {
     }
 }
 
+/**
+ * Puts a refused trigger on the recipient team's timeline (T63e2): the recipient wakes only on a trigger, so
+ * monitor and the user must see it was not woken. Callers write it after their own line about the same send
+ * (the message, the board change), so the timeline reads in order (T65). Never throws: the message is
+ * delivered either way, and the caller already warns about the trigger.
+ */
+export async function logRefusedTrigger(stateRoot, { team, from, to, pane, reason }) {
+    try {
+        return await appendEvent(stateRoot, { type: 'trigger-refused', team, worker: from, to, pane: pane ?? null, reason });
+    } catch {
+        return false;
+    }
+}
+
 function newMessageId() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -287,7 +301,8 @@ function newMessageId() {
  * defaults to false; senders set it to true only for questions. `session` is
  * the recipient team's tmux session (manifest session_name): the trigger is
  * typed only while toPaneId is still the recipient's pane there. The returned
- * message carries `trigger` ({sent, refused?}).
+ * message carries `trigger` ({sent, refused?}); a caller that logs the send logs
+ * a refusal after it, with logRefusedTrigger.
  */
 export async function queueDirectMessage(
     teamName,
@@ -340,13 +355,6 @@ export async function queueDirectMessage(
 
     // 4. Notify the recipient via tmux (best-effort, and only into its own pane).
     const trigger = await sendTmuxTrigger(toPaneId, 'new-message', fromWorker, { session, worker: toWorker });
-    if (trigger.refused) {
-        // the recipient wakes only on a trigger: put the refusal on its team's timeline, for monitor and the user
-        const root = crossTeam?.toStateRoot ?? absPath(cwd, TeamPaths.root(teamName));
-        try {
-            await appendEvent(root, { type: 'trigger-refused', team: teamName, worker: fromWorker, to: toWorker, pane: toPaneId ?? null, reason: trigger.refused });
-        } catch { /* the message is delivered; the caller warns about the trigger */ }
-    }
 
     return { ...message, trigger };
 }

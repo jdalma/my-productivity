@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { loadManifest, manifestPathForTeam, rosterOf } from '../commands/_manifest.js';
 import { appendEvent } from '../lib/events.js';
 import { validateTeamName } from '../lib/team-name.js';
-import { queueDirectMessage } from '../lib/tmux-comm.js';
+import { logRefusedTrigger, queueDirectMessage } from '../lib/tmux-comm.js';
 import { BoardError } from './core/rules.js';
 import { createBoard } from './core/service.js';
 import { gitRange } from './git.js';
@@ -46,7 +46,10 @@ export function boardFor({ store, roster, manifest, actor }) {
                 try {
                     const sent = await queueDirectMessage(manifest.team_name, actor, name, `[board] ${ref} ${action}`, pane, dirname(root),
                         null, false, null, manifest.session_name);
-                    if (sent.trigger?.refused) warnings.push(`notice to ${name} not typed into its pane (${sent.trigger.refused}); it waits in the mailbox`);
+                    if (sent.trigger?.refused) {
+                        warnings.push(`notice to ${name} not typed into its pane (${sent.trigger.refused}); it waits in the mailbox`);
+                        await logRefusedTrigger(root, { team: manifest.team_name, from: actor, to: name, pane, reason: sent.trigger.refused });
+                    }
                 } catch (err) {
                     warnings.push(`notice to ${name}: ${err.message}`);
                 }

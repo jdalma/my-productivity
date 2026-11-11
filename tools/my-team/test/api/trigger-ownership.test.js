@@ -77,6 +77,8 @@ test('a manifest pane id that now belongs to another team\'s pane: nothing typed
     const lines = readFileSync(join(root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
     const refused = lines.filter((e) => e.type === 'trigger-refused');
     assert.equal(refused.length, 1);
+    // T65: the message first, then the refusal of its trigger, as monitor reads them
+    assert.deepEqual(lines.map((e) => e.type), ['message', 'trigger-refused']);
     assert.deepEqual([refused[0].team, refused[0].worker, refused[0].to, refused[0].pane], ['own-team', 'alice', 'bob', theirs.id]);
     assert.match(refused[0].reason, /not bob's/);
     const out = [];
@@ -145,6 +147,8 @@ test('board notices take the same check, and leave process.env as it was (R70 L3
     assert.equal(spool('core'), 1);
     assert.match(r.warning ?? '', /not typed/);
     assert.equal(process.env.MY_TEAM_STATE_ROOT, before);
-    const refused = readFileSync(join(manifest.state_root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'trigger-refused');
+    const events = readFileSync(join(manifest.state_root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+    const refused = events.filter((e) => e.type === 'trigger-refused');
     assert.deepEqual(refused.map((e) => [e.worker, e.to]), [['pm', 'core']], 'board notices log their refusals too');
+    assert.deepEqual(events.map((e) => e.type), ['board', 'trigger-refused'], 'T65: the board change first, then its notice\'s refusal');
 });

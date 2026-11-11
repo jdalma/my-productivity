@@ -37,7 +37,7 @@
 
 import { loadManifest } from '../_manifest.js';
 import { setStateRoot } from '../../lib/state-root.js';
-import { queueDirectMessage } from '../../lib/tmux-comm.js';
+import { logRefusedTrigger, queueDirectMessage } from '../../lib/tmux-comm.js';
 import { appendMessageEvent } from '../../lib/events.js';
 import { sanitizeName, validateTeamName } from '../../lib/team-name.js';
 import { resolvePaneBySessionWorker } from '../../lib/tmux-utils.js';
@@ -255,6 +255,13 @@ export async function runApiSendMessage(input, deps = {}) {
             expects_reply: message.expects_reply,
             from_team: team_name,
             ...eventExtra,
+        });
+    }
+
+    // after the message's own line: monitor reads the send, then that its trigger was not typed (T65)
+    if (message.trigger?.refused) {
+        await logRefusedTrigger(crossTeam?.toStateRoot ?? manifest.state_root, {
+            team: team_name, from: safeFrom, to: safeTo, pane: recipientPaneId, reason: message.trigger.refused,
         });
     }
 

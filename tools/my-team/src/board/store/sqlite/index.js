@@ -7,22 +7,30 @@
  * - Every transaction is BEGIN IMMEDIATE. The migration reads user_version and then writes; two processes
  *   holding a read lock that both ask to write make SQLite fail one at once, without waiting. apply()
  *   matches an update's expected version in its WHERE clause.
+ * - open() takes no lock on a file already at SCHEMA_VERSION: it reads user_version first and opens the
+ *   migration transaction only when the file is behind, so reads never wait on a writer (WAL).
+ * - The file is created 0600 before SQLite opens it; -wal and -shm take the same mode.
  * - node:sqlite needs Node 22.13 / 23.4; on an older Node, open() throws Unavailable and only the board stops.
  */
 
-import { chmodSync } from 'node:fs';
+import { closeSync, openSync } from 'node:fs';
 
 import {
     KINDS, LOG_FIELDS, SCHEMA_VERSION, Busy, Conflict, SchemaTooNew, StoreError, Unavailable,
-    checkChanges, checkQuery, fullLog, fullRow, kindOf,
+    checkChanges, checkKey, checkQuery, fullLog, fullRow,
 } from '../../core/contract.js';
 import { MIGRATIONS, TABLES } from './schema.js';
 
 const BUSY_MS = 5000;
 const q = (name) => `"${name}"`;
 
-/** node:sqlite, without the ExperimentalWarning it prints once per process; other warnings pass. */
-async function loadSqlite() {
+const loadSqlite = () => import('node:sqlite');
+
+/**
+ * Runs load() with SQLite's ExperimentalWarning (printed once per process) dropped; other warnings pass.
+ * Known limit: code that replaces process.emitWarning while load() runs is undone when it ends.
+ */
+async function quietly(load) {
     const emit = process.emitWarning;
     process.emitWarning = function (warning, ...rest) {
         const type = typeof rest[0] === 'string' ? rest[0] : rest[0]?.type;
@@ -30,7 +38,7 @@ async function loadSqlite() {
         return emit.call(this, warning, ...rest);
     };
     try {
-        return await import('node:sqlite');
+        return await load();
     } finally {
         process.emitWarning = emit;
     }
@@ -83,11 +91,16 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
     };
 
     function migrate() {
-        inTransaction(() => {
+        const versionNow = () => {
             const version = db.prepare('PRAGMA user_version').get().user_version;
             if (version > SCHEMA_VERSION) {
                 throw new SchemaTooNew(`${file} has board schema ${version}, newer than this my-team's ${SCHEMA_VERSION}; use the newer my-team`);
             }
+            return version;
+        };
+        if (versionNow() === SCHEMA_VERSION) return;
+        inTransaction(() => {
+            const version = versionNow();
             for (const m of MIGRATIONS.filter((x) => x.to > version)) {
                 exec(m.sql);
                 exec(`PRAGMA user_version = ${m.to}`);
@@ -100,16 +113,16 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
             if (db) return;
             let mod;
             try {
-                mod = await load();
+                mod = await quietly(load);
             } catch (err) {
                 throw new Unavailable(`board needs Node >= 22.13 (this is ${process.version}): ${err.message}`);
             }
             const Database = mod.Database ?? mod.DatabaseSync;
             try {
+                closeSync(openSync(file, 'a', 0o600));
                 db = new Database(file);
                 exec(`PRAGMA busy_timeout = ${BUSY_MS}`);
                 exec('PRAGMA journal_mode = WAL');
-                chmodSync(file, 0o600);
                 migrate();
             } catch (err) {
                 try { db?.close(); } catch { /* already closed */ }
@@ -131,7 +144,7 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
         },
 
         async get(kind, key) {
-            const def = kindOf(kind);
+            const def = checkKey(kind, key);
             return guarded(() => {
                 const raw = db.prepare(`SELECT * FROM ${TABLES[kind]} WHERE ${q(def.key)} = ?`).get(key);
                 return raw ? fullRow(kind, { ...decode(def.fields, raw), version: raw.version }) : null;

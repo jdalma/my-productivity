@@ -2,7 +2,8 @@
  * The board store contract as tests (T63a, rfc/board-design.md §4): an adapter that passes runStoreContract
  * can replace any other. Each adapter's test file calls it with a factory that returns a fresh, unopened store.
  * Cross-process concurrency is adapter-specific (memory is not shared between processes) and lives with the
- * adapter that has it.
+ * adapter that has it. A store that keeps a schema passes makeNewerStore: a store over data written by a newer
+ * schema, which open() must refuse. skip (a reason) skips the whole bundle, for a store this Node cannot run.
  */
 
 import test from 'node:test';
@@ -31,8 +32,8 @@ async function rejectsWith(promise, code) {
     });
 }
 
-export function runStoreContract(name, makeStore) {
-    const withStore = (title, fn) => test(`[${name}] ${title}`, async (t) => {
+export function runStoreContract(name, makeStore, { makeNewerStore, skip } = {}) {
+    const withStore = (title, fn) => test(`[${name}] ${title}`, { skip: skip ?? false }, async (t) => {
         const store = await makeStore(t);
         await store.open();
         t.after(() => store.close());
@@ -70,6 +71,15 @@ export function runStoreContract(name, makeStore) {
 
     withStore('get of a missing key is null', async (store) => {
         assert.equal(await store.get('task', 'nope'), null);
+    });
+
+    withStore('get refuses a key of the wrong type', async (store) => {
+        const { seqs } = await store.apply({ creates: [{ kind: 'note', row: { body: 'b', created_at: AT, created_by: 'pm' } }] });
+        assert.equal((await store.get('note', seqs.note[0])).body, 'b');
+        await rejectsWith(store.get('note', String(seqs.note[0])), 'invalid-query');
+        await rejectsWith(store.get('task', 1), 'invalid-query');
+        await rejectsWith(store.get('task', undefined), 'invalid-query');
+        await rejectsWith(store.get('nothing', 'x'), 'invalid-query');
     });
 
     withStore('a row missing a required field, with an unknown field or a wrong type is refused, and nothing is stored', async (store) => {
@@ -174,6 +184,20 @@ export function runStoreContract(name, makeStore) {
         assert.deepEqual(ids(await store.list('task', { priority: 20 }, ['priority', 'desc'])), ['T3', 'T4', 'T5'], 'ties by key, ascending');
     });
 
+    withStore('list refuses values that do not fit the field, and undefined', async (store) => {
+        await rejectsWith(store.list('task', { priority: '20' }), 'invalid-query');
+        await rejectsWith(store.list('task', { priority: [20, '30'] }), 'invalid-query');
+        await rejectsWith(store.list('task', { assignee: undefined }), 'invalid-query');
+        await rejectsWith(store.list('task', { assignee: [1] }), 'invalid-query');
+        await rejectsWith(store.list('task', { assignee: [undefined] }), 'invalid-query');
+    });
+
+    withStore('text orders by Unicode code point', async (store) => {
+        // UTF-16 puts the emoji (a surrogate pair, 0xD83D…) before U+FFFD; by code point it comes after
+        await store.apply({ creates: [{ kind: 'task', row: task('a\u{1F600}') }, { kind: 'task', row: task('a\uFFFD') }, { kind: 'task', row: task('aZ') }] });
+        assert.deepEqual((await store.list('task', {})).map((r) => r.id), ['aZ', 'a\uFFFD', 'a\u{1F600}']);
+    });
+
     withStore('list refuses fields that are not filterable, and bad orders', async (store) => {
         await rejectsWith(store.list('task', { title: 'x' }), 'invalid-query');
         await rejectsWith(store.list('task', { colour: 'x' }), 'invalid-query');
@@ -199,6 +223,31 @@ export function runStoreContract(name, makeStore) {
         assert.equal((await store.apply({ creates: [{ kind: 'task', row: task('T2') }] })).log_seq, null);
     });
 
+    withStore('a store does not check references between rows: core keeps them', async (store) => {
+        await store.apply({ creates: [
+            { kind: 'landing', row: landing('T9#1', { task_id: 'T9' }) },
+            { kind: 'finding', row: { id: 'R9 M1', verdict_id: 'R9', task_id: 'T9', severity: 'low', summary: 's', repro: 'r', state: 'open', created_at: AT, created_by: 'rv' } },
+        ] });
+        assert.equal((await store.get('landing', 'T9#1')).task_id, 'T9');
+        assert.equal(await store.get('task', 'T9'), null);
+    });
+
+    withStore('a JSON value that JSON text would change is refused before anything is written', async (store) => {
+        for (const detail of [{ f: () => 1 }, { when: new Date(0) }, { n: NaN }, { deep: [{ u: undefined }] }, new Map()]) {
+            await rejectsWith(store.apply({ creates: [{ kind: 'task', row: task('T1') }], log: [logEntry('T1', { detail })] }), 'invalid-row');
+        }
+        assert.equal(await store.get('task', 'T1'), null);
+        assert.deepEqual(await store.logSince(0, 10), []);
+    });
+
+    withStore('an update may not name a row created in the same change set', async (store) => {
+        await rejectsWith(store.apply({
+            creates: [{ kind: 'task', row: task('T1') }],
+            updates: [{ kind: 'task', key: 'T1', expect_version: 1, patch: { state: 'ready' } }],
+        }), 'invalid-row');
+        assert.equal(await store.get('task', 'T1'), null);
+    });
+
     withStore('a log entry missing a field is refused with the change set', async (store) => {
         const { actor, ...noActor } = logEntry('T1');
         await rejectsWith(store.apply({ creates: [{ kind: 'task', row: task('T1') }], log: [noActor] }), 'invalid-row');
@@ -220,5 +269,11 @@ export function runStoreContract(name, makeStore) {
         const up = (key) => store.apply({ updates: [{ kind: 'task', key, expect_version: 1, patch: { state: 'ready' } }] });
         await Promise.all([up('T1'), up('T2')]);
         assert.deepEqual((await store.list('task', { state: 'ready' })).map((r) => r.id), ['T1', 'T2']);
+    });
+
+    test(`[${name}] a store over data from a newer schema refuses to open`, { skip: skip ?? (makeNewerStore ? false : 'this store keeps no schema') }, async (t) => {
+        const store = await makeNewerStore(t);
+        t.after(() => store.close());
+        await rejectsWith(store.open(), 'schema-too-new');
     });
 }

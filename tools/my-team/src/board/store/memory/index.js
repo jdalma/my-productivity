@@ -1,17 +1,26 @@
 /**
  * The board store in memory (T63a): the second adapter, kept so the contract cannot lean on SQLite, and the
- * store for core's tests. One process only; nothing is kept after it ends. apply() checks everything before
- * it changes anything and then runs without awaiting, so a change set is all or nothing.
+ * store for core's tests. One process only; nothing is kept after it ends. apply() checks everything and
+ * copies every row before it changes anything, then changes them without awaiting, so a change set is all or
+ * nothing.
  */
 
 import {
-    KINDS, SCHEMA_VERSION, Conflict, checkChanges, checkQuery, fullLog, fullRow, kindOf,
+    KINDS, SCHEMA_VERSION, Conflict, checkChanges, checkKey, checkQuery, fullLog, fullRow,
 } from '../../core/contract.js';
 
+/** The contract's order: null first, text by Unicode code point (JS < compares UTF-16 units). */
 function compare(a, b) {
     if (a === b) return 0;
     if (a === null) return -1;
     if (b === null) return 1;
+    if (typeof a === 'string') {
+        const x = [...a], y = [...b];
+        for (let i = 0; i < Math.min(x.length, y.length); i++) {
+            if (x[i] !== y[i]) return x[i].codePointAt(0) < y[i].codePointAt(0) ? -1 : 1;
+        }
+        return x.length < y.length ? -1 : 1;
+    }
     return a < b ? -1 : 1;
 }
 
@@ -28,7 +37,7 @@ export function createMemoryStore() {
         },
 
         async get(kind, key) {
-            kindOf(kind);
+            checkKey(kind, key);
             const row = tables[kind].get(key);
             return row ? fullRow(kind, row) : null;
         },
@@ -70,21 +79,27 @@ export function createMemoryStore() {
             }
 
             const made = {};
-            for (const { kind, row } of creates) {
+            const next = { ...seqs };
+            const rows = creates.map(({ kind, row }) => {
                 const def = KINDS[kind];
                 const stored = structuredClone(row);
                 if (def.seq) {
-                    stored[def.key] = ++seqs[kind];
+                    stored[def.key] = ++next[kind];
                     (made[kind] ??= []).push(stored[def.key]);
                 }
                 if (def.versioned) stored.version = 1;
-                tables[kind].set(stored[def.key], stored);
-            }
-            for (const { kind, key, patch } of updates) {
+                return { kind, stored };
+            });
+            const patches = updates.map(({ kind, key, patch }) => ({ kind, key, patch: structuredClone(patch) }));
+            const entriesOut = entries.map((entry, i) => fullLog(log.length + 1 + i, entry));
+
+            Object.assign(seqs, next);
+            for (const { kind, stored } of rows) tables[kind].set(stored[KINDS[kind].key], stored);
+            for (const { kind, key, patch } of patches) {
                 const row = tables[kind].get(key);
-                Object.assign(row, structuredClone(patch), { version: row.version + 1 });
+                Object.assign(row, patch, { version: row.version + 1 });
             }
-            for (const entry of entries) log.push(fullLog(log.length + 1, entry));
+            log.push(...entriesOut);
             return { seqs: made, log_seq: entries.length ? log.length : null };
         },
 

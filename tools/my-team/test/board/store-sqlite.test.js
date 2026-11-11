@@ -1,7 +1,8 @@
 /**
  * The SQLite adapter (T63b, rfc/board-design.md §5): the store contract, plus what only a file shared by
  * processes has — concurrent writers, the PRAGMA order, migration, a schema newer than the code, the
- * ExperimentalWarning and a Node without node:sqlite. Every database lives in a temporary folder.
+ * ExperimentalWarning and a Node without node:sqlite. Every database lives in a temporary folder. On a Node
+ * without node:sqlite (before 22.13 / 23.4) every test that needs it is skipped, not failed.
  */
 
 import test from 'node:test';
@@ -11,11 +12,14 @@ import { mkdtempSync, rmSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-import { DatabaseSync } from 'node:sqlite';
 
 import { runStoreContract } from './store-contract.js';
 import { createSqliteStore } from '../../src/board/store/sqlite/index.js';
 import { SCHEMA_VERSION } from '../../src/board/core/contract.js';
+
+const sqlite = await import('node:sqlite').catch(() => null);
+const needsSqlite = sqlite ? {} : { skip: `node:sqlite needs Node >= 22.13 (this is ${process.version})` };
+const DatabaseSync = sqlite?.Database ?? sqlite?.DatabaseSync;
 
 const ADAPTER = fileURLToPath(new URL('../../src/board/store/sqlite/index.js', import.meta.url));
 const AT = '2026-11-11T08:00:00.000Z';
@@ -26,13 +30,22 @@ function tempFile(t) {
     return join(dir, 'board.db');
 }
 
-runStoreContract('sqlite', (t) => createSqliteStore(tempFile(t)));
+runStoreContract('sqlite', (t) => createSqliteStore(tempFile(t)), {
+    skip: needsSqlite.skip,
+    makeNewerStore(t) {
+        const file = tempFile(t);
+        const raw = new DatabaseSync(file);
+        raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
+        raw.close();
+        return createSqliteStore(file);
+    },
+});
 
 /** Runs `body` (an async function's text, with `store` open on `file`) in a new node process; resolves its stdout and stderr. */
-function child(file, body) {
+function child(file, body, options = '{}') {
     const script = `
         const { createSqliteStore } = await import(${JSON.stringify(ADAPTER)});
-        const store = createSqliteStore(${JSON.stringify(file)});
+        const store = createSqliteStore(${JSON.stringify(file)}, ${options});
         try { await store.open(); ${body} } finally { await store.close(); }
     `;
     return new Promise((resolve, reject) => {
@@ -45,7 +58,7 @@ function child(file, body) {
     });
 }
 
-test('[sqlite] of 8 processes updating one row at one version, exactly one wins', async (t) => {
+test('[sqlite] of 8 processes updating one row at one version, exactly one wins', needsSqlite, async (t) => {
     const file = tempFile(t);
     const store = createSqliteStore(file);
     await store.open();
@@ -69,7 +82,7 @@ test('[sqlite] of 8 processes updating one row at one version, exactly one wins'
     assert.equal((await store.logSince(0, 100)).length, 1, 'only the winner logged');
 });
 
-test('[sqlite] 8 processes opening a new file at once all migrate it and write', async (t) => {
+test('[sqlite] 8 processes opening a new file at once all migrate it and write', needsSqlite, async (t) => {
     const file = tempFile(t);
     const runs = await Promise.all(Array.from({ length: 8 }, (_, i) => child(file, `
         await store.apply({ creates: [{ kind: 'note', row: { body: 'n${i}', created_at: '${AT}', created_by: 'w' } }] });
@@ -82,7 +95,7 @@ test('[sqlite] 8 processes opening a new file at once all migrate it and write',
     assert.equal((await store.list('note', {})).length, 8);
 });
 
-test('[sqlite] busy_timeout is set before journal_mode, and every transaction begins IMMEDIATE, so a first open waits instead of failing', async (t) => {
+test('[sqlite] busy_timeout is set before journal_mode, and every transaction begins IMMEDIATE, so a first open waits instead of failing', needsSqlite, async (t) => {
     const trace = [];
     const store = createSqliteStore(tempFile(t), { trace: (sql) => trace.push(sql) });
     await store.open();
@@ -94,9 +107,30 @@ test('[sqlite] busy_timeout is set before journal_mode, and every transaction be
     const begins = trace.filter((s) => /^BEGIN/i.test(s));
     assert.equal(begins.length, 2, 'the migration and the apply');
     for (const b of begins) assert.equal(b, 'BEGIN IMMEDIATE');
+    await store.close();
+    trace.length = 0;
+    await store.open();
+    assert.deepEqual(trace.filter((s) => /^BEGIN/i.test(s)), [], 'a file at the current schema opens without a transaction');
 });
 
-test('[sqlite] the file is WAL, private to the user, and keeps rows across opens at one schema version', async (t) => {
+test('[sqlite] while another connection holds the write lock, opening a current file and reading do not wait', needsSqlite, async (t) => {
+    const file = tempFile(t);
+    const store = createSqliteStore(file);
+    await store.open();
+    await store.apply({ creates: [{ kind: 'task', row: { id: 'T1', title: 't', state: 'new', priority: 1, created_at: AT, created_by: 'pm' } }] });
+    await store.close();
+    const writer = new DatabaseSync(file);
+    writer.exec('PRAGMA busy_timeout = 0; BEGIN IMMEDIATE');
+    t.after(() => { writer.exec('ROLLBACK'); writer.close(); });
+    const t0 = Date.now();
+    await store.open();
+    t.after(() => store.close());
+    assert.equal((await store.get('task', 'T1')).title, 't');
+    assert.equal((await store.list('task', {})).length, 1);
+    assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0}ms: open or a read waited on the write lock`);
+});
+
+test('[sqlite] the file is WAL, private to the user, and keeps rows across opens at one schema version', needsSqlite, async (t) => {
     const file = tempFile(t);
     const store = createSqliteStore(file);
     await store.open();
@@ -114,16 +148,6 @@ test('[sqlite] the file is WAL, private to the user, and keeps rows across opens
     assert.equal(raw.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
 });
 
-test('[sqlite] a file written by a newer schema is refused', async (t) => {
-    const file = tempFile(t);
-    const raw = new DatabaseSync(file);
-    raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
-    raw.close();
-    const store = createSqliteStore(file);
-    t.after(() => store.close());
-    await assert.rejects(store.open(), (err) => err.code === 'schema-too-new' && /newer/.test(err.message));
-});
-
 test('[sqlite] a Node without node:sqlite makes the board unavailable, naming the Node it needs', async (t) => {
     const missing = Object.assign(new Error("No such built-in module: node:sqlite"), { code: 'ERR_UNKNOWN_BUILTIN_MODULE' });
     const store = createSqliteStore(tempFile(t), { load: async () => { throw missing; } });
@@ -135,7 +159,18 @@ test('[sqlite] a Node without node:sqlite makes the board unavailable, naming th
     });
 });
 
-test("[sqlite] opening prints no SQLite ExperimentalWarning, and other warnings still print", async (t) => {
+test("[sqlite] a warning other than SQLite's, raised while node:sqlite loads, still prints", needsSqlite, async (t) => {
+    const run = await child(tempFile(t), `console.log('ok');`, `{ load: async () => {
+        process.emitWarning('raised while loading', 'ExperimentalWarning');
+        process.emitWarning('SQLite look-alike', 'ExperimentalWarning');
+        return import('node:sqlite');
+    } }`);
+    assert.equal(run.out, 'ok', run.err);
+    assert.match(run.err, /raised while loading/);
+    assert.doesNotMatch(run.err, /SQLite/);
+});
+
+test("[sqlite] opening prints no SQLite ExperimentalWarning, and other warnings still print", needsSqlite, async (t) => {
     const run = await child(tempFile(t), `
         process.emitWarning('a later warning', 'ExperimentalWarning');
         await new Promise((r) => setImmediate(r));

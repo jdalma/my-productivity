@@ -9,17 +9,24 @@
  *   close()                     release it; safe to call twice
  *   describe()                  { adapter, schema_version, location }
  *   get(kind, key)              the row, or null
- *   list(kind, where, order?)   rows matching every `field: value` (a value list means any of them, null means
- *                               no value), on filterable fields only; order is [field, 'asc'|'desc'], by key
- *                               when left out; ties go by key, ascending; null sorts before any value
+ *   list(kind, where, order?)   rows matching every `field: value` on filterable fields (and the key). A value
+ *                               must fit the field's type; null matches no value; a value list matches any of
+ *                               its values (null among them included); an empty list matches nothing.
+ *                               order is [field, 'asc'|'desc'], by key when left out; ties go by key, ascending;
+ *                               null is smaller than any value; text compares by Unicode code point
  *   apply({creates, updates, log})
  *                               all or nothing. creates: [{kind, row}]; a key that exists is a Conflict.
  *                               updates: [{kind, key, expect_version, patch}]; applied only while the row's
  *                               version equals expect_version, which then goes up by one; otherwise Conflict.
+ *                               An update names a row that existed before the change set (InvalidRow for one
+ *                               created in it). A lost lock race (a deadlock, a serialization failure) is a
+ *                               Conflict too.
  *                               log: [entry], numbered in commit order.
  *                               Returns { seqs: {<kind>: [new seq…]}, log_seq } (log_seq null with no log)
  *   logSince(seq, limit)        log entries after seq, oldest first
  * Rows read back with every field of their kind (null when unset), plus `version` on versioned kinds.
+ * A store does not check references between rows (a landing's task, a finding's verdict): core keeps them,
+ * in the same change set.
  */
 
 export const SCHEMA_VERSION = 1;
@@ -104,13 +111,24 @@ export class InvalidRow extends StoreError { constructor(m) { super(m, 'invalid-
 /** The store cannot run here at all (a Node without its driver): every board command fails, the rest of my-team runs. */
 export class Unavailable extends StoreError { constructor(m) { super(m, 'board-unavailable'); } }
 
+const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
+    && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
+
+/** Values that survive JSON text unchanged: what every store can keep. */
+function plainJson(v) {
+    if (v === null || typeof v === 'string' || typeof v === 'boolean') return true;
+    if (typeof v === 'number') return Number.isFinite(v);
+    if (Array.isArray(v)) return v.every(plainJson);
+    return isPlainObject(v) && Object.values(v).every(plainJson);
+}
+
 function fits(spec, value) {
     if (value === null) return true;
     switch (spec.type) {
         case 'text': return typeof value === 'string';
         case 'int': return Number.isInteger(value);
         case 'list': return Array.isArray(value) && value.every((v) => typeof v === 'string');
-        case 'json': return typeof value === 'object' && !Array.isArray(value);
+        case 'json': return isPlainObject(value) && plainJson(value);
     }
     return false;
 }
@@ -145,9 +163,10 @@ export function fullRow(kind, row) {
 }
 
 /**
- * Checks a change set before a store applies any of it. A patch may
- * not set the key, version or creation fields, nor clear a required field. A seq kind's key is not a field
- * of its create, so a row that brings one is refused like any unknown field.
+ * Checks a change set before a store applies any of it. A patch may not set the key, version or creation
+ * fields, nor clear a required field, nor name a row the same change set creates. A seq kind's key is not a
+ * field of its create, so a row that brings one is refused like any unknown field. JSON values must be plain
+ * (what survives JSON text), so no store fails half way through writing one.
  */
 export function checkChanges({ creates = [], updates = [], log = [] } = {}) {
     for (const { kind, row } of creates) {
@@ -156,8 +175,10 @@ export function checkChanges({ creates = [], updates = [], log = [] } = {}) {
         const fields = def.seq ? Object.fromEntries(Object.entries(def.fields).filter(([n]) => n !== def.key)) : def.fields;
         checkFields(`create ${kind}`, fields, row, { all: true });
     }
+    const created = new Set(creates.filter(({ kind }) => !KINDS[kind].seq).map(({ kind, row }) => `${kind}\0${row[KINDS[kind].key]}`));
     for (const { kind, key, expect_version, patch } of updates) {
         const def = kindOf(kind);
+        if (created.has(`${kind}\0${key}`)) throw new InvalidRow(`update ${kind} ${key}: created in the same change set; write it whole`);
         if (!def.versioned) throw new InvalidRow(`${kind} rows are written once`);
         if (!Number.isInteger(expect_version)) throw new InvalidRow(`update ${kind} ${key}: expect_version must be an integer`);
         for (const name of Object.keys(patch ?? {})) {
@@ -170,12 +191,24 @@ export function checkChanges({ creates = [], updates = [], log = [] } = {}) {
     for (const entry of log) checkFields('log', LOG_FIELDS, entry ?? {}, { all: true });
 }
 
+/** Checks a get() key against the kind's key field. */
+export function checkKey(kind, key) {
+    const def = kindOf(kind, InvalidQuery);
+    const spec = def.fields[def.key];
+    if (key === undefined || key === null || !fits(spec, key)) throw new InvalidQuery(`${kind}: the key '${def.key}' is ${spec.type}`);
+    return def;
+}
+
 /** Checks list() arguments; returns the order as [field, direction]. */
 export function checkQuery(kind, where = {}, order) {
     const def = kindOf(kind, InvalidQuery);
     const usable = (name) => name === def.key || def.fields[name]?.filterable;
-    for (const name of Object.keys(where)) {
+    for (const [name, want] of Object.entries(where)) {
         if (!usable(name)) throw new InvalidQuery(`${kind}: '${name}' is not filterable`);
+        const values = Array.isArray(want) ? want : [want];
+        if (values.some((v) => v === undefined || !fits(def.fields[name], v))) {
+            throw new InvalidQuery(`${kind}: '${name}' takes ${def.fields[name].type} values or null`);
+        }
     }
     if (!order) return [def.key, 'asc'];
     const [field, dir] = order;

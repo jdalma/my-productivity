@@ -96,7 +96,9 @@ sh "$scan" "$mid" --not --remotes=origin > "$work/out" 2>&1; check "(L5) --not -
 
 # (g) the hook: a dirty commit is refused and stays off the remote, a clean one goes
 sh "$here/install-pre-push.sh" > "$work/out" 2>&1; check "(g) install" 0 $?
-mkdir -p scripts; cp "$scan" scripts/public-scan.sh; commit -m "scan script"
+echo plain > p.txt; commit -m "plain"
+copy=$(git rev-parse --git-path hooks/public-scan.sh)
+contains "(R62a R1) the hook has its own copy of the scan, naming its commit" "$copy" "# public-scan from "
 git push -q origin main > "$work/out" 2>&1; check "(g) clean push goes through" 0 $?
 echo "host: internal.example.com" > c.txt; commit -m "config"; dirty=$(git rev-parse HEAD)
 git push -q origin main > "$work/out" 2>&1; check "(g) dirty push refused" 1 $?
@@ -114,6 +116,33 @@ git -c user.email=rel@internal.example.com tag -a v-tagger -m "clean notes"
 git push -q origin v-tagger > "$work/out" 2>&1; check "(M1) a tagger address that matches is refused" 1 $?
 git tag -a v-clean -m "clean notes"
 git push -q origin v-clean > "$work/out" 2>&1; check "(M1) a clean tag goes through" 0 $?
+
+# R62a L1: a tag pointing at a tag
+git tag -a inner -m "notes for example-secret-team"
+git tag -a outer inner -m "clean outer notes"
+git tag -d inner > /dev/null
+git push -q origin outer > "$work/out" 2>&1; check "(R62a L1) the inner tag's message is checked" 1 $?
+
+# R62a L2: the names of what is pushed
+git branch example-secret-team-fix
+git push -q origin example-secret-team-fix > "$work/out" 2>&1; check "(R62a L2) a branch name that matches is refused" 1 $?
+git tag example-secret-team-v1
+git push -q origin example-secret-team-v1 > "$work/out" 2>&1; check "(R62a L2) a tag name that matches is refused" 1 $?
+
+# R62a L3: a hit in a tag only still says what it is
+git tag -a v-only -m "about internal.example.com" HEAD
+sh "$scan" v-only --not --remotes=origin > "$work/out" 2>&1; check "(R62a L3) tag-only hit" 1 $?
+contains "(R62a L3) the summary counts tags" "$work/out" "tag(s)"
+
+# R62a R1: a branch without the scan script still has a checking hook
+git checkout -q --orphan bare-main; git rm -rq --cached . ; rm -rf -- *; echo bare > only.txt; commit -m "bare main"
+git push -q origin bare-main > "$work/out" 2>&1; check "(R62a R1) clean push from a branch without scripts/" 0 $?
+echo "x internal.example.com" > leak.txt; commit -m leak
+git push -q origin bare-main > "$work/out" 2>&1; check "(R62a R1) dirty push from a branch without scripts/ is refused" 1 $?
+git checkout -q main
+
+# reinstalling over our own hook replaces it; someone else's is never replaced
+sh "$here/install-pre-push.sh" > "$work/out" 2>&1; check "(R62a R1) reinstall over our own hook" 0 $?
 
 # (h) an existing pre-push hook is never replaced
 hook=$(git rev-parse --git-path hooks/pre-push)

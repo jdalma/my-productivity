@@ -1,11 +1,12 @@
 #!/bin/sh
 # Checks commits for private identifiers before they reach this public repository (T61):
-#   scripts/public-scan.sh <range>...      e.g. origin/feat/x..HEAD, or <sha> --not --remotes=origin
+#   scripts/public-scan.sh [--ref <name>]... <range>...   e.g. origin/feat/x..HEAD, or <sha> --not --remotes=origin
+# --ref names a branch or tag being pushed, checked as text (the pre-push hook passes both of each pair).
 # A range is revisions (A, ^A, A..B, A...B) and --not, --all, --branches, --tags, --remotes, --glob; any
 # other argument (a pathspec, --since, ...) would narrow what is checked and is refused (exit 2).
 # Looks at each commit's added lines (with file and line), its whole message (subject, body, trailers), its
 # author and committer (name and address), and the paths it adds or renames to; an annotated tag named in
-# the range is checked too (message and tagger). The patterns come from outside the repository, since the
+# the range is checked too (message and tagger, and those of a tag it points at). The patterns come from outside the repository, since the
 # list itself is private: $PUBLIC_SCAN_PATTERNS, default ~/.config/my-claude-plugin/private-patterns.txt,
 # one extended regular expression per line, `#` comments, case ignored, CRLF line ends allowed. Hits are
 # printed without the pattern.
@@ -27,7 +28,19 @@ tr -d '\r' < "$file" | grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' > "$tmp/p
 printf '' | grep -i -E -f "$tmp/patterns" >/dev/null 2>"$tmp/err"
 [ $? -le 1 ] || { echo "public-scan: a pattern in $file is not a valid regular expression" >&2; exit 2; }
 
-# only arguments that name revisions: anything else could quietly narrow the check (R62 L5)
+# --ref names apart; then only arguments that name revisions: anything else could quietly narrow the check (R62 L5)
+: > "$tmp/refs"; : > "$tmp/args"
+while [ $# -gt 0 ]; do
+    case $1 in
+        --ref) [ $# -ge 2 ] || { echo "public-scan: --ref needs a name" >&2; exit 2; }; printf '%s\n' "$2" >> "$tmp/refs"; shift 2 ;;
+        *) printf '%s\n' "$1" >> "$tmp/args"; shift ;;
+    esac
+done
+set -f; old=$IFS; IFS='
+'
+set -- $(cat "$tmp/args")
+IFS=$old; set +f
+[ $# -gt 0 ] || { echo "public-scan: no range given" >&2; exit 2; }
 : > "$tmp/tags"
 for a in "$@"; do
     case $a in
@@ -89,14 +102,25 @@ while read -r sha; do
     rm -f "$tmp/added" "$tmp/where"
 done < "$tmp/commits"
 
+tags=0
 while read -r tag; do
-    git cat-file -p "$tag" > "$tmp/tag"
-    lines=$((lines + $(wc -l < "$tmp/tag")))
-    search "$tmp/tag" "tag $tag"
+    # a tag may point at a tag: each one's message and tagger is pushed (R62a L1)
+    while [ "$(git cat-file -t "$tag")" = tag ]; do
+        tags=$((tags + 1))
+        git cat-file -p "$tag" > "$tmp/tag"
+        lines=$((lines + $(wc -l < "$tmp/tag")))
+        search "$tmp/tag" "tag $tag"
+        tag=$(sed -n 's/^object //p;q' "$tmp/tag")
+    done
 done < "$tmp/tags"
 
+refs=$(wc -l < "$tmp/refs" | tr -d ' ')
+lines=$((lines + refs))
+search "$tmp/refs" "ref"
+
+checked="$commits commit(s), $tags tag(s), $refs ref name(s), $lines line(s)"
 if [ "$hits" -gt 0 ]; then
-    echo "public-scan: $hits hit(s) in $commits commit(s). Remove them before pushing." >&2
+    echo "public-scan: $hits hit(s) — $checked checked. Remove them before pushing." >&2
     exit 1
 fi
-echo "public-scan: clean — $commits commit(s), $lines line(s) checked"
+echo "public-scan: clean — $checked checked"

@@ -105,3 +105,25 @@ test('monitor prints old and new lines without undefined (e)', (t) => {
     assert.match(out, /Bash.*git push/);
     assert.doesNotMatch(out, /undefined/);
 });
+
+test('a cut never splits a surrogate pair (R61 L2)', () => {
+    const text = 'x'.repeat(TEXT_LIMIT - 1) + '😀' + 'y'.repeat(10);
+    const { target } = eventLine({ type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push', target: text });
+    const kept = target.slice(0, target.indexOf('…'));
+    assert.equal(/[\ud800-\udbff]$/.test(kept), false, 'no high surrogate left alone at the end');
+    assert.equal(Buffer.from(kept, 'utf-8').toString('utf-8'), kept, 'valid UTF-16 all through');
+    assert.match(target, /…\[\+12 chars\]$/, 'the whole pair went to the cut part');
+});
+
+test('a log that cannot be written is a warning, not a failure: appendEvent says so (R61 L1)', async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'mt-events-ro-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    mkdirSync(join(root, 'events.jsonl'));   // a folder where the file should be
+    const err = process.stderr.write;
+    let warned = '';
+    process.stderr.write = (s) => { warned += s; return true; };
+    try {
+        assert.equal(await appendEvent(root, { type: 'tmux-denied', team: 'tt', worker: 'rv', args: ['ls'] }), false);
+    } finally { process.stderr.write = err; }
+    assert.match(warned, /events\.jsonl append failed/);
+});

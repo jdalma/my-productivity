@@ -118,9 +118,19 @@ test('runShutdown ends the tmux side only: state_root, mail and work files stay,
     delete process.env.TMUX; // never treat the test runner's session as the team session
     const origLog = console.log; console.log = () => {};
     try {
+        // tmux stubbed: under a loaded full suite each real tmux call took up to seconds (T62), which no
+        // bound on shutdown's own time could tell from a grace wait. The old wait was 10 s by default
+        // (MY_TEAM_GRACE_MS, removed in 56da3ce); half of it still catches it with room for any load.
+        const killed = [];
         const t0 = Date.now();
-        await runShutdown({ team: 'demo-team' });
-        assert.ok(Date.now() - t0 < 2000, `shutdown took ${Date.now() - t0}ms — grace wait still present`);
+        await runShutdown({ team: 'demo-team' }, {
+            listPanes: async () => [],
+            killTeamSession: async (session) => { killed.push(session); },
+            killWorkerPanes: async () => { throw new Error('a detached session is killed whole'); },
+        });
+        const took = Date.now() - t0;
+        assert.deepEqual(killed, ['my-team-demo-team-zz:0'], 'the team session is killed right away');
+        assert.ok(took < 5000, `shutdown took ${took}ms: a grace wait is back`);
         assert.equal(existsSync(`${stateRoot}.bak`), false, 'nothing moved to .bak');
         assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL, 'mail kept');
         assert.equal(readFileSync(join(stateRoot, 'work', 'notes.md'), 'utf-8'), 'half done\n', 'work kept');

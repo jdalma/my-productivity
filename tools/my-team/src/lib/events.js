@@ -41,7 +41,10 @@ const ARGS_LIMIT = 20;
 
 function cut(s) {
     const text = String(s);
-    return text.length > TEXT_LIMIT ? `${text.slice(0, TEXT_LIMIT)}…[+${text.length - TEXT_LIMIT} chars]` : text;
+    if (text.length <= TEXT_LIMIT) return text;
+    // never half a surrogate pair (an emoji): a strict JSON reader refuses a lone one (R61 L2)
+    const end = /[\ud800-\udbff]/.test(text[TEXT_LIMIT - 1]) ? TEXT_LIMIT - 1 : TEXT_LIMIT;
+    return `${text.slice(0, end)}…[+${text.length - end} chars]`;
 }
 
 function cutArgs(args) {
@@ -69,19 +72,24 @@ async function write(stateRoot, line) {
     try {
         await mkdir(dirname(path), { recursive: true });
         await appendFile(path, JSON.stringify(line) + '\n', 'utf-8');
+        return true;
     } catch (err) {
         process.stderr.write(`[my-team] events.jsonl append failed: ${err.message}\n`);
+        return false;
     }
 }
 
-/** One line of any type in EVENT_TYPES. Throws when the fields do not fit it. */
+/**
+ * One line of any type in EVENT_TYPES; false when the file could not be written. Throws when the fields
+ * do not fit the type: a mistake in the calling code, for its tests to catch.
+ */
 export async function appendEvent(stateRoot, fields) {
-    await write(stateRoot, eventLine(fields));
+    return write(stateRoot, eventLine(fields));
 }
 
 /** A message line: `team` is the sender's team, its `worker` the sender (also `from`, kept for older readers). */
 export async function appendMessageEvent(stateRoot, { team, from, to, body, message_id, reply_to, expects_reply, ...optional }) {
-    await appendEvent(stateRoot, {
+    return appendEvent(stateRoot, {
         type: 'message', team, worker: from, from, to, body,
         message_id: message_id ?? null, reply_to: reply_to ?? null, expects_reply: Boolean(expects_reply), ...optional,
     });

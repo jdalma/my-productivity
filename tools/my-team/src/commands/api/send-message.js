@@ -94,6 +94,7 @@ function senderFrom(env, teamName, fromWorker) {
 
 export async function runApiSendMessage(input, deps = {}) {
     const resolvePane = deps.resolvePaneBySessionWorker ?? resolvePaneBySessionWorker;
+    const writeEvent = deps.appendMessageEvent ?? appendMessageEvent;
     const { team_name, to_worker, body, reply_to, expects_reply, to_team, to_session } = input ?? {};
     if (!team_name) throw new Error('team_name is required');
     const from_worker = senderFrom(deps.env ?? process.env, team_name, input?.from_worker);
@@ -217,8 +218,16 @@ export async function runApiSendMessage(input, deps = {}) {
         crossTeam
     );
 
+    // The message is delivered by now: a log line that cannot be made or written is a warning, never an
+    // error, or the sender would send again and the recipient get it twice (R61 L1).
+    const logWarnings = [];
+    const logEvent = async (stateRoot, fields) => {
+        let written = false;
+        try { written = await writeEvent(stateRoot, fields); } catch (err) { process.stderr.write(`[my-team] events.jsonl: ${err.message}\n`); }
+        if (!written) logWarnings.push(`not logged in ${stateRoot}/events.jsonl`);
+    };
     const eventExtra = crossTeam ? { to_team: crossTeam.toTeam } : {};
-    await appendMessageEvent(manifest.state_root, {
+    await logEvent(manifest.state_root, {
         team: team_name,
         from: safeFrom,
         to: safeTo,
@@ -232,7 +241,7 @@ export async function runApiSendMessage(input, deps = {}) {
     // message is invisible to `my-team monitor` on the receiving side — the
     // recipient would answer a message its own timeline never recorded.
     if (crossTeam) {
-        await appendMessageEvent(crossTeam.toStateRoot, {
+        await logEvent(crossTeam.toStateRoot, {
             team: team_name,
             from: safeFrom,
             to: safeTo,
@@ -253,5 +262,6 @@ export async function runApiSendMessage(input, deps = {}) {
         expects_reply: message.expects_reply,
         ...(crossTeam ? { delivered_to_team: crossTeam.toTeam } : {}),
         ...(expectsReplyHint ? { hint: expectsReplyHint } : {}),
+        ...(logWarnings.length ? { warning: `delivered, but ${logWarnings.join('; ')}` } : {}),
     };
 }

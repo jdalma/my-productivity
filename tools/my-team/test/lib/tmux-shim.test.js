@@ -254,3 +254,12 @@ test('the default server under another name is still the default server: symlink
     }
     for (const p of Object.values(fake)) assert.equal(alive(p), false, `${p} left running`);
 });
+
+test('a shim refusal stays a refusal when its events line cannot be written (T62)', (t) => {
+    const s = setup(t);
+    writeFileSync(join(s.dir, 'state-file'), 'x');
+    const r = spawnSync('/bin/sh', ['-c', 'tmux kill-server'], { env: { ...s.env, MY_TEAM_STATE_ROOT: join(s.dir, 'state-file') }, encoding: 'utf-8', ...LIMIT });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /거부됨/);
+    assert.equal(s.ctlAlive(), true);
+});

@@ -155,3 +155,13 @@ test('config: deny is an optional list of push and repo-write', () => {
         rmSync(cwd, { recursive: true, force: true });
     }
 });
+
+test('a refusal stays a refusal when its events line cannot be written (T62)', (t) => {
+    const { dir, root } = repo(t);
+    const notADir = join(dir, 'state-file');
+    execFileSync('sh', ['-c', `echo x > '${notADir}'`]);
+    const r = hook(t, { tool_name: 'Bash', tool_input: { command: 'git push' }, cwd: root },
+        ['--deny', 'push'], { MY_TEAM_STATE_ROOT: notADir, MY_TEAM_WORKER: 'tt/rv' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /"push" rule refuses/);
+});

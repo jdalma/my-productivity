@@ -334,7 +334,7 @@ peer for itself when its own task splits.
 ```
 ~/.my-team/sessions/<team>/
 ├── manifest.json
-├── events.jsonl              # peer message audit log
+├── events.jsonl              # team timeline: messages and refusals (docs/events-format.md)
 ├── workers/<name>/
 │   ├── AGENTS.md             # per-worker system prompt overlay
 │   ├── status.json           # worker-written {state, reason}; shown by `status`

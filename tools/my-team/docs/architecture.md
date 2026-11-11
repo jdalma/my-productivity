@@ -174,22 +174,14 @@ reply_to 해석 순서:
 
 ### 4.2 events.jsonl
 
-monitor와 audit 용도 통합 로그. `send-message` API가 호출되면 한 줄 추가:
+팀의 타임라인. 메시지(`send-message`), tmux shim의 거부(`tmux-denied`), worker guard hook의 거부(`tool-denied`)가 한 줄씩 append된다. 모든 새 줄은 `ts`, `type`, `team`, `worker`를 가진다. 줄 종류별 키, 길이 상한, 옛 줄 읽는 규칙은 [events-format.md](events-format.md)에 있고, 코드의 정의는 `src/lib/events.js`의 `EVENT_TYPES` 하나다.
 
 ```jsonc
-{
-  "ts": "<ISO>",
-  "type": "message",
-  "from": "<from>",
-  "to": "<to>",
-  "body": "...",
-  "message_id": "<id>",
-  "reply_to": "<id>" | null,
-  "expects_reply": false
-}
+{ "ts": "<ISO>", "type": "message", "team": "<보낸 팀>", "worker": "<from>", "from": "<from>", "to": "<to>",
+  "body": "...", "message_id": "<id>", "reply_to": "<id>" | null, "expects_reply": false }
 ```
 
-`my-team monitor <team>`은 이 파일을 tail해서 실시간 출력한다.
+메시지 전달 뒤에 쓰므로, 기록에 실패해도 send-message는 ok와 `warning`을 돌려준다(재전송 중복 방지). `my-team monitor <team>`은 `readEvent`로 이 파일을 읽어 실시간 출력한다.
 
 ## 5. tmux 트리거 토큰
 

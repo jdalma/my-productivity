@@ -105,3 +105,18 @@ test('a config cannot set a worker\'s identity variables (e)', () => {
         rmSync(cwd, { recursive: true, force: true });
     }
 });
+
+test('a message delivered but not logged is still ok, with a warning, and delivered once (T62, R61 L1)', async (t) => {
+    const s = setup(t);
+    for (const appendMessageEvent of [
+        async () => { throw new Error("events: 'message' has no key oops"); },   // a shape mistake in a future change
+        async () => false,                                                        // the file could not be written
+    ]) {
+        const r = await runApiSendMessage({ team_name: 'tt', from_worker: 'rv', to_worker: 'core', body: 'once' },
+            { ...s.deps({ MY_TEAM_WORKER: 'tt/rv' }), appendMessageEvent });
+        assert.equal(r.ok, true);
+        assert.match(r.warning, /events\.jsonl/);
+    }
+    const spooled = s.files(s.t1).filter((f) => f.includes('incoming-spool'));
+    assert.equal(spooled.length, 2, 'one spool file per send, none resent');
+});

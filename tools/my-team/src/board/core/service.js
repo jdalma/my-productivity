@@ -233,7 +233,8 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             return {
                 action: 'land', kind: 'landing', ref: id, states,
                 changes: { creates: [{ kind: 'landing', row }], updates, log: [log('land', 'landing', id, { ...states, detail: { task: task.id, superseded: previous?.id ?? null } })] },
-                notify: [...judgesOf(task), ...pms()],
+                // the judge only: pm hears of a reviewed task at its verdict (R70 L2)
+                notify: judgesOf(task),
                 result: () => ({ task: { ...task, state }, landing: { ...row, superseded_by: null, version: 1 }, fixed }),
             };
         }),
@@ -249,7 +250,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             move('verdict', task);
             const state = VERDICTS[verdict];
             if (input.verified_commit !== landing.commit) fail('stale-landing', `${landing.id} is ${landing.commit}; verified_commit is ${input.verified_commit}`);
-            const report = text(input.report, 'report');
+            const report = input.report === undefined ? landing.review_report_path : text(input.report, 'report');
             const rerun = { cmd: text(input.rerun?.cmd, 'rerun.cmd'), result: text(input.rerun?.result, 'rerun.result') };
             const raised = input.findings ?? [];
             if (!Array.isArray(raised)) fail('invalid', 'findings must be a list');

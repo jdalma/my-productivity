@@ -72,5 +72,5 @@ test('the cycle in docs/board.md runs as written and ends where the doc says', {
     assert.deepEqual(last.verdicts.map((v) => v.id).sort(), ['R1', 'R1a']);
     assert.deepEqual(last.findings.map((f) => [f.id, f.state, f.fixed_in]), [['R1 M1', 'fixed', 'T1#2']]);
     const notices = (w) => (existsSync(join(root, 'incoming-spool', w)) ? readdirSync(join(root, 'incoming-spool', w)).length : 0);
-    assert.deepEqual({ pm: notices('pm'), dev: notices('dev'), rv: notices('rv') }, { pm: 4, dev: 3, rv: 2 });
+    assert.deepEqual({ pm: notices('pm'), dev: notices('dev'), rv: notices('rv') }, { pm: 2, dev: 3, rv: 2 });
 });

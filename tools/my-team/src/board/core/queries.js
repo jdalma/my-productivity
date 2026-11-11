@@ -36,7 +36,8 @@ export async function reviewQueue(store, roster, reviewer) {
     const tasks = (await store.list('task', { state: 'review' })).filter((t) => judgesOf(t, roster).includes(reviewer)).sort(byPriority);
     const queue = [], incomplete = [];
     for (const task of tasks) {
-        const [landing] = await store.list('landing', { task_id: task.id, superseded_by: null });
+        const own = await store.list('landing', { task_id: task.id });
+        const landing = own.find((l) => l.superseded_by === null);
         if (!landing) continue;
         const missing = REQUIRED_TASK_FIELDS.filter((f) => task[f] === null);
         if (missing.length) { incomplete.push({ landing: landing.id, task: task.id, missing }); continue; }
@@ -49,6 +50,8 @@ export async function reviewQueue(store, roster, reviewer) {
             task,
             parent: task.parent_id ? family[0] : null,
             landing,
+            // what the reviewer last saw of this task: the commit of the landing this one superseded (R70 R2)
+            previous_commit: own.find((l) => l.superseded_by === landing.id)?.commit ?? null,
             open_findings: findings.filter((f) => isOpen(f, approved)),
             settled_findings: findings.filter((f) => !isOpen(f, approved) && f.state !== 'fixed'),
             notes: await store.list('note', { task_id: ids }),

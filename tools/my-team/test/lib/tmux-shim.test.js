@@ -180,6 +180,7 @@ function notify(t, s, shimDir) {
     const stateRoot = join(base, 't56');
     mkdirSync(join(stateRoot, 'mailbox'), { recursive: true });
     const pane = s.ctlTmux('display-message', '-p', '-t', 'ctl', '#{pane_id}').trim();
+    s.ctlTmux('set-option', '-p', '-t', pane, '@worker_name', 'bob');   // as start tags a worker's pane (T63e1)
     writeFileSync(join(stateRoot, 'manifest.json'), JSON.stringify({
         team_name: 't56', state_root: stateRoot, session_name: 'ctl',
         workers: [{ name: 'alice', pane_id: '%999' }, { name: 'bob', pane_id: pane }],

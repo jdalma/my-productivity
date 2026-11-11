@@ -43,6 +43,7 @@ import { mkdir, readFile, readdir, unlink } from 'fs/promises';
 import { join, dirname } from 'path';
 
 import { sendToWorker } from './tmux-session.js';
+import { tmuxExecAsync } from './tmux-utils.js';
 import { TeamPaths, absPath } from './state-paths.js';
 import { atomicWriteJson, appendFileWithMode, ensureDirWithMode } from './fs-utils.js';
 
@@ -212,19 +213,48 @@ export async function absorbIncomingSpool(teamName, workerName, cwd) {
 }
 
 /**
- * Send a short tmux trigger to a worker pane. Message MUST be < 200 chars.
- * Returns false on error — never throws.
+ * Whether `paneId` is, right now, `owner.worker`'s pane in `owner.session` (T63e1, R70 R1): the same
+ * (session, @worker_name) test as team liveness. Pane ids are server-wide and reused, so a stale manifest
+ * (a stopped team, a restarted tmux) can name another team's pane; in a split-pane team the session is the
+ * user's, and @worker_name tells the team's panes apart. `reason` says why not, or why it could not tell.
  */
-export async function sendTmuxTrigger(paneId, triggerType, payload) {
+async function paneOwnedBy(paneId, owner) {
+    const session = owner?.session?.split(':')[0];
+    if (!paneId || !session || !owner?.worker) return { ok: false, reason: 'no pane id or session in the manifest to check against' };
+    let stdout;
+    try {
+        // worker first and '|' between: a worker name has no '|', and tmux may print a tab as '_' (no UTF-8 locale)
+        ({ stdout } = await tmuxExecAsync(['display-message', '-p', '-t', paneId, '#{@worker_name}|#{session_name}']));
+    } catch {
+        return { ok: false, reason: `pane ${paneId} is gone or tmux cannot say` };
+    }
+    const line = stdout.replace(/\n$/, '');
+    const cut = line.indexOf('|');
+    const paneWorker = line.slice(0, cut), paneSession = line.slice(cut + 1);
+    if (paneSession !== session || paneWorker.trim() !== owner.worker) {
+        return { ok: false, reason: `pane ${paneId} is not ${owner.worker}'s in ${session} now` };
+    }
+    return { ok: true };
+}
+
+/**
+ * Send a short tmux trigger to a worker pane, only while the pane is still `owner`'s
+ * ({session, worker}, see paneOwnedBy). Message MUST be < 200 chars. Never throws. Returns {sent}; when the
+ * ownership check refused it, also `refused` (the reason). An unanswered prompt or a busy pane is
+ * `sent: false` without `refused`: the recipient's next poll picks the message up.
+ */
+export async function sendTmuxTrigger(paneId, triggerType, payload, owner) {
     const message = payload ? `${triggerType}:${payload}` : triggerType;
     if (message.length > 200) {
         console.warn(`[tmux-comm] sendTmuxTrigger: message rejected (${message.length} chars exceeds 200 char limit)`);
-        return false;
+        return { sent: false };
     }
+    const check = await paneOwnedBy(paneId, owner);
+    if (!check.ok) return { sent: false, refused: check.reason };
     try {
-        return await sendToWorker('', paneId, message);
+        return { sent: await sendToWorker('', paneId, message) };
     } catch {
-        return false;
+        return { sent: false };
     }
 }
 
@@ -253,7 +283,10 @@ function newMessageId() {
  *   4. Fire the tmux notification (best-effort; recipient still polls).
  *
  * `replyTo` (optional) is the message_id this answers. `expectsReply`
- * defaults to false; senders set it to true only for questions.
+ * defaults to false; senders set it to true only for questions. `session` is
+ * the recipient team's tmux session (manifest session_name): the trigger is
+ * typed only while toPaneId is still the recipient's pane there. The returned
+ * message carries `trigger` ({sent, refused?}).
  */
 export async function queueDirectMessage(
     teamName,
@@ -264,7 +297,8 @@ export async function queueDirectMessage(
     cwd,
     replyTo = null,
     expectsReply = false,
-    crossTeam = null
+    crossTeam = null,
+    session = null
 ) {
     const messageId = newMessageId();
     const createdAt = new Date().toISOString();
@@ -303,10 +337,10 @@ export async function queueDirectMessage(
     // 3. Drop into recipient's spool (commits delivery).
     dropSpoolMessage(teamName, toWorker, cwd, message, crossTeam?.toStateRoot);
 
-    // 4. Notify the recipient via tmux (best-effort).
-    await sendTmuxTrigger(toPaneId, 'new-message', fromWorker);
+    // 4. Notify the recipient via tmux (best-effort, and only into its own pane).
+    const trigger = await sendTmuxTrigger(toPaneId, 'new-message', fromWorker, { session, worker: toWorker });
 
-    return message;
+    return { ...message, trigger };
 }
 
 /**
@@ -317,7 +351,7 @@ export async function queueDirectMessage(
  * the pending entry?). Senders that need answers must call
  * `queueDirectMessage` per recipient with distinct message_ids.
  */
-export async function queueBroadcastMessage(teamName, fromWorker, body, workerPanes, cwd, { expectsReply = false } = {}) {
+export async function queueBroadcastMessage(teamName, fromWorker, body, workerPanes, cwd, { expectsReply = false, session = null } = {}) {
     if (expectsReply) {
         throw new Error(
             'Broadcast does not support expects_reply=true. Send individual queueDirectMessage calls per recipient if you need answers.'
@@ -344,7 +378,7 @@ export async function queueBroadcastMessage(teamName, fromWorker, body, workerPa
         messages.push(message);
     }
     await Promise.all(
-        workerNames.map((toWorker) => sendTmuxTrigger(workerPanes[toWorker], 'new-message', fromWorker))
+        workerNames.map((toWorker) => sendTmuxTrigger(workerPanes[toWorker], 'new-message', fromWorker, { session, worker: toWorker }))
     );
     return messages;
 }

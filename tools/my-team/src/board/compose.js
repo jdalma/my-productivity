@@ -11,7 +11,6 @@ import { dirname, join } from 'node:path';
 
 import { loadManifest, manifestPathForTeam, rosterOf } from '../commands/_manifest.js';
 import { appendEvent } from '../lib/events.js';
-import { setStateRoot } from '../lib/state-root.js';
 import { validateTeamName } from '../lib/team-name.js';
 import { queueDirectMessage } from '../lib/tmux-comm.js';
 import { BoardError } from './core/rules.js';
@@ -37,17 +36,23 @@ export async function openBoard(teamName) {
 export function boardFor({ store, roster, manifest, actor }) {
     const root = manifest.state_root;
     const notify = async (to, ref, action) => {
-        // the mailbox paths follow the team's state root, as in send-message
+        // the mailbox paths follow MY_TEAM_STATE_ROOT; set it for these writes only (R70 L3)
+        const saved = process.env.MY_TEAM_STATE_ROOT;
         process.env.MY_TEAM_STATE_ROOT = root;
-        setStateRoot(root);
         const warnings = [];
-        for (const name of to) {
-            const pane = manifest.workers.find((w) => w.name === name)?.pane_id;
-            try {
-                await queueDirectMessage(manifest.team_name, actor, name, `[board] ${ref} ${action}`, pane, dirname(root));
-            } catch (err) {
-                warnings.push(`notice to ${name}: ${err.message}`);
+        try {
+            for (const name of to) {
+                const pane = manifest.workers.find((w) => w.name === name)?.pane_id;
+                try {
+                    const sent = await queueDirectMessage(manifest.team_name, actor, name, `[board] ${ref} ${action}`, pane, dirname(root),
+                        null, false, null, manifest.session_name);
+                    if (sent.trigger?.refused) warnings.push(`notice to ${name} not typed into its pane (${sent.trigger.refused}); it waits in the mailbox`);
+                } catch (err) {
+                    warnings.push(`notice to ${name}: ${err.message}`);
+                }
             }
+        } finally {
+            if (saved === undefined) delete process.env.MY_TEAM_STATE_ROOT; else process.env.MY_TEAM_STATE_ROOT = saved;
         }
         return warnings;
     };

@@ -55,6 +55,8 @@ function scratchTeam(t, repoDir) {
     const first = tmuxExec(['display-message', '-p', '-t', session, '#{pane_id}'], { stdio: 'pipe' }).trim();
     const more = ['core', 'rv'].map((w) => tmuxExec(['split-window', '-d', '-P', '-F', '#{pane_id}', '-t', session, sink(`${typedLog}.${w}`)], { stdio: 'pipe' }).trim());
     const panes = { pm: first, core: more[0], rv: more[1] };
+    // as start does: a notice is typed only into a pane tagged with its worker's name (T63e1)
+    for (const [name, id] of Object.entries(panes)) tmuxExec(['set-option', '-p', '-t', id, '@worker_name', name], { stdio: 'pipe' });
     const root = join(base, TEAM);
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, 'manifest.json'), JSON.stringify({
@@ -113,7 +115,7 @@ test('one task from add to approve through the CLI: notices to the right workers
     assert.equal(done.task.state, 'done');
 
     const notices = { pm: spool(root, 'pm'), core: spool(root, 'core'), rv: spool(root, 'rv') };
-    assert.deepEqual(Object.fromEntries(Object.entries(notices).map(([w, n]) => [w, n.length])), { pm: 4, core: 3, rv: 2 });
+    assert.deepEqual(Object.fromEntries(Object.entries(notices).map(([w, n]) => [w, n.length])), { pm: 2, core: 3, rv: 2 }, 'R70 L2: 7 a cycle; land goes to the reviewer only');
     for (const n of Object.values(notices).flat()) {
         assert.match(n.body, /^\[board\] T1(#\d)? (add|land)$|^\[board\] R1a? verdict$/, n.body);
         assert.equal(n.expects_reply, false);

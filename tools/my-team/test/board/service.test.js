@@ -165,14 +165,14 @@ both('take: ready and changes go to doing, by the assignee only', async (setup) 
     assert.equal((await c.as('core').take({ id: 'T1' })).task.state, 'doing', 'no pm step after changes');
 });
 
-both('land: doing goes to review with the review request row; reviewer and pm are told', async (setup) => {
+both('land: doing goes to review with the review request row; the reviewer is told, not pm (R70 L2)', async (setup) => {
     const b = await setup();
     await taskIn(b, 'doing');
     b.ranges.set(`${BASE}..${H('2')}`, { ancestor: true, commits: [H('1'), H('2')] });
     const r = await b.as('core').land(land('T1', H('2'), { deployed: H('9') }));
     assert.equal(r.task.state, 'review');
     assert.deepEqual([r.landing.id, r.landing.base_commit, r.landing.commits, r.landing.repo], ['T1#1', BASE, [H('1'), H('2')], '/repo']);
-    assert.deepEqual(b.sent.at(-1), { to: ['pm', 'rv'], ref: 'T1#1', action: 'land' });
+    assert.deepEqual(b.sent.at(-1), { to: ['rv'], ref: 'T1#1', action: 'land' });
     await rejects(b.as('app').land(land('T1', H('2'))), 'forbidden');
 });
 
@@ -185,7 +185,7 @@ both('land again in review: the open landing is superseded, fixes move to the ne
     assert.deepEqual([r.task.state, r.landing.id], ['review', 'T1#3']);
     assert.equal((await b.store.get('landing', 'T1#2')).superseded_by, 'T1#3');
     assert.equal((await b.store.get('finding', 'R1 M1')).fixed_in, 'T1#3');
-    assert.deepEqual(b.sent.at(-1), { to: ['pm', 'rv'], ref: 'T1#3', action: 'land' });
+    assert.deepEqual(b.sent.at(-1), { to: ['rv'], ref: 'T1#3', action: 'land' });
     await rejects(b.as('rv').verdict(judge('T1#2', H('2'), 'approve')), 'stale-landing');
 });
 
@@ -291,6 +291,22 @@ both('R68 M1: a reviewer change that leaves only the assignee to judge is refuse
     const b = await setup({ roster: [{ name: 'pm', role: 'orchestrator' }, { name: 'rv', role: 'worker' }] });
     await b.as('pm').add({ id: 'T1', title: 't', assignee: 'pm', reviewer: 'rv', base: BASE });
     await rejects(b.as('pm').assign({ id: 'T1', reviewer: null }), 'invalid');
+});
+
+both('land on a task with no reviewer tells pm, who judges it', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'doing', { reviewer: null });
+    await b.as('core').land(land('T1', H('1')));
+    assert.deepEqual(b.sent.at(-1), { to: ['pm'], ref: 'T1#1', action: 'land' });
+});
+
+both('verdict: the report defaults to the landing\'s review report path; rerun stays required (R70 R2)', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'review');
+    const { report, ...noReport } = judge('T1#1', H('1'), 'changes');
+    await rejects(b.as('rv').verdict({ ...noReport, rerun: undefined }), 'invalid');
+    const r = await b.as('rv').verdict(noReport);
+    assert.equal(r.verdict.report_path, '/r/R.md');
 });
 
 both('R68a R1: nobody approves a commit they landed themselves, even after the roles are swapped', async (setup) => {

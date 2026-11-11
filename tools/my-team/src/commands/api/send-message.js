@@ -165,6 +165,7 @@ export async function runApiSendMessage(input, deps = {}) {
     // manifest and its pane from tmux — see the module header for why those
     // come from different sources.
     let recipientPaneId;
+    let recipientSession = manifest.session_name;
     let crossTeam = null;
     if (isCrossTeam) {
         const targetManifest = loadManifest(to_team);
@@ -190,6 +191,7 @@ export async function runApiSendMessage(input, deps = {}) {
         // session would sit unread forever with the send reporting success.
         recipientPaneId = await resolvePane(stripWindowSuffix(targetManifest.session_name), targetWorker.name);
         crossTeam = { toTeam: targetManifest.team_name, toStateRoot: targetManifest.state_root };
+        recipientSession = targetManifest.session_name;
     } else {
         const recipient = manifest.workers.find((w) => sanitizeName(w.name) === safeTo);
         if (!recipient) {
@@ -215,12 +217,14 @@ export async function runApiSendMessage(input, deps = {}) {
         team_name, safeFrom, safeTo, body, recipientPaneId, parentDir,
         reply_to ?? null,
         expectsReply,
-        crossTeam
+        crossTeam,
+        recipientSession
     );
 
     // The message is delivered by now: a log line that cannot be made or written is a warning, never an
     // error, or the sender would send again and the recipient get it twice (R61 L1).
     const logWarnings = [];
+    if (message.trigger?.refused) logWarnings.push(`not typed into ${safeTo}'s pane (${message.trigger.refused}); it waits in the mailbox for the next poll`);
     const logEvent = async (stateRoot, fields) => {
         let written = false;
         try { written = await writeEvent(stateRoot, fields); } catch (err) { process.stderr.write(`[my-team] events.jsonl: ${err.message}\n`); }

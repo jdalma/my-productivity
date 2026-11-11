@@ -79,6 +79,8 @@ both('review queue: one row per open review request of the reviewer, with what R
     assert.deepEqual(row.settled_findings.map((f) => [f.id, f.state]), [['R1 L1', 'backlog']]);
     assert.deepEqual(q.incomplete, []);
     assert.deepEqual([row.next_verdict, row.verdicts.map((v) => [v.id, v.verdict])], ['R1a', [['R1', 'changes']]], 'R69 L4');
+    assert.equal(row.previous_commit, H('2'), 'R70 R2: the commit of the landing this one supersedes');
+    assert.equal((await reviewQueue(store, ROSTER, 'app')).queue[0].previous_commit, null);
     assert.deepEqual((await reviewQueue(store, ROSTER, 'app')).queue.map((r) => [r.landing.id, r.next_verdict]), [['T2#1', 'R2']]);
     await as('app').note({ id: 'T1a', body: 'context for the reviewer' });
     assert.deepEqual((await reviewQueue(store, ROSTER, 'rv')).queue[0].notes.map((n) => n.body), ['context for the reviewer'], 'R69 R1: a note with no "to" shows on the row');

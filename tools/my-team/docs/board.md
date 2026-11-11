@@ -35,7 +35,7 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 | `board-assign` | pm | **`id`**; `assignee` (reassign → ready); `reviewer` (change it); neither, on a held task → review again | `task` |
 | `board-take` | assignee | **`id`** | `task` |
 | `board-land` | assignee | **`id`**, **`commit`**, **`check`** `{cmd, result}`, **`focus`**, **`closes`**, **`report`**, **`review_report`**; `base`, `commits`, `deployed` | `task`, `landing`, `fixed` |
-| `board-verdict` | the task's reviewer (pm without one) | **`landing`**, **`verdict`** (`approve`, `changes` or `hold`), **`verified_commit`**, **`report`**, **`rerun`** `{cmd, result}`, **`findings`**; `reopen`, `side_notes` | `verdict`, `task`, `findings`, `reopened` |
+| `board-verdict` | the task's reviewer (pm without one) | **`landing`**, **`verdict`** (`approve`, `changes` or `hold`), **`verified_commit`**, **`rerun`** `{cmd, result}`, **`findings`**; `report` (defaults to the landing's `review_report`), `reopen`, `side_notes` | `verdict`, `task`, `findings`, `reopened` |
 | `board-finding` | pm settles, reviewer reopens | **`id`**, **`state`** | `finding` |
 | `board-cancel` | pm | **`id`**; `findings` (where its unsettled findings go), `reason` | `task`, `findings` |
 | `board-note` | anyone | **`body`**; `id` (task), `to` (workers to tell) | `note` |
@@ -49,9 +49,14 @@ Notes on the inputs:
 - `board-land` reads its repository from the acting worker's cwd, so `repo` is never an input.
 - `commits` defaults to `git rev-list base..commit`. Give a subset of that list to leave out other work.
 - `base` defaults to the family's last approved commit, then to the task's `base`.
+- A `board-review-queue` row carries the task and its parent, the landing (with `commits` and `left_out`),
+  `previous_commit` (the commit of the landing it superseded), open and settled findings, notes, the
+  family's earlier verdicts, and `next_verdict` (the id this verdict will take).
 
 **Notices.** A write that concerns other workers sends each of them one mailbox line,
-`[board] <ref> <action>`. The line carries no state: the reader runs `board-inbox`. Every write also adds a
+`[board] <ref> <action>`. The line carries no state: the reader runs `board-inbox`. The pane trigger is typed
+only while the recipient's pane in the manifest is still that worker's pane in the team's session; otherwise
+the notice waits in the mailbox and the result carries a `warning`. Every write also adds a
 `board` line to `events.jsonl` (see `events-format.md`).
 
 **Errors.** An error is a stderr line `[my-team] error: <code>: <message>` and exit 1. With `--json`, it is
@@ -118,4 +123,5 @@ MY_TEAM_WORKER=demo/pm my-team api board-status --input '{"team_name":"demo","ta
 <!-- example:end -->
 
 After the last line, T1 is `done`. Its family shows landings `T1#1` and `T1#2`, verdicts `R1` and `R1a`,
-and finding `R1 M1` fixed in `T1#2`. Across the cycle the mailbox carried 9 notices: pm 4, dev 3, rv 2.
+and finding `R1 M1` fixed in `T1#2`. Across the cycle the mailbox carried 7 notices: pm 2, dev 3, rv 2. A land on a task with a reviewer goes to
+the reviewer only; pm hears at the verdict.

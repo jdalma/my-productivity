@@ -16,7 +16,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { mkdir, writeFile, rm, rename } from 'fs/promises';
+import { mkdir, readFile, writeFile, rm, rename } from 'fs/promises';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, normalize, sep } from 'path';
@@ -25,7 +25,7 @@ import { loadConfig, autoDiscoverConfig, parseInlineWorkerSpec, validateConfig }
 import { setStateRoot } from '../lib/state-root.js';
 import {
     createTeamSession, spawnWorkerInPane, waitForPaneReady,
-    sendToWorker, isUnixLikeOnWindows, sanitizeName,
+    isUnixLikeOnWindows, sanitizeName,
 } from '../lib/tmux-session.js';
 import { tmuxShell, tmuxExecAsync } from '../lib/tmux-utils.js';
 import {
@@ -34,6 +34,8 @@ import {
 import { atomicWriteJson } from '../lib/fs-utils.js';
 import { guardLaunch } from '../lib/worker-guard.js';
 import { listPanes, runningByManifest } from '../lib/team-liveness.js';
+import { sendStartupNotices, startupNotice } from '../lib/startup-notice.js';
+import { mailAndState } from './status.js';
 
 /** AGENT_TYPE → CLI binary name + install hint. */
 export const AGENT_CLI = {
@@ -251,6 +253,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
     console.log(`[my-team] Host pane (monitor): ${session.leaderPaneId}`);
 
     // For each worker: state dir, task file, AGENTS.md overlay, initial inbox, spawn CLI
+    const overlays = new Map();   // per worker: its AGENTS.md before this start and now (T66)
     const manifest = {
         team_name: config.team_name,
         state_root: config.state_root,
@@ -300,7 +303,10 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
             board: config.board,
         });
         const overlayPath = join(workerDir, 'AGENTS.md');
+        // under --continue, the one the worker read last time: its startup notice depends on what changed (T66)
+        const previousOverlay = opts.continue ? await readFile(overlayPath, 'utf-8').catch(() => null) : null;
         await writeFile(overlayPath, overlay, 'utf-8');
+        overlays.set(w.name, { previous: previousOverlay, current: overlay });
 
         // 5. spawn CLI in pane
         const agentBin = AGENT_CLI[w.agent_type].bin;
@@ -371,16 +377,23 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
     }
 
     // Startup notice: tell each worker to read its AGENTS.md and wait for the
-    // user (in this pane) or peer messages (via mailbox). No task lifecycle,
-    // no inbox.md — every instruction either lands here as user input or in
-    // the mailbox as a peer message.
+    // user (in this pane) or peer messages (via mailbox). A worker that resumes
+    // its conversation under --continue already holds its instructions: it is
+    // told only what changed, or about waiting mail, or nothing (T66).
+    const notices = [];
     for (const w of manifest.workers) {
-        const overlayHint = `${config.state_root}/workers/${w.name}/AGENTS.md`;
-        const notice = `Team is live. Follow ${overlayHint} for the peer protocol; wait for user input in this pane or peer messages in your mailbox.`;
-        const sent = await sendToWorker(session.sessionName, w.pane_id, notice);
-        if (sent === false) {
-            console.warn(`[my-team] startup notice NOT delivered to '${w.name}' (pane ${w.pane_id}). Check that pane, then type: ${notice}`);
-        }
+        const cfg = config.workers.find((c) => c.name === w.name);
+        const { previous, current } = overlays.get(w.name);
+        const notice = startupNotice({
+            overlayPath: `${config.state_root}/workers/${w.name}/AGENTS.md`, keep: Boolean(opts.continue), previous, current,
+            agentType: w.agent_type, launchArgs: cfg?.launch_args ?? [], mail: await mailAndState(config.team_name, w.name),
+        });
+        if (notice === null) console.log(`[my-team] '${w.name}' resumes with the same AGENTS.md and no mail: no startup notice.`);
+        notices.push({ name: w.name, pane_id: w.pane_id, notice });
+    }
+    for (const name of await sendStartupNotices(session.sessionName, notices)) {
+        const { pane_id, notice } = notices.find((n) => n.name === name);
+        console.warn(`[my-team] startup notice NOT delivered to '${name}' (pane ${pane_id}). Check that pane, then type: ${notice}`);
     }
     console.log('[my-team] Startup notices sent. Team is live.');
 

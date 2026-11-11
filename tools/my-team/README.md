@@ -387,6 +387,11 @@ the next `start` does with it is the caller's choice:
   not yet delivered reaches the workers of the new run. The manifest and each
   worker's `AGENTS.md` are written afresh. With no previous `state_root`, it
   starts a new team and says so.
+- The startup notice under `--continue` depends on the worker. A claude worker
+  that resumes its conversation (`--resume` or `--continue` in its launch args)
+  gets nothing when its `AGENTS.md` is unchanged, one line when mail waits, and
+  one line naming the changed `## ` sections when it changed. Any other worker
+  gets the full notice, as a new team does.
 - Killing the tmux session directly (`tmux kill-session`) leaves the same state
   behind as `shutdown`.
 - **Known limitation:** `<state_root>.bak` for a team you never re-run lingers

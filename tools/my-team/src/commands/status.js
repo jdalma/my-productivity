@@ -17,7 +17,7 @@ import { listPanes, liveness } from '../lib/team-liveness.js';
 import { readMailboxFile } from '../lib/tmux-comm.js';
 import { TeamPaths } from '../lib/state-paths.js';
 
-async function mailAndState(teamName, workerName) {
+export async function mailAndState(teamName, workerName) {
     let state = null, reason = null;
     try {
         const s = JSON.parse(await readFile(TeamPaths.workerStatus(teamName, workerName), 'utf-8'));

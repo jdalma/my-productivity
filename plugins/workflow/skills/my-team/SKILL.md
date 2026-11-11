@@ -64,6 +64,8 @@ my-team monitor my-feature   # peer 메시지 실시간 tail
 my-team shutdown --team my-feature
 
 # 6. 같은 팀을 이어서: 메일·work·events를 그대로 쓴다. --continue 없이 start하면 새 팀(이전 state는 .bak으로)
+#    대화를 이어받은 claude 워커(--resume/--continue)는 AGENTS.md가 그대로면 시작 안내를 받지 않고(메일이 있으면 한 줄),
+#    바뀌었으면 바뀐 절 제목만 한 줄로 받는다. 그 밖의 워커는 지금처럼 전체 안내를 받는다.
 my-team start --continue --config ./my-team.json
 ```
 

@@ -18,7 +18,7 @@ struct PaneTerminal: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text("터미널").scaledFont(.headline, weight: .semibold)
-                Text("클릭하면 이 pane에 입력 · Esc도 pane으로 · 나가기: ⌘K 또는 사이드바 클릭")
+                Text("클릭하면 이 pane에 입력 · Esc도 pane으로 · 나가기: ⌘K 또는 사이드바 클릭 · 글자 크기는 폭에 맞춤")
                     .scaledFont(.caption1).foregroundStyle(.secondary)
                 Button("터미널에서 나가기") { PaneTerminalView.leave() }
                     .buttonStyle(.link).scaledFont(.caption1)

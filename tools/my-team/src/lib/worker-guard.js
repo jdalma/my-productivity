@@ -52,7 +52,8 @@ function lex(src) {
     const cmds = [], subs = [];
     let words = [], word = null, i = 0, ok = true;
     const endWord = () => { if (word !== null) words.push(word); word = null; };
-    const endCmd = () => { endWord(); if (words.length) cmds.push(words); words = []; };
+    // each simple command keeps the operator that ended it (`.sep`): what follows a cd depends on it
+    const endCmd = (sep = null) => { endWord(); if (words.length) { words.sep = sep; cmds.push(words); } words = []; };
     const add = (s) => { word = (word ?? '') + s; };
     /** From after `$(` (or `<(`), the text up to its `)`, quotes and nesting followed. */
     const balanced = () => {
@@ -79,7 +80,8 @@ function lex(src) {
         const c = src[i];
         if (c === ' ' || c === '\t') { endWord(); i++; }
         else if (c === '(' || c === ')') { endCmd(); cmds.push(c === '(' ? OPEN : CLOSE); i++; }
-        else if (c === '\n' || c === ';' || c === '&' || c === '|') { endCmd(); i++; }
+        else if ((c === '&' || c === '|') && src[i + 1] === c) { endCmd(c + c); i += 2; }
+        else if (c === '\n' || c === ';' || c === '&' || c === '|') { endCmd(c); i++; }
         else if (c === '#' && word === null) { while (i < src.length && src[i] !== '\n') i++; }
         else if (c === '\\') { if (src[i + 1] !== '\n') add(src[i + 1] ?? ''); i += 2; }
         else if (c === "'") {
@@ -194,6 +196,57 @@ function gitCommonDir(dir) {
     } catch { return null; }
 }
 
+/** The URLs a push to `repo` from `dir` goes to: a remote's push URLs, or `repo` itself; insteadOf applied. */
+function pushUrls(dir, repo) {
+    const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    try { return git('remote', 'get-url', '--push', '--all', repo).split('\n').filter(Boolean); } catch { /* not a remote name */ }
+    try { return [git('ls-remote', '--get-url', repo)]; } catch { return []; }
+}
+
+/** The remote a bare `git push` in `dir` uses, as git chooses it (git-push(1), git-config(1)). */
+function defaultPushRemote(dir) {
+    const get = (key) => { try { return execFileSync('git', ['-C', dir, 'config', '--get', key], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
+    let branch = '';
+    try { branch = execFileSync('git', ['-C', dir, 'symbolic-ref', '--short', '-q', 'HEAD'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* detached */ }
+    return (branch && get(`branch.${branch}.pushRemote`)) || get('remote.pushDefault') || (branch && get(`branch.${branch}.remote`)) || 'origin';
+}
+
+/** A URL's local path (relative ones from `dir`), or null for a server: `scheme://` other than file, or scp-like `host:path`. */
+function localPath(url, dir) {
+    if (/^file:\/\//i.test(url)) return url.slice('file://'.length);
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url) || /^[^/]*:/.test(url)) return null;
+    return resolve(dir, url);
+}
+
+/**
+ * Whether `git push <args>` from `dir` goes only to local repositories other than the protected one (T59c,
+ * R60b R1): the point of `push` is that nothing leaves for a server, and a clone's push to one leaves just the
+ * same; a local clone of the protected repository pushing back into it changes it just the same.
+ */
+function pushStaysLocal(args, dir, protectedRepo) {
+    let repo = null;
+    const positional = [];
+    for (let k = 0; k < args.length; k++) {
+        const a = args[k];
+        if (unknownWord(a)) return false;
+        if (a === '--') { positional.push(...args.slice(k + 1)); break; }
+        if (a.startsWith('--repo=')) { repo = a.slice('--repo='.length); continue; }
+        if (['--repo', '-o', '--push-option', '--receive-pack', '--exec'].includes(a)) {
+            const value = args[++k];
+            if (value === undefined || unknownWord(value)) return false;
+            if (a === '--repo') repo = value;
+            continue;
+        }
+        if (!a.startsWith('-')) positional.push(a);
+    }
+    const urls = pushUrls(dir, positional[0] ?? repo ?? defaultPushRemote(dir));
+    if (urls.length === 0) return false;
+    return urls.every((url) => {
+        const path = localPath(url, dir);
+        return path !== null && !touchesProtected([path], protectedRepo);
+    });
+}
+
 /**
  * Whether a git command acting on `targets` touches the protected repository (R60a L2): a folder inside it
  * (symlinks and case followed), one sharing its git data (a worktree of it elsewhere, its .git), or one that
@@ -226,13 +279,23 @@ export function bashDenial(command, rules, { cwd = null, repoRoot = null } = {})
 function denial(command, rules, start, protectedRepo) {
     const { cmds, subs, ok } = lex(command);
     if (!ok && rules.includes('push') && /\bpush\b/.test(command)) return { rule: 'push', reason: 'an unclosed quote or substitution around push' };
-    let dir = start, moved = false;
+    let dir = start, moved = false, gitEnvUnknown = false;
     const outer = [];
     const judge = (cmd) => {
         if (cmd.text !== undefined) return denial(cmd.text, rules, dir, protectedRepo);
         if (cmd.name === 'cd' || cmd.name === 'pushd' || cmd.name === 'popd') {
-            dir = cmd.name === 'popd' ? null : cdTarget(cmd.args, dir);
+            // in a pipe or in the background the cd runs in a subshell of its own (R60b L1)
+            if (cmd.sep === '|' || cmd.sep === '&') return null;
+            const to = cmd.name === 'popd' ? null : cdTarget(cmd.args, dir);
+            // after `;`, a newline or `||`, a cd that fails still lets the rest run where the line was:
+            // only a folder there now is certain (R60b M1); after `&&` the rest runs only if the cd worked
+            dir = cmd.sep === '&&' || (to !== null && existsSync(to)) ? to : null;
             moved = true;
+            return null;
+        }
+        if (['export', 'declare', 'typeset', 'set'].includes(cmd.name)) {
+            // an exported git location reaches every git after it in ways not followed here (R60b L2)
+            if (cmd.name === 'set' || cmd.args.some((a) => /^(GIT_DIR|GIT_WORK_TREE)(=|$)/.test(a))) gitEnvUnknown = true;
             return null;
         }
         if (SHELLS.has(cmd.name)) {
@@ -242,17 +305,24 @@ function denial(command, rules, start, protectedRepo) {
         if (cmd.name === 'eval') return denial(cmd.args.join(' '), rules, dir, protectedRepo);
         if (cmd.name !== 'git') return null;
         const git = gitCall(cmd.args, cmd.env, dir);
+        if (gitEnvUnknown && git.targets) git.targets.push(null);
         if (git.sub === undefined) return { rule: rules[0], reason: 'a git command it cannot read (unknown option, -c alias, or a value from a variable)' };
         if (git.sub === null || git.help) return null;
         const pushes = git.sub === 'push' || git.sub === 'send-pack' || (git.sub === 'subtree' && git.rest.includes('push'));
         const rule = rules.includes('push') && pushes ? 'push' : rules.includes('repo-write') && GIT_WRITES.has(git.sub) ? 'repo-write' : null;
-        if (!rule || !touchesProtected(git.targets, protectedRepo)) return null;
-        return { rule, reason: `git ${git.sub} in the protected repository` };
+        if (!rule) return null;
+        if (touchesProtected(git.targets, protectedRepo)) return { rule, reason: `git ${git.sub} in the protected repository` };
+        // outside it, a push still must stay on this machine (T59c); send-pack and subtree are not read that far
+        if (rule === 'push' && !(git.sub === 'push' && git.targets.length === 1 && pushStaysLocal(git.rest, git.targets[0], protectedRepo))) {
+            return { rule, reason: `git ${git.sub} to a destination not certainly local` };
+        }
+        return null;
     };
     for (const words of cmds) {
         if (words === OPEN) { outer.push(dir); continue; }
         if (words === CLOSE) { if (outer.length) dir = outer.pop(); continue; }
         for (const cmd of commandsOf(words)) {
+            cmd.sep = words.sep;
             const found = judge(cmd);
             if (found) return found;
         }

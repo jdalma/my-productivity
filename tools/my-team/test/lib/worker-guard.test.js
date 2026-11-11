@@ -219,3 +219,60 @@ test('git rules apply to the protected repository only: other repositories commi
     assert.equal(deny(`cd ${r.dir}/fresh && git commit -m x`, r.root), null, 'not there yet, outside: cannot be the protected one');
     assert.equal(deny(`cd ${r.root}/new && git commit -m x`, r.other), 'repo-write', 'not there yet, inside');
 });
+
+test('outside the protected repository a push passes only to a local destination (T59c)', (t) => {
+    const r = twoRepos(t);
+    const g = (repo, ...args) => execFileSync('git', ['-C', repo, ...args]);
+    const deny = (cmd, cwd) => bashDenial(cmd, ['push'], { cwd, repoRoot: r.root })?.rule ?? null;
+    // a clone whose remote is a server
+    const clone = join(r.dir, 'clone');
+    execFileSync('git', ['init', '-q', '-b', 'main', clone]);
+    g(clone, 'remote', 'add', 'origin', 'https://example.com/team/repo.git');
+    assert.equal(deny('git push', clone), 'push', 'the default remote is a server');
+    assert.equal(deny('git push origin main', clone), 'push');
+    assert.equal(deny('git push --all', clone), 'push');
+    assert.equal(deny('git push git@example.com:team/repo.git main', clone), 'push', 'scp-like ssh');
+    assert.equal(deny('git push ssh://example.com/team/repo.git main', clone), 'push');
+    // a scratch repository whose remote is a local bare one
+    g(r.other, 'remote', 'add', 'local', r.bare);
+    g(r.other, 'remote', 'add', 'byfile', `file://${r.bare}`);
+    assert.equal(deny('git push local HEAD', r.other), null);
+    assert.equal(deny('git push byfile HEAD', r.other), null);
+    assert.equal(deny(`git push ${r.bare} HEAD`, r.other), null);
+    assert.equal(deny('git push ../bare.git HEAD', r.other), null, 'a relative path');
+    assert.equal(deny(`git push --repo=${r.bare} HEAD`, r.other), null);
+    // a local remote name whose push URL is a server
+    g(r.other, 'remote', 'add', 'sneaky', r.bare);
+    g(r.other, 'config', 'remote.sneaky.pushurl', 'https://example.com/team/repo.git');
+    assert.equal(deny('git push sneaky HEAD', r.other), 'push', 'pushurl decides');
+    // a local-looking path rewritten to a server
+    g(r.other, 'config', 'url.https://example.com/.insteadOf', '/srv-alias/');
+    assert.equal(deny('git push /srv-alias/team.git HEAD', r.other), 'push', 'insteadOf decides');
+    // where it cannot be told
+    assert.equal(deny('git push $DEST HEAD', r.other), 'push');
+    assert.equal(deny('git push "$(cat dest)" HEAD', r.other), 'push');
+    assert.equal(deny('git send-pack ../bare.git main', r.other), 'push', 'send-pack and subtree: not judged');
+});
+
+test('a cd that can fail, a cd in a pipe, an exported GIT_DIR, and a local remote that is the protected repository (R60b)', (t) => {
+    const r = twoRepos(t);
+    const deny = (cmd, cwd, rules = ['push', 'repo-write']) => bashDenial(cmd, rules, { cwd, repoRoot: r.root })?.rule ?? null;
+    // M1: a cd to a folder that is not there fails; what follows runs where the line was
+    assert.equal(deny('cd /nonexistent-t59c; git push', r.root), 'push');
+    assert.equal(deny('cd /nonexistent-t59c || git push', r.root), 'push');
+    assert.equal(deny('cd /nonexistent-t59c\ngit commit -m x', r.root), 'repo-write');
+    assert.equal(deny(`mkdir -p ${r.dir}/made && cd ${r.dir}/made && git init -q && git commit -m x`, r.root), null, '&& keeps the made folder');
+    assert.equal(deny(`cd ${r.other}; git commit -m x`, r.root), null, 'an existing folder after ;');
+    // L1: a cd in a pipe or in the background moves nothing
+    assert.equal(deny(`cd ${r.other} | true; git commit -m x`, r.root), 'repo-write');
+    assert.equal(deny(`cd ${r.other} & git commit -m x`, r.root), 'repo-write');
+    // L2: an exported git location is unknown to the guard
+    assert.equal(deny(`export GIT_DIR=${r.other}/.git; git commit -m x`, r.other), 'repo-write');
+    assert.equal(deny(`GIT_WORK_TREE=${r.other}; export GIT_WORK_TREE; git commit -m x`, r.other), 'repo-write');
+    // R1: a local destination that is the protected repository itself
+    const clone = join(r.dir, 'fromp');
+    execFileSync('git', ['clone', '-q', `file://${r.root}`, clone]);
+    assert.equal(deny('git push origin HEAD:refs/heads/x', clone, ['push']), 'push', 'the clone pushes into the protected repository');
+    assert.equal(deny(`git push ${r.root}/.git HEAD:refs/heads/x`, r.other, ['push']), 'push');
+    assert.equal(deny(`git push ${r.bare} HEAD`, r.other, ['push']), null);
+});

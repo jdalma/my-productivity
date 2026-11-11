@@ -350,6 +350,26 @@ struct PaneTmuxTests {
     }
 
 
+    /// Option+Enter is the newline in Claude Code's input, in Ghostty as here: the pane gets ESC CR. Enter and
+    /// Shift+Enter both send CR. The key events go straight to the view object; nothing is posted to the system.
+    @MainActor @Test func optionEnterReachesThePaneAsEscapeReturn() async throws {
+        let server = ScratchServer()
+        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")
+        let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+        let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))
+        view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: PaneLink())
+        defer { view.detach() }
+        #expect(await until { server.run("display-message", "-p", "-t", pane, "#{pane_current_command}") == "od" })
+        for mods: NSEvent.ModifierFlags in [[], .option, .shift] {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: 0,
+                                         windowNumber: 0, context: nil, characters: "\r",
+                                         charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+            view.keyDown(with: event)
+        }
+        view.send(source: view, data: Array(repeating: 0x42, count: 12)[...])  // od prints a line per 16 bytes
+        #expect(await until { server.run("capture-pane", "-p", "-t", pane).contains("0d  1b  0d  0d  42") })
+    }
+
     @MainActor @Test func theTerminalViewTakesThePaneSizeAndSendsWhatIsTyped() async throws {
         let server = ScratchServer()
         server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")

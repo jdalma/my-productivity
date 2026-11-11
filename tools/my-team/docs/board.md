@@ -42,6 +42,7 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 | `board-inbox` | anyone, for themselves | `since` (the last `cursor`) | `tasks`, `review_queue`, `incomplete`, `notes`, `announcements`, `cursor` |
 | `board-review-queue` | anyone, for themselves | | `queue`, `incomplete` |
 | `board-status` | anyone | `task` (one family in full) | `store`, `tasks`, `workers`, `open_findings`, `recent`, `announcements` |
+| `board-pushable` | anyone | **`commit`**, **`upstream`** (the remote's commit) or **`remote`** (its name, for a new branch); `repo` (default: the current folder), `baseline` | `ok`, `repo`, `covered`, `uncovered` (`commit`, `short`, `subject`) |
 
 Notes on the inputs:
 
@@ -104,6 +105,30 @@ Any state that is not `done` or `cancelled` can also be cancelled by pm.
 - Nobody judges a task they are assigned. Nobody approves a commit they landed in the same family.
 - `approve` is refused while the family has an open `must` finding.
 - Reopening a finding needs an unfinished task in its family.
+
+## Push gate
+
+`board-pushable` answers whether every commit going out is covered. A commit is covered when it is in the
+`commits` of a landing that an approve verdict covers, in the same repository (its top level), or when it is
+the repository's baseline or one of its ancestors. Anything else is uncovered: a commit in review, one after
+the approval, a commit off the board, a merge, or a rebased copy of an approved commit.
+
+The repository's pre-push hook (`scripts/install-pre-push.sh` in this repository) runs the identifier scan
+for every ref first. Then, when the repository names a board team, it runs the gate for every ref:
+
+```sh
+git config my-team.board <team>          # turns the gate on; without it the hook only scans
+git config my-team.baseline <commit>     # its ancestors count as reviewed: work from before the board, your own
+```
+
+- Only pm or the user sets these two values. They live in the repository's git config and not on the board,
+  because the board moves to `.bak` when a new team starts.
+- The hook refuses a push it cannot judge: no `my-team` or `node` on PATH, a team that is not there, or an
+  installed `my-team` too old to have `board-pushable`.
+- A refusal lists each uncovered commit with its subject, and says how to go on:
+  - get it reviewed on the board;
+  - for your own commits, move the baseline;
+  - or skip both checks once with `git push --no-verify`.
 
 ## One cycle
 

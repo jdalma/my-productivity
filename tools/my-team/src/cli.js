@@ -8,7 +8,7 @@
  *   api send-message, api mailbox-list, api mailbox-mark-delivered,
  *   api archive-lookup, api roster
  *   api board-status, api board-inbox, api board-review-queue (the team's board, T63)
- *   api board-add, -assign, -take, -note, -land, -verdict, -finding, -cancel, -announce
+ *   api board-add, -assign, -take, -note, -land, -verdict, -finding, -cancel, -announce, board-pushable
  */
 
 import { Command } from 'commander';
@@ -32,6 +32,7 @@ import { runApiBoardStatus } from './commands/api/board-status.js';
 import { runApiBoardInbox } from './commands/api/board-inbox.js';
 import { runApiBoardReviewQueue } from './commands/api/board-review-queue.js';
 import { runApiBoardWrite } from './commands/api/board-write.js';
+import { runApiBoardPushable } from './commands/api/board-pushable.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -227,6 +228,7 @@ async function main() {
         announce: 'Tell the whole team (pm): body',
     };
     for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name));
+    board('board-pushable', '[pure] Whether every outgoing commit has an approved review on the board or is within the baseline: commit, upstream (or remote, for a new branch); repo, baseline', runApiBoardPushable);
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
 
     try {

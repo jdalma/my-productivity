@@ -330,6 +330,9 @@ review requests, verdicts and findings, notes and announcements. It is a SQLite 
   overlay it always had.
 - The board needs Node 22.13 or later. On an older Node, only the board commands fail.
 - No worker approves its own task, or a commit it landed.
+- `api board-pushable` tells whether every commit of a push has an approved review (or lies within the
+  repository's baseline). A repository's pre-push hook can refuse the push on it: `git config my-team.board
+  <team>` turns that on (see "Push gate" in `docs/board.md`).
 
 Commands, inputs, error codes, states and a full cycle: `docs/board.md`.
 

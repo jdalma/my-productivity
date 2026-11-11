@@ -88,6 +88,13 @@ export async function inbox(store, roster, worker, cursor = {}) {
     };
 }
 
+/** Every commit an approve verdict covers in `repo`: the commits lists of its landings (T63f). */
+export async function approvedCommits(store, repo) {
+    const approved = await approvedLandings(store);
+    const landings = (await store.list('landing', { repo })).filter((l) => approved.has(l.id));
+    return new Set(landings.flatMap((l) => l.commits));
+}
+
 /**
  * The whole board (the app's view, D1·D2), or with `task` that task's family in full. `workers` counts work
  * only; whether a worker is alive is status.json's and tmux's to say.

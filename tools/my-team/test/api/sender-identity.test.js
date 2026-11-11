@@ -39,7 +39,8 @@ function setup(t) {
         return out.filter((f) => !f.endsWith('manifest.json'));
     };
     const events = (root) => existsSync(join(root, 'events.jsonl'))
-        ? readFileSync(join(root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+        // message lines only: no live pane here, so each send also logs a trigger-refused line (T63e2)
+        ? readFileSync(join(root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'message') : [];
     const deps = (env) => ({ env, resolvePaneBySessionWorker: async () => '%999' });
     return { t1, t2, files, events, deps };
 }

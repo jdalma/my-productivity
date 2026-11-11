@@ -93,6 +93,7 @@ test('monitor prints old and new lines without undefined (e)', (t) => {
         eventLine({ type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push', target: 'git push' }),
         eventLine({ type: 'board', team: 'tt', worker: 'core', action: 'land', kind: 'landing', ref: 'T1#1', log_seq: 3, state_from: 'doing', state_to: 'review' }),
         eventLine({ type: 'board', team: 'tt', worker: 'pm', action: 'note', kind: 'note', ref: '-', log_seq: 4 }),
+        eventLine({ type: 'trigger-refused', team: 'tt', worker: 'pm', to: 'core', pane: '%3', reason: 'pane %3 is not core\'s in s now' }),
     ];
     writeFileSync(join(root, 'events.jsonl'), old.map((e) => JSON.stringify(e)).join('\n') + '\n');
     // monitor watches forever: read its first output, then stop it
@@ -107,6 +108,7 @@ test('monitor prints old and new lines without undefined (e)', (t) => {
     assert.match(out, /Bash.*git push/);
     assert.match(out, /core: board land T1#1 \(doing → review\)/);
     assert.match(out, /pm: board note -\n/);
+    assert.match(out, /pm → core: 알림이 pane %3에 입력되지 않음 \(pane %3 is not core's in s now\)/);
     assert.doesNotMatch(out, /undefined/);
 });
 

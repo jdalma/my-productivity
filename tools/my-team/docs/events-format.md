@@ -17,7 +17,7 @@ appended, and existing lines are never rewritten. The format is defined in one p
 | key | meaning |
 |---|---|
 | `ts` | ISO 8601 time of writing |
-| `type` | `message`, `tmux-denied`, `tool-denied` or `board` |
+| `type` | `message`, `tmux-denied`, `tool-denied`, `board` or `trigger-refused` |
 | `team` | the team of the actor |
 | `worker` | the actor: the sender of a message, the worker that was refused, or the worker that changed the board |
 
@@ -29,6 +29,7 @@ appended, and existing lines are never rewritten. The format is defined in one p
 | `tmux-denied` | the tmux shim on a worker's PATH | `args` | |
 | `tool-denied` | the worker guard hook (`deny` rules) | `tool`, `rule`, `target` | |
 | `board` | a board write command (`api board-*`), after its change is applied | `action`, `kind`, `ref`, `log_seq` | `state_from`, `state_to` |
+| `trigger-refused` | `api send-message` or a board notice, when the recipient's pane in the manifest is no longer its pane (the message stays in the mailbox) | `to`, `pane`, `reason` | |
 
 - `message` keeps `from` and `to` for existing readers. Its `worker` always equals `from`.
 - A cross-team send writes two lines:
@@ -42,6 +43,9 @@ appended, and existing lines are never rewritten. The format is defined in one p
   split; N counts what was cut, the pair included.
 - `args` keeps at most 20 items. When it holds more, its last item is `…[+N args]`.
 - A message `body` is never cut.
+- A `trigger-refused` line goes to the recipient's team's log; `worker` is the sender, `pane` the pane id the
+  manifest gave (or null), and `reason` is cut at 500 characters. The recipient wakes only on a trigger, so
+  this line is how the user sees that a worker was not woken.
 - A `board` line carries no text from the board: `ref` names the row (`T1`, `T1#1`, `R1`, `R1 M1`, or `-` for a
   note or announcement without a task) and `log_seq` its line in the board's own log, where the rest is.
 

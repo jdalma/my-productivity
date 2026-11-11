@@ -40,6 +40,7 @@ function renderEvent(raw, team) {
     const ts = formatTimestamp(entry.ts);
     if (entry.type === 'tmux-denied') return `[${ts}] ${entry.worker}: tmux ${(entry.args ?? []).join(' ')} 거부됨\n\n`;
     if (entry.type === 'tool-denied') return `[${ts}] ${entry.worker}: ${entry.tool} ${entry.target} 거부됨 (${entry.rule})\n\n`;
+    if (entry.type === 'trigger-refused') return `[${ts}] ${entry.worker} → ${entry.to}: 알림이 pane ${entry.pane}에 입력되지 않음 (${entry.reason})\n\n`;
     if (entry.type === 'board') {
         const move = entry.state_from || entry.state_to ? ` (${entry.state_from ?? '∅'} → ${entry.state_to ?? '∅'})` : '';
         return `[${ts}] ${entry.worker}: board ${entry.action} ${entry.ref}${move}\n\n`;

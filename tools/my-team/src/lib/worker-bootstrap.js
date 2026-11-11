@@ -367,13 +367,10 @@ working — do not block. The peer's reply arrives in your inbox with
 surfaces it and clears the pending entry. If too many entries pile up in
 \`sent_pending\`, surface it on stdout so the user can intervene.
 
-### Broadcast caveat
+### Asking several peers
 
-\`queueBroadcastMessage\` (server-side helper) **does not support
-\`expects_reply: true\`** because one \`message_id\` is shared across N
-recipients and cannot be cleanly correlated. If you need answers from
-several peers, send individual \`send-message\` calls with distinct
-\`message_id\`s instead.
+There is no broadcast. To ask several peers, send one \`send-message\` to each,
+with \`expects_reply: true\`, so each answer resolves its own \`message_id\`.
 
 ## Rules
 - Do NOT edit files outside the scope described in your \`## Role Context\` brief

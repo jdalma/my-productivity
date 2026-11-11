@@ -121,7 +121,7 @@ test('listPanes: no tmux server means no panes; any other tmux failure is an err
     assert.deepEqual(await listPanes(fail('error connecting to /tmp/mt.x/tmux-501/default (No such file or directory)\n')), []);
     await assert.rejects(listPanes(fail('lost server\n')), /lost server/);
     await assert.rejects(listPanes(async () => { throw Object.assign(new Error('spawn tmux ETIMEDOUT'), { stderr: '' }); }), /ETIMEDOUT/);
-    const ok = async () => ({ stdout: 'host\t%1\tpm\n' });
+    const ok = async () => ({ stdout: '%1|pm|host\n' });   // PANE_FORMAT: pane id, @worker_name, session
     assert.deepEqual(await listPanes(ok), [{ session: 'host', paneId: '%1', worker: 'pm' }]);
 
     const { mkdtempSync, writeFileSync, rmSync } = await import('fs');

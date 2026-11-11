@@ -18,6 +18,7 @@ import { runApiSendMessage } from '../../src/commands/api/send-message.js';
 import { boardFor } from '../../src/board/compose.js';
 import { createMemoryStore } from '../../src/board/store/memory/index.js';
 import { tmuxExec } from '../../src/lib/tmux-utils.js';
+import { runStatus } from '../../src/commands/status.js';
 
 if (process.env.MY_TEAM_TEST_TMUX) {
     const own = `${process.env.MY_TEAM_TEST_TMUX}-owner`;
@@ -64,13 +65,25 @@ test('a manifest pane id that now belongs to another team\'s pane: nothing typed
     t.after(() => rmSync(scratch, { recursive: true, force: true }));
     const mine = pane(t, scratch, 'own-session', 'alice');
     const theirs = pane(t, scratch, 'other-team-session', 'bob');
-    const { spool } = team(t, { session: 'own-session', workers: [{ name: 'alice', pane_id: mine.id }, { name: 'bob', pane_id: theirs.id }] });
+    const { spool, root } = team(t, { session: 'own-session', workers: [{ name: 'alice', pane_id: mine.id }, { name: 'bob', pane_id: theirs.id }] });
 
     const r = await runApiSendMessage({ team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'hello' }, { env });
     assert.equal(r.ok, true);
     assert.deepEqual(theirs.typed(), [], 'the other team\'s pane got nothing');
     assert.equal(spool('bob'), 1, 'the message waits in bob\'s mailbox');
     assert.match(r.warning ?? '', /not typed/);
+
+    // R70a R1: the refusal is on the team's timeline, and status shows bob's mail as stuck
+    const lines = readFileSync(join(root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+    const refused = lines.filter((e) => e.type === 'trigger-refused');
+    assert.equal(refused.length, 1);
+    assert.deepEqual([refused[0].team, refused[0].worker, refused[0].to, refused[0].pane], ['own-team', 'alice', 'bob', theirs.id]);
+    assert.match(refused[0].reason, /not bob's/);
+    const out = [];
+    const log = console.log;
+    console.log = (x) => out.push(String(x));
+    try { await runStatus({ team: 'own-team', json: true }); } finally { console.log = log; }
+    assert.equal(JSON.parse(out.join('\n')).workers.find((w) => w.name === 'bob').spool, 1);
 });
 
 test('a pane in the team\'s own session that now carries another worker\'s name: nothing typed (a split-pane team\'s case)', async (t) => {
@@ -132,4 +145,6 @@ test('board notices take the same check, and leave process.env as it was (R70 L3
     assert.equal(spool('core'), 1);
     assert.match(r.warning ?? '', /not typed/);
     assert.equal(process.env.MY_TEAM_STATE_ROOT, before);
+    const refused = readFileSync(join(manifest.state_root, 'events.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'trigger-refused');
+    assert.deepEqual(refused.map((e) => [e.worker, e.to]), [['pm', 'core']], 'board notices log their refusals too');
 });

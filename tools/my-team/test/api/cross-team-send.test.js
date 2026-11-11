@@ -63,7 +63,8 @@ function readSpool(stateRoot, worker) {
 function readEvents(stateRoot) {
     const f = join(stateRoot, 'events.jsonl');
     if (!existsSync(f)) return [];
-    return readFileSync(f, 'utf-8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    // message lines only: these fixtures have no live pane, so each send also logs a trigger-refused line (T63e2)
+    return readFileSync(f, 'utf-8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)).filter((e) => e.type === 'message');
 }
 
 /** Injected tmux seam (same pattern as add-worker tests): pane resolves to %99. */

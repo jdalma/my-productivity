@@ -195,21 +195,29 @@ export function quoteShellArg(value) {
  * mistyped session must fail loudly rather than silently spool a message that
  * nobody will ever read.
  */
+/**
+ * One pane per line for list-panes -F: pane id and @worker_name first, '|' between, the session name last. Not a
+ * tab: without a UTF-8 locale tmux prints a tab as '_' (R70a R2). A pane id and a worker name hold no '|', so a
+ * session name with one still reads whole.
+ */
+export const PANE_FORMAT = '#{pane_id}|#{@worker_name}|#{session_name}';
+
+export function parsePaneLine(line) {
+    const a = line.indexOf('|');
+    const b = line.indexOf('|', a + 1);
+    return { session: line.slice(b + 1), paneId: line.slice(0, a), worker: line.slice(a + 1, b).trim() };
+}
+
 export async function resolvePaneBySessionWorker(sessionName, workerName) {
     const target = sessionName.split(':')[0];
     let stdout;
     try {
-        ({ stdout } = await tmuxCmdAsync([
-            'list-panes', '-a', '-F', '#{session_name}\t#{pane_id}\t#{@worker_name}',
-        ]));
+        ({ stdout } = await tmuxCmdAsync(['list-panes', '-a', '-F', PANE_FORMAT]));
     } catch (err) {
         throw new Error(`Cannot list tmux panes (is the tmux server running?): ${err.message}`);
     }
 
-    const rows = stdout.split('\n')
-        .map((line) => line.split('\t'))
-        .filter((cols) => cols.length >= 2 && cols[0])
-        .map(([session, paneId, worker]) => ({ session, paneId, worker: (worker ?? '').trim() }));
+    const rows = stdout.split('\n').filter((line) => line.includes('|')).map(parsePaneLine).filter((r) => r.session);
 
     const inSession = rows.filter((r) => r.session === target);
     if (inSession.length === 0) {

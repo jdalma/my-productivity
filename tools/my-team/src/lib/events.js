@@ -30,6 +30,8 @@ export const EVENT_TYPES = {
     'tmux-denied': { required: ['args'], optional: [], legacy: [] },   // the tmux shim (T56)
     'tool-denied': { required: ['tool', 'rule', 'target'], optional: [], legacy: [] },   // the worker guard hook (T59)
     board: { required: ['action', 'kind', 'ref', 'log_seq'], optional: ['state_from', 'state_to'], legacy: [] },   // a board change (T63e)
+    // a notice not typed into the recipient's pane, which then sleeps until it polls (T63e2); worker = the sender
+    'trigger-refused': { required: ['to', 'pane', 'reason'], optional: [], legacy: [] },
 };
 
 /**
@@ -65,6 +67,7 @@ export function eventLine(fields) {
     const line = { ts: fields.ts ?? new Date().toISOString(), ...fields };
     if (line.type === 'tmux-denied') line.args = cutArgs(line.args);
     if (line.type === 'tool-denied') line.target = cut(line.target);
+    if (line.type === 'trigger-refused') line.reason = cut(line.reason);
     return line;
 }
 

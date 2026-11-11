@@ -46,6 +46,7 @@ import { sendToWorker } from './tmux-session.js';
 import { tmuxExecAsync } from './tmux-utils.js';
 import { TeamPaths, absPath } from './state-paths.js';
 import { atomicWriteJson, appendFileWithMode, ensureDirWithMode } from './fs-utils.js';
+import { appendEvent } from './events.js';
 
 export const MAILBOX_SCHEMA_VERSION = 2;
 
@@ -339,48 +340,15 @@ export async function queueDirectMessage(
 
     // 4. Notify the recipient via tmux (best-effort, and only into its own pane).
     const trigger = await sendTmuxTrigger(toPaneId, 'new-message', fromWorker, { session, worker: toWorker });
+    if (trigger.refused) {
+        // the recipient wakes only on a trigger: put the refusal on its team's timeline, for monitor and the user
+        const root = crossTeam?.toStateRoot ?? absPath(cwd, TeamPaths.root(teamName));
+        try {
+            await appendEvent(root, { type: 'trigger-refused', team: teamName, worker: fromWorker, to: toWorker, pane: toPaneId ?? null, reason: trigger.refused });
+        } catch { /* the message is delivered; the caller warns about the trigger */ }
+    }
 
     return { ...message, trigger };
-}
-
-/**
- * Broadcast a message to all workers. One message_id shared across recipients.
- *
- * Broadcasts intentionally forbid `expectsReply=true`: a single message_id
- * cannot be cleanly correlated to N replies (which peer's answer "resolves"
- * the pending entry?). Senders that need answers must call
- * `queueDirectMessage` per recipient with distinct message_ids.
- */
-export async function queueBroadcastMessage(teamName, fromWorker, body, workerPanes, cwd, { expectsReply = false, session = null } = {}) {
-    if (expectsReply) {
-        throw new Error(
-            'Broadcast does not support expects_reply=true. Send individual queueDirectMessage calls per recipient if you need answers.'
-        );
-    }
-    // Exclude the sender from its own broadcast — even if the caller passed
-    // the whole roster including itself.
-    const workerNames = Object.keys(workerPanes).filter((n) => n !== fromWorker);
-    const messageId = newMessageId();
-    const createdAt = new Date().toISOString();
-    const messages = [];
-    for (const toWorker of workerNames) {
-        const message = {
-            message_id: messageId,
-            from_worker: fromWorker,
-            to_worker: toWorker,
-            body,
-            reply_to: null,
-            expects_reply: false,
-            created_at: createdAt,
-        };
-        dropSpoolMessage(teamName, toWorker, cwd, message);
-        appendArchive(teamName, fromWorker, cwd, { ...message, direction: 'out' });
-        messages.push(message);
-    }
-    await Promise.all(
-        workerNames.map((toWorker) => sendTmuxTrigger(workerPanes[toWorker], 'new-message', fromWorker, { session, worker: toWorker }))
-    );
-    return messages;
 }
 
 /**

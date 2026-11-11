@@ -6,7 +6,7 @@
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 
-import { tmuxCmdAsync } from './tmux-utils.js';
+import { PANE_FORMAT, parsePaneLine, tmuxCmdAsync } from './tmux-utils.js';
 
 /**
  * All panes on the tmux server as {session, paneId, worker}. Empty when no
@@ -17,15 +17,12 @@ import { tmuxCmdAsync } from './tmux-utils.js';
 export async function listPanes(run = tmuxCmdAsync) {
     let stdout;
     try {
-        ({ stdout } = await run(['list-panes', '-a', '-F', '#{session_name}\t#{pane_id}\t#{@worker_name}']));
+        ({ stdout } = await run(['list-panes', '-a', '-F', PANE_FORMAT]));
     } catch (err) {
         if (/no server running|error connecting to/.test(err.stderr ?? '')) return [];
         throw err;
     }
-    return stdout.split('\n').filter(Boolean).map((line) => {
-        const [session, paneId, worker] = line.split('\t');
-        return { session, paneId, worker: (worker ?? '').trim() };
-    });
+    return stdout.split('\n').filter(Boolean).map(parsePaneLine);
 }
 
 /**

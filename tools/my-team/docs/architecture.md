@@ -127,9 +127,9 @@ reply_to 해석 순서:
 3. **archive-lookup (direction=in)** — 내가 옛날에 받은 메시지에 대한 follow-up.
 4. 어디서도 못 찾으면 → peer 버그. body 자체만으로 처리.
 
-### 3.3 broadcast의 제약
+### 3.3 broadcast는 없다
 
-`api send-message`는 1:1 전송이다. broadcast 헬퍼(`queueBroadcastMessage`)는 내부 helper로만 존재하며 `expects_reply=true`를 거부한다 — 동일 message_id를 N명에게 보낼 수 없으면 reply_to 매칭이 깨지기 때문이다. 워커가 여러 peer에 동시에 질문하려면 각각 별도 `send-message` 호출을 해야 한다.
+`api send-message`는 1:1 전송이다. broadcast는 없다. 내부 helper(`queueBroadcastMessage`)는 부르는 곳이 없어 T63e2에서 지웠다. 워커가 여러 peer에 동시에 질문하려면 각각 별도 `send-message` 호출을 해야 한다. 그래야 답마다 자기 message_id의 reply_to로 이어진다.
 
 ## 4. 메시지 스펙
 

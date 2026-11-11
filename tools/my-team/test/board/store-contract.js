@@ -165,6 +165,7 @@ export function runStoreContract(name, makeStore) {
         assert.deepEqual(ids(await store.list('task', { assignee: 'core' })), ['T1']);
         assert.deepEqual(ids(await store.list('task', { assignee: ['core', 'app'] })), ['T1', 'T2']);
         assert.deepEqual(ids(await store.list('task', { assignee: null })), ['T3']);
+        assert.deepEqual(ids(await store.list('task', { assignee: ['app', null] })), ['T2', 'T3'], 'null in a value list matches no value');
         assert.deepEqual(ids(await store.list('task', { state: 'new', assignee: 'core' })), ['T1']);
         assert.deepEqual(ids(await store.list('task', {}, ['priority', 'asc'])), ['T2', 'T3', 'T1']);
         assert.deepEqual(ids(await store.list('task', {}, ['priority', 'desc'])), ['T1', 'T3', 'T2']);

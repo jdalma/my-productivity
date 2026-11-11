@@ -101,6 +101,8 @@ export class Busy extends StoreError { constructor(m) { super(m, 'busy'); } }
 export class SchemaTooNew extends StoreError { constructor(m) { super(m, 'schema-too-new'); } }
 export class InvalidQuery extends StoreError { constructor(m) { super(m, 'invalid-query'); } }
 export class InvalidRow extends StoreError { constructor(m) { super(m, 'invalid-row'); } }
+/** The store cannot run here at all (a Node without its driver): every board command fails, the rest of my-team runs. */
+export class Unavailable extends StoreError { constructor(m) { super(m, 'board-unavailable'); } }
 
 function fits(spec, value) {
     if (value === null) return true;

@@ -7,6 +7,10 @@ appended, and existing lines are never rewritten. The format is defined in one p
 - Writers call `appendEvent` or `appendMessageEvent`. A key that the type does not list, or a missing
   required key, throws an error.
 - Readers call `readEvent(line, team)`. It returns old lines in the same shape as new ones.
+- `api send-message` logs its line after the message is delivered. If the line cannot be made or written,
+  the message stays delivered: the result is still `ok: true`, with a `warning` field
+  (`"delivered, but not logged in <state_root>/events.jsonl"`) and a line on stderr. Sending again would
+  deliver it twice.
 
 ## Keys on every line written now
 
@@ -30,9 +34,11 @@ appended, and existing lines are never rewritten. The format is defined in one p
   - the sender's log gets `to_team`;
   - the recipient's log gets a mirror line with `from_team` and `to_team`. In both lines, `team` is the
     sender's team.
-- Free text in refusals is cut at 500 characters, ending with `…[+N chars]`:
+- Free text in refusals is cut at 500 characters (UTF-16 units), ending with `…[+N chars]`:
   - each string in `args`;
   - `target`.
+  When character 500 is the first half of a surrogate pair (an emoji), the cut is at 499 so the pair is not
+  split; N counts what was cut, the pair included.
 - `args` keeps at most 20 items. When it holds more, its last item is `…[+N args]`.
 - A message `body` is never cut.
 

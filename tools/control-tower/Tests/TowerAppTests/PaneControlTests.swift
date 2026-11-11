@@ -112,23 +112,26 @@ private final class Quiet: TerminalDelegate {
 /// A cell 0.6 of the font size wide, as a monospaced font's.
 private func cell(_ size: CGFloat) -> CGFloat { size * 0.6 }
 
-@Test func aWideDetailShowsThePaneAtTheBoardsTextSize() {
-    #expect(paneFontSize(width: 1000, cols: 80, preferred: 13, smallest: 9, cellWidth: cell) == 13)
+@Test func aWideDetailGrowsTheFontUntilTheColumnsFillItWithinACell() {
+    let size = paneFontSize(width: 1240, cols: 119, smallest: 9, largest: 26, cellWidth: cell)
+    #expect(size > 13)
+    #expect(cell(size) * 119 <= 1240)
+    #expect(1240 - cell(size) * 119 < cell(size))
 }
 
 @Test func aNarrowerDetailShrinksTheFontUntilEveryColumnFits() {
-    let size = paneFontSize(width: 500, cols: 80, preferred: 13, smallest: 9, cellWidth: cell)
+    let size = paneFontSize(width: 500, cols: 80, smallest: 9, largest: 26, cellWidth: cell)
     #expect(size < 13 && size >= 9)
     #expect(cell(size) * 80 <= 500)
-    #expect(cell(size + 0.5) * 80 > 500)
+    #expect(500 - cell(size) * 80 < cell(size))
 }
 
 @Test func aDetailTooNarrowForTheSmallestFontKeepsTheSmallestAndScrolls() {
-    #expect(paneFontSize(width: 200, cols: 80, preferred: 13, smallest: 9, cellWidth: cell) == 9)
+    #expect(paneFontSize(width: 200, cols: 80, smallest: 9, largest: 26, cellWidth: cell) == 9)
 }
 
-@Test func aBoardTextSizeUnderTheSmallestStaysAsTheUserSetIt() {
-    #expect(paneFontSize(width: 200, cols: 80, preferred: 8, smallest: 9, cellWidth: cell) == 8)
+@Test func aPaneOfFewColumnsStopsAtTheLargestFont() {
+    #expect(paneFontSize(width: 1240, cols: 20, smallest: 9, largest: 26, cellWidth: cell) == 26)
 }
 
 // MARK: - a control mode client against a throwaway tmux server (`tmux -L`), never the user's
@@ -397,12 +400,14 @@ struct PaneTmuxTests {
         view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: link)
         defer { view.detach() }
         #expect(!view.allowMouseReporting)
-        view.place(width: 3000, preferred: 13)
+        view.place(width: 1240, largest: 26)
         #expect(await until { link.size.width > 0 })
-        #expect(view.font.pointSize == 13)
-        view.place(width: 700, preferred: 13)
+        #expect(view.font.pointSize > 13)
+        // SwiftTerm snaps a cell to the pixel grid (half a point at 2x), so a fill can fall short by that per column
+        #expect(link.size.width <= 1240 && 1240 - link.size.width < 120 * 0.5)
+        view.place(width: 700, largest: 26)
         #expect(view.font.pointSize < 13)
-        #expect(link.size.width <= 700)
+        #expect(link.size.width <= 700 && 700 - link.size.width < 120 * 0.5)
         #expect(server.run("display-message", "-p", "-t", pane, "#{pane_width}") == "120")
     }
 
@@ -423,7 +428,7 @@ struct PaneTmuxTests {
         window.contentView?.addSubview(view)
         view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: link)
         defer { view.detach() }
-        view.place(width: 900, preferred: 13)
+        view.place(width: 900, largest: 26)
         #expect(await until { link.size.width > 0 })
         #expect(link.size.width <= 900)
         // AppKit tells the view when its window moves to a 1x screen; at 2x's font the 120 cells come to 960 points

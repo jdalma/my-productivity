@@ -6,8 +6,8 @@ import TowerCore
 /// A live tmux pane in the detail, in place of the recent conversation: what the pane shows, as it changes, and
 /// what the user types while the terminal has focus goes to the pane (PaneStream says what that touches).
 /// The terminal has the pane's columns and rows, so lines wrap as they do in the user's own terminal. Its font is the
-/// board's text size, made smaller when that is what fits every column in the detail's width; under the macOS mini
-/// control size the detail scrolls sideways instead.
+/// size at which those columns fill the detail's width: no larger than twice the board's text size (a pane of few
+/// columns), and no smaller than the macOS mini control size, under which the detail scrolls sideways instead.
 struct PaneTerminal: View {
     let ref: TmuxRef
     @Environment(\.boardFontScale) private var scale
@@ -57,19 +57,25 @@ private struct PaneTerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PaneTerminalView, context: Context) {
-        if width > 0 { view.place(width: width, preferred: fontSize) }
+        if width > 0 { view.place(width: width, largest: fontSize * 2) }
     }
 
     static func dismantleNSView(_ view: PaneTerminalView, coordinator: ()) { view.detach() }
 }
 
-/// The font size at which `cols` cells fit in `width`: `preferred` when they do, else the largest half point under it
-/// that does, but not under `smallest` (a `preferred` already under it stays). `cellWidth` is a cell's width at a size.
-func paneFontSize(width: CGFloat, cols: Int, preferred: CGFloat, smallest: CGFloat,
+/// The largest font size, between `smallest` and `largest`, at which `cols` cells fit in `width`; `smallest` when
+/// none does. `cellWidth` is a cell's width at a size, never smaller at a larger one.
+func paneFontSize(width: CGFloat, cols: Int, smallest: CGFloat, largest: CGFloat,
                   cellWidth: (CGFloat) -> CGFloat) -> CGFloat {
-    var size = preferred
-    while cellWidth(size) * CGFloat(cols) > width, size - 0.5 >= smallest { size -= 0.5 }
-    return size
+    func fits(_ size: CGFloat) -> Bool { cellWidth(size) * CGFloat(cols) <= width }
+    if fits(largest) { return largest }
+    var fit = smallest, over = largest
+    guard fits(fit) else { return smallest }
+    while over - fit > 0.01 {
+        let mid = (fit + over) / 2
+        if fits(mid) { fit = mid } else { over = mid }
+    }
+    return fit
 }
 
 /// SwiftTerm's view fed by a PaneStream instead of a local process.
@@ -104,13 +110,13 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
     }
 
     private var width = CGFloat.infinity
-    private var preferred: CGFloat?
+    private var largest: CGFloat?
 
-    /// Lays the terminal out for a detail `width` points wide at the board's text size `preferred`.
-    func place(width: CGFloat, preferred: CGFloat) {
-        guard width != self.width || preferred != self.preferred else { return }
+    /// Lays the terminal out for a detail `width` points wide, its font at most `largest`.
+    func place(width: CGFloat, largest: CGFloat) {
+        guard width != self.width || largest != self.largest else { return }
         self.width = width
-        self.preferred = preferred
+        self.largest = largest
         fit()
     }
 
@@ -127,8 +133,8 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
     private func fit() {
         guard paneSize.cols > 0 else { return }
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1  // as SwiftTerm snaps cells
-        let size = paneFontSize(width: width, cols: paneSize.cols, preferred: preferred ?? font.pointSize,
-                                smallest: NSFont.systemFontSize(for: .mini)) { size in
+        let size = paneFontSize(width: width, cols: paneSize.cols, smallest: NSFont.systemFontSize(for: .mini),
+                                largest: largest ?? font.pointSize) { size in
             // SwiftTerm's cell: the advance of W, snapped to the pixel grid
             let f = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
             return (f.advancement(forGlyph: f.glyph(withName: "W")).width * scale).rounded() / scale

@@ -13,6 +13,7 @@ import { createBoard } from '../../src/board/core/service.js';
 import { inbox, reviewQueue, status } from '../../src/board/core/queries.js';
 import { createMemoryStore } from '../../src/board/store/memory/index.js';
 import { createSqliteStore } from '../../src/board/store/sqlite/index.js';
+import { SCHEMA_VERSION } from '../../src/board/core/contract.js';
 
 const hasSqlite = await import('node:sqlite').then(() => true, () => false);
 const ROSTER = [
@@ -77,7 +78,10 @@ both('review queue: one row per open review request of the reviewer, with what R
     assert.deepEqual(row.open_findings.map((f) => [f.id, f.state, f.fixed_in]), [['R1 M1', 'fixed', 'T1a#2']]);
     assert.deepEqual(row.settled_findings.map((f) => [f.id, f.state]), [['R1 L1', 'backlog']]);
     assert.deepEqual(q.incomplete, []);
-    assert.deepEqual((await reviewQueue(store, ROSTER, 'app')).queue.map((r) => r.landing.id), ['T2#1']);
+    assert.deepEqual([row.next_verdict, row.verdicts.map((v) => [v.id, v.verdict])], ['R1a', [['R1', 'changes']]], 'R69 L4');
+    assert.deepEqual((await reviewQueue(store, ROSTER, 'app')).queue.map((r) => [r.landing.id, r.next_verdict]), [['T2#1', 'R2']]);
+    await as('app').note({ id: 'T1a', body: 'context for the reviewer' });
+    assert.deepEqual((await reviewQueue(store, ROSTER, 'rv')).queue[0].notes.map((n) => n.body), ['context for the reviewer'], 'R69 R1: a note with no "to" shows on the row');
 });
 
 both('review queue: a task without a ticket or constraints is listed as incomplete; pm judges tasks with no reviewer; priority orders', async ({ store, as }) => {
@@ -120,6 +124,9 @@ both('inbox: my unfinished work, my reviews, notes to me and announcements after
     const next = await inbox(store, ROSTER, 'core', first.cursor);
     assert.deepEqual([next.notes, next.announcements.map((a) => a.body)], [[], ['rule two']]);
     assert.ok(next.cursor.announcement > first.cursor.announcement);
+    assert.equal(next.cursor.board, (await store.describe()).board_id);
+    const elsewhere = await inbox(store, ROSTER, 'core', { ...next.cursor, board: 'f'.repeat(32) });
+    assert.deepEqual(elsewhere.announcements.map((a) => a.body), ['rule one', 'rule two'], 'R69 R2: a cursor of another board starts from the beginning');
 });
 
 both('status: every task, each worker\'s load, open findings, recent changes; or one family in full', async ({ store, as }) => {
@@ -131,7 +138,7 @@ both('status: every task, each worker\'s load, open findings, recent changes; or
     await as('pm').add({ id: 'T2', title: 'other' });
 
     const all = await status(store, ROSTER);
-    assert.equal(all.store.schema_version, 1);
+    assert.equal(all.store.schema_version, SCHEMA_VERSION);
     assert.deepEqual(all.tasks.map((t) => [t.id, t.state]), [['T1', 'changes'], ['T1a', 'ready'], ['T2', 'new']]);
     assert.deepEqual(all.workers.find((w) => w.name === 'core'), { name: 'core', role: 'worker', assigned: 1, reviewing: 0 });
     assert.deepEqual(all.workers.find((w) => w.name === 'rv'), { name: 'rv', role: 'worker', assigned: 0, reviewing: 2 });
@@ -140,7 +147,12 @@ both('status: every task, each worker\'s load, open findings, recent changes; or
     assert.deepEqual(all.recent.at(-1).action, 'add');
     assert.ok(all.recent.length <= 20);
 
+    await as('pm').announce({ body: 'user decided: sqlite' });
+    await as('core').note({ id: 'T1', body: 'why this way' });
+    const later = await status(store, ROSTER);
+    assert.deepEqual(later.announcements.map((a) => a.body), ['user decided: sqlite'], 'R69 R4');
     const fam = await status(store, ROSTER, { task: 'T1a' });
+    assert.deepEqual(fam.notes.map((n) => n.body), ['why this way'], 'R69 R1');
     assert.deepEqual([fam.root.id, fam.tasks.map((t) => t.id)], ['T1', ['T1', 'T1a']]);
     assert.deepEqual(fam.landings.map((l) => l.id), ['T1#1']);
     assert.deepEqual(fam.verdicts.map((v) => [v.id, v.verdict]), [['R1', 'changes']]);

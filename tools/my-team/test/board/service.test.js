@@ -293,6 +293,21 @@ both('R68 M1: a reviewer change that leaves only the assignee to judge is refuse
     await rejects(b.as('pm').assign({ id: 'T1', reviewer: null }), 'invalid');
 });
 
+both('R68a R1: nobody approves a commit they landed themselves, even after the roles are swapped', async (setup) => {
+    const b = await setup();
+    await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv', base: BASE });
+    await b.as('core').take({ id: 'T1' });
+    await b.as('core').land(land('T1', H('1')));
+    await b.as('rv').verdict(judge('T1#1', H('1'), 'changes'));
+    await b.as('pm').assign({ id: 'T1', assignee: 'app', reviewer: 'core' });
+    await b.as('app').take({ id: 'T1' });
+    b.ranges.set(`${BASE}..${H('2')}`, { ancestor: true, commits: [H('1'), H('2')] });
+    await b.as('app').land(land('T1', H('2')));
+    await rejects(b.as('core').verdict(judge('T1#2', H('2'), 'approve')), 'forbidden');
+    await b.as('pm').assign({ id: 'T1', reviewer: 'rv' });
+    assert.equal((await b.as('rv').verdict(judge('T1#2', H('2'), 'approve'))).task.state, 'done');
+});
+
 both('R68 L2: a reviewer can be set from new, ready, doing and changes; the state stays and nobody is told', async (setup) => {
     for (const from of ['new', 'ready', 'doing', 'changes']) {
         const b = await setup();
@@ -359,7 +374,8 @@ both('land: base defaults to the family\'s last approved commit, then the task\'
     await rejects(b.as('core').land(land('T1a', H('5'), { commits: [H('5'), H('7')] })), 'invalid');
     await rejects(b.as('core').land(land('T1a', H('5'), { commits: [H('4')] })), 'invalid');
     const r = await b.as('core').land(land('T1a', H('5'), { commits: [H('5')] }));
-    assert.deepEqual([r.landing.base_commit, r.landing.commits, r.outside_commits], [H('1'), [H('5')], [H('4')]]);
+    assert.deepEqual([r.landing.base_commit, r.landing.commits, r.landing.left_out], [H('1'), [H('5')], [H('4')]]);
+    assert.deepEqual((await b.store.get('landing', 'T1a#1')).left_out, [H('4')], 'stored, so the review request shows it (R69 R3)');
 
     const c = await setup();
     await c.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });

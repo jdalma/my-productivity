@@ -17,9 +17,9 @@ appended, and existing lines are never rewritten. The format is defined in one p
 | key | meaning |
 |---|---|
 | `ts` | ISO 8601 time of writing |
-| `type` | `message`, `tmux-denied` or `tool-denied` |
+| `type` | `message`, `tmux-denied`, `tool-denied` or `board` |
 | `team` | the team of the actor |
-| `worker` | the actor: the sender of a message, or the worker that was refused |
+| `worker` | the actor: the sender of a message, the worker that was refused, or the worker that changed the board |
 
 ## Types
 
@@ -28,6 +28,7 @@ appended, and existing lines are never rewritten. The format is defined in one p
 | `message` | `api send-message` | `from`, `to`, `body`, `message_id`, `reply_to`, `expects_reply` | `from_team`, `to_team` |
 | `tmux-denied` | the tmux shim on a worker's PATH | `args` | |
 | `tool-denied` | the worker guard hook (`deny` rules) | `tool`, `rule`, `target` | |
+| `board` | a board write command (`api board-*`), after its change is applied | `action`, `kind`, `ref`, `log_seq` | `state_from`, `state_to` |
 
 - `message` keeps `from` and `to` for existing readers. Its `worker` always equals `from`.
 - A cross-team send writes two lines:
@@ -41,6 +42,8 @@ appended, and existing lines are never rewritten. The format is defined in one p
   split; N counts what was cut, the pair included.
 - `args` keeps at most 20 items. When it holds more, its last item is `…[+N args]`.
 - A message `body` is never cut.
+- A `board` line carries no text from the board: `ref` names the row (`T1`, `T1#1`, `R1`, `R1 M1`, or `-` for a
+  note or announcement without a task) and `log_seq` its line in the board's own log, where the rest is.
 
 ## Example lines
 
@@ -49,6 +52,7 @@ appended, and existing lines are never rewritten. The format is defined in one p
 {"ts":"2026-11-11T05:52:09.000Z","type":"message","team":"team-a","worker":"alice","from":"alice","to":"bob","body":"hi","message_id":"…","reply_to":null,"expects_reply":false,"from_team":"team-a","to_team":"team-b"}
 {"ts":"2026-11-11T04:55:21.414Z","type":"tmux-denied","team":"t56probe","worker":"w","args":["kill-session","-t","nothing"]}
 {"ts":"2026-11-11T05:52:11.148Z","type":"tool-denied","team":"t59probe","worker":"w","tool":"Write","rule":"repo-write","target":"/…/repo/inside.txt"}
+{"ts":"2026-11-11T08:50:02.000Z","type":"board","team":"flow-team","worker":"core","action":"land","kind":"landing","ref":"T1#1","log_seq":3,"state_from":"doing","state_to":"review"}
 ```
 
 ## Reading older lines

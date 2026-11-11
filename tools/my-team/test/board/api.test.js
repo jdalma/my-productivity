@@ -108,6 +108,9 @@ test('who asks: MY_TEAM_WORKER of another team is refused; without it the input 
     assert.deepEqual([nobody.code, nobody.json.code], [1, 'invalid']);
     const stranger = cli(base, ['board-inbox', '--input', '{"team_name":"bt","worker":"ghost"}', '--json']);
     assert.deepEqual([stranger.code, stranger.json.code], [1, 'invalid']);
+    const outsider = cli(base, ['board-status', '--input', '{"team_name":"bt"}', '--json'], { worker: 'elsewhere/pm' });
+    assert.deepEqual([outsider.code, outsider.json.code], [1, 'forbidden'], 'R69 L1: another team\'s worker does not read this board');
+    assert.equal(cli(base, ['board-status', '--input', '{"team_name":"bt"}', '--json']).code, 0, 'the user\'s shell may');
     const missing = cli(base, ['board-status', '--input', '{"team_name":"nope"}', '--json']);
     assert.deepEqual([missing.code, missing.json.code], [1, 'not-found']);
 });

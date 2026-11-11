@@ -19,7 +19,7 @@ const task = (id, extra = {}) => ({
 const logEntry = (ref, extra = {}) => ({ at: AT, actor: 'pm', action: 'add', kind: 'task', ref, ...extra });
 const landing = (id, extra = {}) => ({
     id, task_id: 'T1', repo: '/repo', commit: 'a'.repeat(40), base_commit: 'b'.repeat(40),
-    commits: ['a'.repeat(40)], check_cmd: 'npm test',
+    commits: ['a'.repeat(40)], left_out: [], check_cmd: 'npm test',
     check_result: '10/10', focus: ['one'], closes: [], report_path: '/r/T1.md', review_report_path: '/r/R1.md',
     created_at: AT, created_by: 'core', ...extra,
 });
@@ -46,6 +46,15 @@ export function runStoreContract(name, makeStore, { makeNewerStore, skip } = {})
         assert.equal(d.adapter, name);
         assert.equal(d.schema_version, SCHEMA_VERSION);
         assert.ok('location' in d);
+        assert.match(d.board_id, /^[0-9a-f]{32}$/, 'a board id made when the store was created (R69 R2)');
+        assert.equal((await store.describe()).board_id, d.board_id);
+    });
+
+    test(`[${name}] two stores have different board ids`, { skip: skip ?? false }, async (t) => {
+        const [a, b] = [await makeStore(t), await makeStore(t)];
+        await a.open(); await b.open();
+        t.after(async () => { await a.close(); await b.close(); });
+        assert.notEqual((await a.describe()).board_id, (await b.describe()).board_id);
     });
 
     withStore('a created row reads back with every field, version 1, and lists intact', async (store) => {

@@ -5,6 +5,8 @@
  * nothing.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import {
     KINDS, SCHEMA_VERSION, Conflict, checkChanges, checkKey, checkQuery, fullLog, fullRow,
 } from '../../core/contract.js';
@@ -28,12 +30,13 @@ export function createMemoryStore() {
     const tables = Object.fromEntries(Object.keys(KINDS).map((k) => [k, new Map()]));
     const seqs = Object.fromEntries(Object.keys(KINDS).map((k) => [k, 0]));
     const log = [];
+    const boardId = randomUUID().replaceAll('-', '');
 
     return {
         async open() {},
         async close() {},
         async describe() {
-            return { adapter: 'memory', schema_version: SCHEMA_VERSION, location: null };
+            return { adapter: 'memory', schema_version: SCHEMA_VERSION, location: null, board_id: boardId };
         },
 
         async get(kind, key) {

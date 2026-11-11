@@ -3,9 +3,10 @@
  * Plain reads over the store contract; nothing here writes, so nothing waits on a writer (R67 R2).
  */
 
-import { BoardError, TERMINAL, pmsOf } from './rules.js';
+import { BoardError, TERMINAL, nextVerdictId, pmsOf } from './rules.js';
 
 const RECENT = 20;
+const ANNOUNCEMENTS = 10;
 const byPriority = (a, b) => a.priority - b.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const judgesOf = (task, roster) => (task.reviewer ? [task.reviewer] : pmsOf(roster));
 
@@ -31,6 +32,7 @@ const REQUIRED_TASK_FIELDS = ['ticket_path', 'constraints'];
  */
 export async function reviewQueue(store, roster, reviewer) {
     const approved = await approvedLandings(store);
+    const allVerdicts = await store.list('verdict', {});
     const tasks = (await store.list('task', { state: 'review' })).filter((t) => judgesOf(t, roster).includes(reviewer)).sort(byPriority);
     const queue = [], incomplete = [];
     for (const task of tasks) {
@@ -39,13 +41,19 @@ export async function reviewQueue(store, roster, reviewer) {
         const missing = REQUIRED_TASK_FIELDS.filter((f) => task[f] === null);
         if (missing.length) { incomplete.push({ landing: landing.id, task: task.id, missing }); continue; }
         const family = await familyOf(store, task);
-        const findings = await store.list('finding', { task_id: family.map((t) => t.id) });
+        const ids = family.map((t) => t.id);
+        const findings = await store.list('finding', { task_id: ids });
+        const familyLandings = new Set((await store.list('landing', { task_id: ids })).map((l) => l.id));
+        const verdicts = allVerdicts.filter((v) => familyLandings.has(v.landing_id));
         queue.push({
             task,
             parent: task.parent_id ? family[0] : null,
             landing,
             open_findings: findings.filter((f) => isOpen(f, approved)),
             settled_findings: findings.filter((f) => !isOpen(f, approved) && f.state !== 'fixed'),
+            notes: await store.list('note', { task_id: ids }),
+            verdicts,
+            next_verdict: nextVerdictId(allVerdicts.map((v) => v.id), verdicts.map((v) => v.id)),
         });
     }
     return { queue, incomplete };
@@ -53,10 +61,13 @@ export async function reviewQueue(store, roster, reviewer) {
 
 /**
  * A worker's own: its unfinished tasks not waiting on someone else (ready, doing, changes, held), its review
- * requests, and notes to it and announcements after `since` ({note, announcement} seqs). `cursor` is the
- * `since` for the next call; nothing is marked read on the board.
+ * requests, and notes to it and announcements after `since` ({board, note, announcement}). `cursor` is the
+ * `since` for the next call; a cursor of another board (a new team's, R69 R2) starts from the beginning.
+ * Nothing is marked read on the board.
  */
-export async function inbox(store, roster, worker, since = {}) {
+export async function inbox(store, roster, worker, cursor = {}) {
+    const board = (await store.describe()).board_id;
+    const since = cursor.board === board ? cursor : {};
     const after = (rows, seq) => rows.filter((r) => r.seq > (seq ?? 0));
     const tasks = (await store.list('task', { assignee: worker, state: ['ready', 'doing', 'changes', 'held'] })).sort(byPriority);
     const { queue, incomplete } = await reviewQueue(store, roster, worker);
@@ -69,7 +80,7 @@ export async function inbox(store, roster, worker, since = {}) {
         incomplete,
         notes: after(notes, since.note).filter((n) => n.to?.includes(worker)),
         announcements: after(announcements, since.announcement),
-        cursor: { note: last(notes, since.note), announcement: last(announcements, since.announcement) },
+        cursor: { board, note: last(notes, since.note), announcement: last(announcements, since.announcement) },
     };
 }
 
@@ -90,6 +101,7 @@ export async function status(store, roster, { task } = {}) {
             landings,
             verdicts: await store.list('verdict', { landing_id: landings.map((l) => l.id) }),
             findings: await store.list('finding', { task_id: ids }),
+            notes: await store.list('note', { task_id: ids }),
         };
     }
     const tasks = (await store.list('task', {})).sort(byPriority);
@@ -107,5 +119,6 @@ export async function status(store, roster, { task } = {}) {
         })),
         open_findings: findings.filter((f) => isOpen(f, approved)),
         recent: log.slice(-RECENT),
+        announcements: (await store.list('announcement', {})).slice(-ANNOUNCEMENTS),
     };
 }

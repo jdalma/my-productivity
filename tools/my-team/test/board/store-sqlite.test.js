@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 
 import { runStoreContract } from './store-contract.js';
 import { createSqliteStore } from '../../src/board/store/sqlite/index.js';
+import { MIGRATIONS } from '../../src/board/store/sqlite/schema.js';
 import { SCHEMA_VERSION } from '../../src/board/core/contract.js';
 
 const sqlite = await import('node:sqlite').catch(() => null);
@@ -146,6 +147,25 @@ test('[sqlite] the file is WAL, private to the user, and keeps rows across opens
     t.after(() => raw.close());
     assert.equal(raw.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
     assert.equal(raw.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+});
+
+test('[sqlite] a version 1 file migrates: its rows stay, it gains a board id kept across opens, and landings a left_out list', needsSqlite, async (t) => {
+    const file = tempFile(t);
+    const raw = new DatabaseSync(file);
+    raw.exec(MIGRATIONS.find((m) => m.to === 1).sql);
+    raw.exec('PRAGMA user_version = 1');
+    raw.prepare(`INSERT INTO landings VALUES ('T1#1','T1','/r','${'a'.repeat(40)}','${'b'.repeat(40)}','[]','c','r','["f"]','[]','/p','/q',NULL,NULL,'${AT}','core',NULL,NULL,1)`).run();
+    raw.close();
+    const store = createSqliteStore(file);
+    await store.open();
+    const id = (await store.describe()).board_id;
+    assert.match(id, /^[0-9a-f]{32}$/);
+    assert.deepEqual((await store.get('landing', 'T1#1')).left_out, null, 'an old row has no left_out');
+    await store.close();
+    await store.open();
+    t.after(() => store.close());
+    assert.equal((await store.describe()).board_id, id);
+    assert.equal((await store.describe()).schema_version, SCHEMA_VERSION);
 });
 
 test('[sqlite] a Node without node:sqlite makes the board unavailable, naming the Node it needs', async (t) => {

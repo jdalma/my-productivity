@@ -29,6 +29,7 @@ export const EVENT_TYPES = {
     },
     'tmux-denied': { required: ['args'], optional: [], legacy: [] },   // the tmux shim (T56)
     'tool-denied': { required: ['tool', 'rule', 'target'], optional: [], legacy: [] },   // the worker guard hook (T59)
+    board: { required: ['action', 'kind', 'ref', 'log_seq'], optional: ['state_from', 'state_to'], legacy: [] },   // a board change (T63e)
 };
 
 /**

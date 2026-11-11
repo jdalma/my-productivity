@@ -53,4 +53,12 @@ CREATE INDEX landings_task ON landings("task_id");
 CREATE INDEX findings_task ON findings("task_id");
 `,
     },
+    {
+        to: 2,
+        sql: `
+CREATE TABLE meta ("key" TEXT PRIMARY KEY, "value" TEXT NOT NULL);
+INSERT INTO meta VALUES ('board_id', lower(hex(randomblob(16))));
+ALTER TABLE landings ADD COLUMN "left_out" TEXT;
+`,
+    },
 ];

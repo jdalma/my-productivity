@@ -7,7 +7,8 @@
  *   open()                      make the store usable; create or migrate its schema. Safe to call again and
  *                               from several processes at once. A schema newer than SCHEMA_VERSION: SchemaTooNew
  *   close()                     release it; safe to call twice
- *   describe()                  { adapter, schema_version, location }
+ *   describe()                  { adapter, schema_version, location, board_id }; board_id is made once when
+ *                               the store is created, so a reader can tell a new board from an old one (R69 R2)
  *   get(kind, key)              the row, or null
  *   list(kind, where, order?)   rows matching every `field: value` on filterable fields (and the key). A value
  *                               must fit the field's type; null matches no value; a value list matches any of
@@ -29,7 +30,7 @@
  * in the same change set.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const text = (opts = {}) => ({ type: 'text', ...opts });
 const int = (opts = {}) => ({ type: 'int', ...opts });
@@ -60,6 +61,7 @@ export const KINDS = {
             commit: text({ ...req, ...filt }), base_commit: text(req), commits: list(req), check_cmd: text(req),
             check_result: text(req), focus: list(req), closes: list(req), report_path: text(req),
             review_report_path: text(req), deployed: text(), superseded_by: text(filt),
+            left_out: list(),   // rev-list commits the landing leaves out (R69 R3); null on rows before schema 2
             ...created, ...updated,
         },
     },

@@ -8,6 +8,7 @@
  *   api send-message, api mailbox-list, api mailbox-mark-delivered,
  *   api archive-lookup, api roster
  *   api board-status, api board-inbox, api board-review-queue (the team's board, T63)
+ *   api board-add, -assign, -take, -note, -land, -verdict, -finding, -cancel, -announce
  */
 
 import { Command } from 'commander';
@@ -30,6 +31,7 @@ import { runApiRoster } from './commands/api/roster.js';
 import { runApiBoardStatus } from './commands/api/board-status.js';
 import { runApiBoardInbox } from './commands/api/board-inbox.js';
 import { runApiBoardReviewQueue } from './commands/api/board-review-queue.js';
+import { runApiBoardWrite } from './commands/api/board-write.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -213,6 +215,18 @@ async function main() {
         .action((opts) => boardRun(opts, fn));
     board('board-status', '[pure] The team board: every task, each worker\'s load, open findings, recent changes; with "task", that task\'s family', runApiBoardStatus);
     board('board-inbox', '[pure] Your unfinished tasks, your review requests, notes to you and announcements after "since" (pass back "cursor")', runApiBoardInbox);
+    const WRITES = {
+        add: 'Add a task (pm): title; id, parent, ticket, assignee, reviewer, priority, base, constraints',
+        assign: '(Re)assign (pm): id with assignee → ready; a held task without one → review again; reviewer alone changes the reviewer',
+        take: 'Start your task (ready or changes → doing): id',
+        note: 'A note: body; id, to (workers told)',
+        land: 'Ask for review of your work: id, commit, check {cmd,result}, focus, closes, report, review_report; base, commits, deployed',
+        verdict: 'Judge a review request: landing, verdict (approve|changes|hold), verified_commit, report, rerun {cmd,result}, findings; reopen',
+        finding: 'Settle or reopen a finding: id, state',
+        cancel: 'Cancel a task (pm): id; findings (backlog|accepted-limit|rejected) for its unsettled ones',
+        announce: 'Tell the whole team (pm): body',
+    };
+    for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name));
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
 
     try {

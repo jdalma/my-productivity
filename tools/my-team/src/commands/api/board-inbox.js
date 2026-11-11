@@ -7,8 +7,9 @@ import { inbox } from '../../board/core/queries.js';
 export function runApiBoardInbox(input = {}, env = process.env) {
     const since = input.since ?? {};
     const seq = (v) => v === undefined || (Number.isInteger(v) && v >= 0);
-    if (typeof since !== 'object' || Array.isArray(since) || !seq(since.note) || !seq(since.announcement)) {
-        throw new BoardError('invalid', 'since must be {note, announcement} seqs, as the last cursor gave');
+    const board = since.board === undefined || typeof since.board === 'string';
+    if (typeof since !== 'object' || Array.isArray(since) || !board || !seq(since.note) || !seq(since.announcement)) {
+        throw new BoardError('invalid', 'since must be the last cursor: {board, note, announcement}');
     }
     return withBoard(input.team_name, async ({ store, roster }) => {
         const worker = actorOf(env, input.team_name, roster, input.worker);

@@ -19,7 +19,7 @@
 
 import {
     BoardError, COMMIT, FINDING_CODE, FINDING_MOVES, SETTLED, SEVERITIES, TASK_ID, TERMINAL, VERDICTS,
-    fail, move, nextDerived, nextNumbered, pmsOf, verdictBase,
+    fail, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
 } from './rules.js';
 
 const ATTEMPTS = 3;
@@ -226,14 +226,15 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             }
             const row = {
                 id, task_id: task.id, repo, commit, base_commit: base, commits, check_cmd: check.cmd, check_result: check.result,
-                focus, closes, report_path: report, review_report_path: reviewReport, deployed: input.deployed ?? null, ...created(),
+                focus, closes, report_path: report, review_report_path: reviewReport, deployed: input.deployed ?? null,
+                left_out: range.commits.filter((c) => !commits.includes(c)), ...created(),
             };
             const states = { state_from: task.state, state_to: state };
             return {
                 action: 'land', kind: 'landing', ref: id, states,
                 changes: { creates: [{ kind: 'landing', row }], updates, log: [log('land', 'landing', id, { ...states, detail: { task: task.id, superseded: previous?.id ?? null } })] },
                 notify: [...judgesOf(task), ...pms()],
-                result: () => ({ task: { ...task, state }, landing: { ...row, superseded_by: null, version: 1 }, fixed, outside_commits: range.commits.filter((c) => !commits.includes(c)) }),
+                result: () => ({ task: { ...task, state }, landing: { ...row, superseded_by: null, version: 1 }, fixed }),
             };
         }),
 
@@ -257,11 +258,14 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const fam = await family(task);
             const famIds = fam.tasks.map((t) => t.id);
             const all = await store.list('verdict', {});
-            const famLandings = new Set((await store.list('landing', { task_id: famIds })).map((l) => l.id));
+            const familyLandings = await store.list('landing', { task_id: famIds });
+            const famLandings = new Set(familyLandings.map((l) => l.id));
+            // R68a R1: whoever landed one of these commits, in any landing of the family, does not approve them
+            const own = new Set(familyLandings.filter((l) => l.created_by === actor).flatMap((l) => l.commits));
+            const mine = landing.commits.filter((c) => own.has(c));
+            if (mine.length) fail('forbidden', `${actor} landed ${mine.join(', ')} and cannot judge it`);
             const famVerdicts = all.filter((v) => famLandings.has(v.landing_id)).map((v) => v.id);
-            // the family's first verdict takes the next R<n>; later ones are R<n>a, R<n>b … (§2.8)
-            const base = famVerdicts.length ? verdictBase(famVerdicts[0]) : null;
-            const vid = base ? nextDerived(base, all.map((v) => v.id)) : nextNumbered('R', all.map((v) => v.id));
+            const vid = nextVerdictId(all.map((v) => v.id), famVerdicts);
 
             const codes = new Set();
             const newFindings = raised.map((f) => {

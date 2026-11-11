@@ -92,3 +92,9 @@ export function nextDerived(base, ids) {
 
 /** R<n>[letters] split into its numbered base. */
 export const verdictBase = (id) => /^R\d+/.exec(id)?.[0] ?? null;
+
+/** The id the next verdict on a family takes: the next R<n> for its first, R<n>a, R<n>b … after (§2.8). */
+export function nextVerdictId(allIds, familyIds) {
+    const base = familyIds.length ? verdictBase(familyIds[0]) : null;
+    return base ? nextDerived(base, allIds) : nextNumbered('R', allIds);
+}

@@ -140,6 +140,7 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
         async describe() {
             return guarded(() => ({
                 adapter: 'sqlite', schema_version: db.prepare('PRAGMA user_version').get().user_version, location: file,
+                board_id: db.prepare(`SELECT "value" FROM meta WHERE "key" = 'board_id'`).get().value,
             }));
         },
 

@@ -91,6 +91,8 @@ test('monitor prints old and new lines without undefined (e)', (t) => {
         { ts: '2026-11-11T00:00:01.000Z', type: 'message', from: 'pm', to: 'lead', body: 'xs', message_id: 'm', reply_to: null, expects_reply: false, from_session: 's', to_session: 'u', to_team: 'uu' },
         eventLine({ type: 'tmux-denied', team: 'tt', worker: 'rv', args: ['kill-server'] }),
         eventLine({ type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push', target: 'git push' }),
+        eventLine({ type: 'board', team: 'tt', worker: 'core', action: 'land', kind: 'landing', ref: 'T1#1', log_seq: 3, state_from: 'doing', state_to: 'review' }),
+        eventLine({ type: 'board', team: 'tt', worker: 'pm', action: 'note', kind: 'note', ref: '-', log_seq: 4 }),
     ];
     writeFileSync(join(root, 'events.jsonl'), old.map((e) => JSON.stringify(e)).join('\n') + '\n');
     // monitor watches forever: read its first output, then stop it
@@ -103,6 +105,8 @@ test('monitor prints old and new lines without undefined (e)', (t) => {
     assert.match(out, /pm → core/);
     assert.match(out, /tmux kill-server/);
     assert.match(out, /Bash.*git push/);
+    assert.match(out, /core: board land T1#1 \(doing → review\)/);
+    assert.match(out, /pm: board note -\n/);
     assert.doesNotMatch(out, /undefined/);
 });
 
@@ -126,4 +130,16 @@ test('a log that cannot be written is a warning, not a failure: appendEvent says
         assert.equal(await appendEvent(root, { type: 'tmux-denied', team: 'tt', worker: 'rv', args: ['ls'] }), false);
     } finally { process.stderr.write = err; }
     assert.match(warned, /events\.jsonl append failed/);
+});
+
+test('a board line (T63e): the change\'s action, kind, ref and log seq, with its states when it moved one', async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'mt-events-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    await appendEvent(root, { type: 'board', team: 'tt', worker: 'core', action: 'land', kind: 'landing', ref: 'T1#1', log_seq: 3, state_from: 'doing', state_to: 'review' });
+    await appendEvent(root, { type: 'board', team: 'tt', worker: 'pm', action: 'note', kind: 'note', ref: '-', log_seq: 4 });
+    const [a, b] = lines(root);
+    assert.deepEqual([a.type, a.action, a.ref, a.log_seq, a.state_to], ['board', 'land', 'T1#1', 3, 'review']);
+    assert.equal('state_from' in b, false);
+    assert.throws(() => eventLine({ type: 'board', team: 'tt', worker: 'pm', action: 'add', kind: 'task', ref: 'T1' }), /log_seq/);
+    assert.throws(() => eventLine({ type: 'board', team: 'tt', worker: 'pm', action: 'add', kind: 'task', ref: 'T1', log_seq: 1, body: 'x' }), /body/);
 });

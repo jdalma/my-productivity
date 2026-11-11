@@ -165,3 +165,57 @@ test('a refusal stays a refusal when its events line cannot be written (T62)', (
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, /"push" rule refuses/);
 });
+
+// ── T59b: wrappers by path or taking a command string, and git rules judged by the repository they act on ──
+
+test('wrappers named by path, wrappers given the command as a string, and runner words in option values (R60a R1)', (t) => {
+    const { root } = repo(t);
+    const push = (cmd) => bashDenial(cmd, ['push'], { cwd: root, repoRoot: root })?.rule ?? null;
+    for (const cmd of ['/usr/bin/env git push', '/usr/bin/xargs git push', '/usr/bin/nice git push', 'watch "git push"',
+        "parallel 'git push' ::: a", 'env -S "git push"', 'find . -name sh -exec git push \;', 'sudo -u git git push'])
+        assert.equal(push(cmd), 'push', cmd);
+    for (const cmd of ['git -h', 'git commit -h', 'git push --help', '/usr/bin/env ls'])
+        assert.equal(bashDenial(cmd, ['push', 'repo-write'], { cwd: root, repoRoot: root }), null, cmd);
+});
+
+function twoRepos(t) {
+    const { dir, root } = repo(t);
+    execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+    const other = join(dir, 'other');
+    execFileSync('git', ['init', '-q', other]);
+    execFileSync('git', ['init', '-q', '--bare', join(dir, 'bare.git')]);
+    const wt = join(dir, 'wt');
+    execFileSync('git', ['-C', root, 'worktree', 'add', '-q', '-b', 'side', wt]);
+    symlinkSync(root, join(dir, 'link'));
+    return { dir, root, other, wt, bare: join(dir, 'bare.git') };
+}
+
+test('git rules apply to the protected repository only: other repositories commit and push (R60a L2)', (t) => {
+    const r = twoRepos(t);
+    const deny = (cmd, cwd) => bashDenial(cmd, ['push', 'repo-write'], { cwd, repoRoot: r.root })?.rule ?? null;
+    // inside the protected repository, or bound for it
+    assert.equal(deny('git commit -m x', r.root), 'repo-write');
+    assert.equal(deny('git push', r.root), 'push');
+    assert.equal(deny('git commit -m x', join(r.root, '.git')), 'repo-write');
+    assert.equal(deny(`cd ${r.root} && git commit -m x`, r.other), 'repo-write');
+    assert.equal(deny(`git -C ${r.root} push`, r.other), 'push');
+    assert.equal(deny(`cd ${join(r.dir, 'link')} && git commit -m x`, r.other), 'repo-write', 'through a symlink');
+    assert.equal(deny('git commit -m x', r.wt), 'repo-write', 'a worktree of it elsewhere shares its refs');
+    assert.equal(deny(`GIT_DIR=${r.root}/.git git commit -m x`, r.other), 'repo-write');
+    assert.equal(deny(`git --git-dir=${r.root}/.git commit -m x`, r.other), 'repo-write');
+    assert.equal(deny(`(cd ${r.other}); git commit -m x`, r.root), 'repo-write', 'a subshell cd stays in the subshell');
+    assert.equal(deny(`echo $(cd ${r.root} && git commit -m x)`, r.other), 'repo-write');
+    assert.equal(deny(`cd ${r.root} && echo $(git commit -m x)`, r.other), 'repo-write', 'a substitution after a cd runs there');
+    // bound where it cannot be told
+    assert.equal(deny('git -C $X commit -m x', r.other), 'repo-write');
+    assert.equal(deny('cd $X && git commit -m x', r.other), 'repo-write');
+    assert.equal(deny('cd - && git push', r.other), 'push');
+    // elsewhere: a scratch repository, a clone, a local bare remote
+    assert.equal(deny('git commit -m x', r.other), null);
+    assert.equal(deny(`git push ${r.bare} HEAD`, r.other), null);
+    assert.equal(deny(`cd ${r.other} && git add . && git commit -m x && git push ${r.bare} HEAD`, r.root), null);
+    assert.equal(deny(`git -C ${r.other} checkout -b x`, r.root), null);
+    assert.equal(deny(`mkdir -p ${r.dir}/new && cd ${r.dir}/new && git init -q && git commit -m x`, r.root), null, 'a folder made by the same line');
+    assert.equal(deny(`cd ${r.dir}/fresh && git commit -m x`, r.root), null, 'not there yet, outside: cannot be the protected one');
+    assert.equal(deny(`cd ${r.root}/new && git commit -m x`, r.other), 'repo-write', 'not there yet, inside');
+});

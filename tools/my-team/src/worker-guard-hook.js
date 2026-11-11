@@ -35,7 +35,7 @@ const { tool_name: tool, tool_input: input = {}, cwd = process.cwd() } = call;
 let denial = null, target = null;
 if (tool === 'Bash') {
     target = String(input.command ?? '');
-    denial = bashDenial(target, rules);
+    denial = bashDenial(target, rules, { cwd, repoRoot });
 } else if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) && rules.includes('repo-write')) {
     target = String(input.file_path ?? input.notebook_path ?? '');
     denial = pathDenial(target, cwd, repoRoot);

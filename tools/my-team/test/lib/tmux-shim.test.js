@@ -111,6 +111,7 @@ function setup(t) {
     };
     const sh = (script) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf-8', ...LIMIT });
     const ctlAlive = () => spawnSync(real, ['-S', ctl, 'has-session', '-t', 'ctl'], LIMIT).status === 0;
+    // non-empty lines only: sendToWorker presses Enter twice, and the second submits an empty line
     const typedLines = () => (existsSync(typed) ? readFileSync(typed, 'utf-8').split('\n').filter(Boolean) : []);
     return { dir, ctl, real, bin, env, sh, ctlTmux, ctlAlive, state, typedLines };
 }
@@ -152,6 +153,14 @@ test('send-keys, kill-session and rename-window without -L are refused and chang
     }
     assert.equal(s.ctlAlive(), true);
     assert.equal(s.ctlTmux('display-message', '-p', '-t', 'ctl', '#W').trim(), 'keep');
+    // A submitted line goes to the pane's file and leaves the screen, so the file is where a forwarded
+    // send-keys would show (R72 M1). A marker sent after it, through the real tmux, arrives after anything the
+    // shim forwarded: once the marker is in the file, so would TYPED be.
+    s.ctlTmux('send-keys', '-t', 'ctl:keep', 'MARK', 'Enter');
+    const deadline = Date.now() + 5000;
+    while (!s.typedLines().includes('MARK') && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    assert.deepEqual(s.typedLines(), ['MARK'], 'nothing reached the pane but the marker');
+    // input typed without Enter stays on the screen, not in the file
     assert.doesNotMatch(s.ctlTmux('capture-pane', '-p', '-t', 'ctl'), /TYPED/);
 });
 

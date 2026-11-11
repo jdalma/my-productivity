@@ -32,6 +32,7 @@ import {
     generateWorkerOverlay, ensureWorkerStateDir,
 } from '../lib/worker-bootstrap.js';
 import { atomicWriteJson } from '../lib/fs-utils.js';
+import { guardLaunch } from '../lib/worker-guard.js';
 import { listPanes, runningByManifest } from '../lib/team-liveness.js';
 
 /** AGENT_TYPE → CLI binary name + install hint. */
@@ -311,11 +312,15 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
             );
         }
 
+        // deny rules: a hook passed with --settings, kept out of the manifest's launch_args (T59)
+        const guard = guardLaunch({ agentType: w.agent_type, deny: w.deny, cwd: w.cwd, workerDir });
+        if (guard.warning) console.warn(`[my-team] worker '${w.name}': ${guard.warning}`);
+
         const startConfig = {
             teamName: config.team_name,
             workerName: w.name,
             launchBinary: agentBin,
-            launchArgs,
+            launchArgs: [...launchArgs, ...guard.args],
             envVars: {
                 ...(w.env || {}),
                 // after the config's env, so nothing there can rename the worker (T58)

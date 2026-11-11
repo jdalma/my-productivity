@@ -12,9 +12,11 @@ import { isAbsolute, join, resolve, dirname } from 'path';
 import { homedir } from 'os';
 
 import { validateTeamName } from '../lib/team-name.js';
+import { DENY_RULES } from '../lib/worker-guard.js';
 
 const VALID_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor']);
 const VALID_ROLES = new Set(['orchestrator', 'worker']);
+
 /** Who and where a worker is: my-team sets them at launch, a config may not (T58). */
 const IDENTITY_KEYS = new Set(['MY_TEAM_WORKER', 'OMC_TEAM_WORKER', 'MY_TEAM_STATE_ROOT']);
 
@@ -256,6 +258,15 @@ export function validateWorker(w, idx, seen) {
         launchArgs = [...w.launch_args];
     }
 
+    // deny (optional): rules a claude worker's PreToolUse hook keeps (T59, lib/worker-guard.js)
+    let deny = [];
+    if (w.deny !== undefined) {
+        if (!Array.isArray(w.deny) || w.deny.some((r) => !DENY_RULES.includes(r))) {
+            throw new Error(`${where}.deny must be an array of ${DENY_RULES.join('|')}. Got: ${JSON.stringify(w.deny)}`);
+        }
+        deny = DENY_RULES.filter((r) => w.deny.includes(r));
+    }
+
     return {
         name: w.name,
         cwd: expandedCwd,
@@ -265,6 +276,7 @@ export function validateWorker(w, idx, seen) {
         extra_prompt: extraPrompt,
         env,
         launch_args: launchArgs,
+        deny,
     };
 }
 

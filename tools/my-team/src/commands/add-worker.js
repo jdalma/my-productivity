@@ -29,6 +29,7 @@ import { AGENT_CLI, stripSessionArgs, validateAgentCLIs } from './start.js';
 import { sanitizeName } from '../lib/team-name.js';
 import { ensureWorkerStateDir, generateWorkerOverlay } from '../lib/worker-bootstrap.js';
 import { atomicWriteJson } from '../lib/fs-utils.js';
+import { guardLaunch } from '../lib/worker-guard.js';
 import {
     isWorkerAlive, addWorkerPane, applyTeamLayout, sendToWorker,
     spawnWorkerInPane, waitForPaneReady,
@@ -106,6 +107,8 @@ export async function runAddWorker(opts, deps = {}) {
     const newWorker = { name: opts.name, cwd: opts.cwd, agent_type: opts.agentType };
     if (opts.role !== undefined) newWorker.role = opts.role;
     if (opts.description !== undefined) newWorker.description = opts.description;
+    // deny rules are this worker's own (--deny push,repo-write): never inherited from the caller (T59)
+    if (opts.deny !== undefined) newWorker.deny = String(opts.deny).split(',').map((r) => r.trim()).filter(Boolean);
 
     // Resolve --team as EITHER a team name OR a tmux session name (what
     // `tmux ls` shows). resolveTeamManifest scans manifests by session_name
@@ -241,6 +244,10 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
     const overlayPath = join(stateRoot, 'workers', opts.name, 'AGENTS.md');
     await writeFile(overlayPath, overlay, 'utf-8');
 
+    // deny rules: a hook passed with --settings, kept out of the manifest's launch_args (T59)
+    const guard = guardLaunch({ agentType: opts.agentType, deny: validated.deny, cwd, workerDir: join(stateRoot, 'workers', opts.name) });
+    if (guard.warning) console.warn(`[my-team] worker '${opts.name}': ${guard.warning}`);
+
     // ── Step 3: split a new pane (every failure past here kills this pane) ──
     const { paneId } = await _addWorkerPane(
         manifest.session_name, anchor.pane_id, { name: opts.name, cwd }
@@ -252,7 +259,7 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
             teamName: opts.team,
             workerName: opts.name,
             launchBinary: AGENT_CLI[opts.agentType].bin,
-            launchArgs,
+            launchArgs: [...launchArgs, ...guard.args],
             envVars: {
                 MY_TEAM_WORKER: `${opts.team}/${opts.name}`,
                 MY_TEAM_STATE_ROOT: stateRoot,

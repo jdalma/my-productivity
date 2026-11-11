@@ -135,6 +135,7 @@ async function main() {
             prev.push(v);
             return prev;
         })
+        .option('--deny <rules>', 'comma-separated rules a claude worker\'s hook keeps: push, repo-write (not inherited by peers)')
         .option('--state-root <path>', 'override state root')
         .action(async (opts) => {
             // commander stores repeated --launch-arg under opts.launchArg; add-worker reads opts.launchArgs

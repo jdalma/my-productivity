@@ -62,12 +62,13 @@ function getopt(args, i, flags, withArg) {
 }
 
 /**
- * A socket as the file system finds it (R57 M1): symlinks followed and names in their stored case, through
- * realpath.native on the socket or, while it does not exist yet, on its nearest existing folder. Lowercased
- * as well, so a name that differs only in case is the same socket on a case-insensitive volume (APFS, the
+ * A path as the file system finds it (R57 M1): symlinks followed and names in their stored case, through
+ * realpath.native on the path or, while it does not exist yet, on its nearest existing folder. Lowercased
+ * as well, so a name that differs only in case is the same file on a case-insensitive volume (APFS, the
  * default) and, on a case-sensitive one, is refused when it would have passed: refusing is the safe side.
+ * Sockets here, and the worker guard's repository paths (T59).
  */
-function socketKey(path) {
+export function pathKey(path) {
     let dir = resolve(path);
     const rest = [];
     for (;;) {
@@ -94,9 +95,9 @@ function userSockets(env, uid) {
     const sockets = socketDirs(env, uid).map((d) => join(d, 'default'));
     const inTmux = (env.TMUX ?? '').split(',')[0];
     if (inTmux) sockets.push(inTmux);
-    const keys = new Set(sockets.map(socketKey));
+    const keys = new Set(sockets.map(pathKey));
     const ids = new Set(sockets.map(fileId).filter(Boolean));
-    return { has: (p) => keys.has(socketKey(p)) || ids.has(fileId(p)) };
+    return { has: (p) => keys.has(pathKey(p)) || ids.has(fileId(p)) };
 }
 
 /** `{ allow }` for a tmux call with `args`, made by a worker whose environment is `env`. */

@@ -701,3 +701,31 @@ test('does not inherit or persist the caller\'s --resume <sid> (a peer must not 
         cleanup(ctx);
     }
 });
+
+// ── deny rules (T59): a hook installed by --settings, not inherited, not in the manifest ──
+
+test('--deny installs the guard hook for this worker only: --settings at launch, not in the manifest (T59 e)', async () => {
+    const ctx = setupTeam({ workers: ['alice'] });
+    let spawned = null;
+    try {
+        const deps = okDeps({ spawnWorkerInPane: async (_s, _p, config) => { spawned = config; } });
+        await runAddWorker(validOpts({ deny: 'push,repo-write', launchArgs: ['--model', 'haiku'] }), deps);
+        const settings = join(ctx.stateRoot, 'workers', 'carol', 'guard-settings.json');
+        assert.deepEqual(spawned.launchArgs, ['--model', 'haiku', '--settings', settings]);
+        assert.match(readFileSync(settings, 'utf-8'), /--deny 'push,repo-write'/);
+        const carol = readManifest(ctx).workers.find((w) => w.name === 'carol');
+        assert.deepEqual(carol.launch_args, ['--model', 'haiku'], 'a peer inheriting these flags does not inherit the rules');
+    } finally { cleanup(ctx); }
+});
+
+test('without --deny no hook is installed (T59 d)', async () => {
+    const ctx = setupTeam({ workers: ['alice'] });
+    let spawned = null;
+    try {
+        const deps = okDeps({ spawnWorkerInPane: async (_s, _p, config) => { spawned = config; } });
+        await runAddWorker(validOpts(), deps);
+        assert.equal(spawned.launchArgs.includes('--settings'), false);
+        assert.equal(existsSync(join(ctx.stateRoot, 'workers', 'carol', 'guard-settings.json')), false);
+        await assert.rejects(runAddWorker(validOpts({ name: 'dave', deny: 'force-push', allowSharedCwd: true }), deps), /deny/);
+    } finally { cleanup(ctx); }
+});

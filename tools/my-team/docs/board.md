@@ -1,8 +1,7 @@
 # The team board
 
 A board team keeps its work on a board: tasks, review requests (landings), verdicts and findings, notes and
-announcements. The mailbox still carries notices and questions, but no work state. The design, with the
-reasons for each rule, is in the control-tower team's `rfc/board-design.md`.
+announcements. The mailbox still carries notices and questions, but no work state.
 
 ## Turning it on
 
@@ -34,8 +33,8 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 | `board-add` | pm | **`title`**; `id`, `parent`, `ticket`, `assignee`, `reviewer`, `priority`, `base`, `constraints` | `task` |
 | `board-assign` | pm | **`id`**; `assignee` (reassign → ready); `reviewer` (change it); neither, on a held task → review again | `task` |
 | `board-take` | assignee | **`id`** | `task` |
-| `board-land` | assignee | **`id`**, **`commit`**, **`check`** `{cmd, result}`, **`focus`**, **`closes`**, **`report`**, **`review_report`**; `base`, `commits`, `deployed` | `task`, `landing`, `fixed` |
-| `board-verdict` | the task's reviewer (pm without one) | **`landing`**, **`verdict`** (`approve`, `changes` or `hold`), **`verified_commit`**, **`rerun`** `{cmd, result}`, **`findings`**; `report` (defaults to the landing's `review_report`), `reopen`, `side_notes` | `verdict`, `task`, `findings`, `reopened` |
+| `board-land` | assignee | **`id`**, **`commit`**, **`check`** `{cmd, result}`, **`focus`**, **`closes`**, **`report`**; `base`, `commits`, `review_report` (a suggestion), `deployed` | `task`, `landing`, `fixed` |
+| `board-verdict` | the task's reviewer (pm without one) | **`landing`**, **`verdict`** (`approve`, `changes` or `hold`), **`verified_commit`**, **`rerun`** `{cmd, result}`, **`findings`**; `report` (required unless the landing suggests one), `reopen`, `side_notes` | `verdict`, `task`, `findings`, `reopened` |
 | `board-finding` | pm settles, reviewer reopens | **`id`**, **`state`** | `finding` |
 | `board-cancel` | pm | **`id`**; `findings` (where its unsettled findings go), `reason` | `task`, `findings` |
 | `board-note` | anyone | **`body`**; `id` (task), `to` (workers to tell) | `note` |
@@ -49,6 +48,10 @@ Notes on the inputs:
 - `board-land` reads its repository from the acting worker's cwd, so `repo` is never an input.
 - `commits` defaults to `git rev-list base..commit`. Give a subset of that list to leave out other work.
 - `base` defaults to the family's last approved commit, then to the task's `base`.
+- The review report path is the reviewer's to choose. A landing may suggest one with `review_report`.
+- A task with no constraints says `없음`. A missing or blank `constraints` or `ticket` leaves the task's review
+  request under `incomplete` instead of in the queue.
+- A lost `cursor` is no loss: call `board-inbox` without `since`, and you see some items twice.
 - A `board-review-queue` row carries the task and its parent, the landing (with `commits` and `left_out`),
   `previous_commit` (the commit of the landing it superseded), open and settled findings, notes, the
   family's earlier verdicts, and `next_verdict` (the id this verdict will take).
@@ -74,6 +77,7 @@ also printed on stdout as `{"ok": false, "code", "message"}`.
 | `busy` | the board file stayed locked for 5 seconds |
 | `schema-too-new` | a newer my-team wrote this board |
 | `invalid-row`, `invalid-query`, `store` | a bug in my-team; report it |
+| `error` | any other failure (a Node error, an unreadable manifest); the message says what |
 
 ## States
 

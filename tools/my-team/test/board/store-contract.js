@@ -69,6 +69,12 @@ export function runStoreContract(name, makeStore, { makeNewerStore, skip } = {})
         assert.deepEqual([l.focus, l.closes], [['a', 'b'], ['R1 M1']]);
     });
 
+    withStore('a landing may leave out its review report path (R71 R2)', async (store) => {
+        const { review_report_path, ...row } = landing('T1#1');
+        await store.apply({ creates: [{ kind: 'landing', row }] });
+        assert.equal((await store.get('landing', 'T1#1')).review_report_path, null);
+    });
+
     withStore('rows handed in and out are copies', async (store) => {
         const row = landing('T1#1');
         await store.apply({ creates: [{ kind: 'landing', row }] });

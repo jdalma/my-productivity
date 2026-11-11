@@ -191,7 +191,8 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const focus = texts(input.focus, 'focus', { nonEmpty: true });
             const closes = texts(input.closes, 'closes');
             const report = text(input.report, 'report');
-            const reviewReport = text(input.review_report, 'review_report');
+            // a suggestion: the review report path is the reviewer's to choose (R71 R2)
+            const reviewReport = input.review_report == null ? null : text(input.review_report, 'review_report');
 
             const fam = await family(task);
             const landings = (await store.list('landing', { task_id: fam.tasks.map((t) => t.id) }))
@@ -250,7 +251,9 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             move('verdict', task);
             const state = VERDICTS[verdict];
             if (input.verified_commit !== landing.commit) fail('stale-landing', `${landing.id} is ${landing.commit}; verified_commit is ${input.verified_commit}`);
-            const report = input.report === undefined ? landing.review_report_path : text(input.report, 'report');
+            const report = input.report === undefined
+                ? landing.review_report_path ?? fail('invalid', `report is required: ${landing.id} suggests no review report path`)
+                : text(input.report, 'report');
             const rerun = { cmd: text(input.rerun?.cmd, 'rerun.cmd'), result: text(input.rerun?.result, 'rerun.result') };
             const raised = input.findings ?? [];
             if (!Array.isArray(raised)) fail('invalid', 'findings must be a list');

@@ -30,7 +30,7 @@
  * in the same change set.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const text = (opts = {}) => ({ type: 'text', ...opts });
 const int = (opts = {}) => ({ type: 'int', ...opts });
@@ -60,7 +60,8 @@ export const KINDS = {
             id: text(req), task_id: text({ ...req, ...filt }), repo: text({ ...req, ...filt }),
             commit: text({ ...req, ...filt }), base_commit: text(req), commits: list(req), check_cmd: text(req),
             check_result: text(req), focus: list(req), closes: list(req), report_path: text(req),
-            review_report_path: text(req), deployed: text(), superseded_by: text(filt),
+            // review_report_path is the reviewer's to choose; a land may suggest one (R71 R2, schema 3)
+            review_report_path: text(), deployed: text(), superseded_by: text(filt),
             left_out: list(),   // rev-list commits the landing leaves out (R69 R3); null on rows before schema 2
             ...created, ...updated,
         },

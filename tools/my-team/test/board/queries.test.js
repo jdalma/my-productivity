@@ -94,6 +94,12 @@ both('review queue: a task without a ticket or constraints is listed as incomple
     const q = await reviewQueue(store, ROSTER, 'rv');
     assert.deepEqual(q.queue, []);
     assert.deepEqual(q.incomplete, [{ landing: 'T1#1', task: 'T1', missing: ['ticket_path', 'constraints'] }]);
+    await as('pm').add({ id: 'T9', title: 'blank', assignee: 'app', reviewer: 'rv', ticket: '/t.md', constraints: '  ', base: BASE });
+    await as('app').take({ id: 'T9' });
+    const { review_report, ...noSuggestion } = land('T9', H('9'));
+    await as('app').land(noSuggestion);
+    assert.deepEqual((await reviewQueue(store, ROSTER, 'rv')).incomplete.map((r) => [r.task, r.missing]), [['T1', ['ticket_path', 'constraints']], ['T9', ['constraints']]],
+        'R71 R2: a blank constraint is as incomplete as none; a missing review report path is not');
 
     await as('pm').add({ id: 'T2', title: 'low', assignee: 'core', priority: 50, ...full });
     await as('pm').add({ id: 'T3', title: 'high', assignee: 'app', priority: 5, ...full });

@@ -149,6 +149,30 @@ test('[sqlite] the file is WAL, private to the user, and keeps rows across opens
     assert.equal(raw.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
 });
 
+test('[sqlite] a version 2 file migrates to 3: its landings stay, and the review report path may be left out', needsSqlite, async (t) => {
+    const file = tempFile(t);
+    const raw = new DatabaseSync(file);
+    for (const m of MIGRATIONS.filter((x) => x.to <= 2)) raw.exec(m.sql);
+    raw.exec('PRAGMA user_version = 2');
+    raw.prepare(`INSERT INTO landings VALUES ('T1#1','T1','/r','${'a'.repeat(40)}','${'b'.repeat(40)}','[]','c','r','["f"]','[]','/p','/q',NULL,NULL,'${AT}','core',NULL,NULL,1,'[]')`).run();
+    const id = raw.prepare(`SELECT "value" FROM meta`).get().value;
+    raw.close();
+    const store = createSqliteStore(file);
+    await store.open();
+    t.after(() => store.close());
+    assert.equal((await store.get('landing', 'T1#1')).review_report_path, '/q');
+    assert.equal((await store.describe()).board_id, id, 'the board id stays');
+    await store.apply({ creates: [{ kind: 'landing', row: { id: 'T1#2', task_id: 'T1', repo: '/r', commit: 'c'.repeat(40), base_commit: 'b'.repeat(40), commits: [], check_cmd: 'c', check_result: 'r', focus: ['f'], closes: [], report_path: '/p', created_at: AT, created_by: 'core' } }] });
+    assert.equal((await store.get('landing', 'T1#2')).review_report_path, null);
+    assert.deepEqual((await store.list('landing', { task_id: 'T1' })).map((l) => l.id), ['T1#1', 'T1#2']);
+    await store.close();
+    const check = new DatabaseSync(file);
+    const indexes = check.prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'landings' AND name NOT LIKE 'sqlite_%'`).all().map((r) => r.name);
+    check.close();
+    assert.deepEqual(indexes, ['landings_task'], 'the rebuilt table keeps its index');
+    await store.open();
+});
+
 test('[sqlite] a version 1 file migrates: its rows stay, it gains a board id kept across opens, and landings a left_out list', needsSqlite, async (t) => {
     const file = tempFile(t);
     const raw = new DatabaseSync(file);

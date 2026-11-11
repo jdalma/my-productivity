@@ -39,7 +39,8 @@ export async function reviewQueue(store, roster, reviewer) {
         const own = await store.list('landing', { task_id: task.id });
         const landing = own.find((l) => l.superseded_by === null);
         if (!landing) continue;
-        const missing = REQUIRED_TASK_FIELDS.filter((f) => task[f] === null);
+        // blank counts as missing: "없음" is how a task says it has no constraints (R71 R2)
+        const missing = REQUIRED_TASK_FIELDS.filter((f) => !task[f]?.trim());
         if (missing.length) { incomplete.push({ landing: landing.id, task: task.id, missing }); continue; }
         const family = await familyOf(store, task);
         const ids = family.map((t) => t.id);

@@ -300,6 +300,17 @@ both('land on a task with no reviewer tells pm, who judges it', async (setup) =>
     assert.deepEqual(b.sent.at(-1), { to: ['pm'], ref: 'T1#1', action: 'land' });
 });
 
+both('the review report path is the reviewer\'s: land may suggest one; without it the verdict must name it (R71 R2)', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'doing');
+    const { review_report, ...noSuggestion } = land('T1', H('1'));
+    const r = await b.as('core').land(noSuggestion);
+    assert.equal(r.landing.review_report_path, null);
+    const { report, ...noReport } = judge('T1#1', H('1'), 'changes');
+    await rejects(b.as('rv').verdict(noReport), 'invalid');
+    assert.equal((await b.as('rv').verdict(judge('T1#1', H('1'), 'changes', { report: '/r/R9.md' }))).verdict.report_path, '/r/R9.md');
+});
+
 both('verdict: the report defaults to the landing\'s review report path; rerun stays required (R70 R2)', async (setup) => {
     const b = await setup();
     await taskIn(b, 'review');
@@ -399,7 +410,7 @@ both('land: base defaults to the family\'s last approved commit, then the task\'
     await rejects(c.as('core').land(land('T1', H('1'))), 'invalid', 'no base anywhere');
     c.ranges.set(`${H('8')}..${H('1')}`, { ancestor: false, commits: [] });
     await rejects(c.as('core').land(land('T1', H('1'), { base: H('8') })), 'invalid');
-    for (const bad of [{ commit: 'abc' }, { focus: [] }, { closes: undefined }, { report: '' }, { check: { cmd: 'x' } }, { repo: undefined }, { review_report: undefined }]) {
+    for (const bad of [{ commit: 'abc' }, { focus: [] }, { closes: undefined }, { report: '' }, { check: { cmd: 'x' } }, { repo: undefined }, { review_report: '' }]) {
         await rejects(c.as('core').land(land('T1', H('1'), { base: BASE, ...bad })), 'invalid');
     }
 });

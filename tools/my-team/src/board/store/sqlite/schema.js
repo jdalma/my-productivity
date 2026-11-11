@@ -61,4 +61,23 @@ INSERT INTO meta VALUES ('board_id', lower(hex(randomblob(16))));
 ALTER TABLE landings ADD COLUMN "left_out" TEXT;
 `,
     },
+    {
+        // review_report_path may be null (R71 R2): SQLite cannot drop a NOT NULL, so the table is made again
+        to: 3,
+        sql: `
+CREATE TABLE landings_v3 (
+    "id" TEXT PRIMARY KEY, "task_id" TEXT NOT NULL, "repo" TEXT NOT NULL, "commit" TEXT NOT NULL,
+    "base_commit" TEXT NOT NULL, "commits" TEXT NOT NULL, "check_cmd" TEXT NOT NULL, "check_result" TEXT NOT NULL,
+    "focus" TEXT NOT NULL, "closes" TEXT NOT NULL, "report_path" TEXT NOT NULL, "review_report_path" TEXT,
+    "deployed" TEXT, "superseded_by" TEXT, "created_at" TEXT NOT NULL, "created_by" TEXT NOT NULL,
+    "updated_at" TEXT, "updated_by" TEXT, "version" INTEGER NOT NULL, "left_out" TEXT
+);
+INSERT INTO landings_v3 SELECT "id", "task_id", "repo", "commit", "base_commit", "commits", "check_cmd", "check_result",
+    "focus", "closes", "report_path", "review_report_path", "deployed", "superseded_by", "created_at", "created_by",
+    "updated_at", "updated_by", "version", "left_out" FROM landings;
+DROP TABLE landings;
+ALTER TABLE landings_v3 RENAME TO landings;
+CREATE INDEX landings_task ON landings("task_id");
+`,
+    },
 ];

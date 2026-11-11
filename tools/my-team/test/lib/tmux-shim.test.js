@@ -187,7 +187,7 @@ function notify(t, s, shimDir) {
     const input = JSON.stringify({ team_name: 't56', from_worker: 'alice', to_worker: 'bob', body: 'hi' });
     const r = spawnSync(process.execPath, [MY_TEAM, 'api', 'send-message', '--input', input], {
         env: { ...s.env, PATH: `${shimDir}:${s.bin}:/usr/bin:/bin`,
-               MY_TEAM_STATE_ROOT_BASE: base, MY_TEAM_STATE_ROOT: stateRoot, OMC_TEAM_WORKER: 't56/alice' },
+               MY_TEAM_STATE_ROOT_BASE: base, MY_TEAM_STATE_ROOT: stateRoot, MY_TEAM_WORKER: 't56/alice', OMC_TEAM_WORKER: 't56/alice' },
         encoding: 'utf-8', timeout: 20000,
     });
     assert.equal(r.status, 0, r.stdout + r.stderr);

@@ -7,6 +7,8 @@
 # directory is missing, and a kill-server then lands on the user's server. TMUX, TMUX_PANE and
 # TMUX_TMPDIR are cleared so that -L resolves to /tmp/tmux-<uid>/<name>.
 unset TMUX TMUX_PANE TMUX_TMPDIR
+# a run from a worker's pane: tests send as their own fixture workers, not as the worker (T58)
+unset MY_TEAM_WORKER OMC_TEAM_WORKER MY_TEAM_STATE_ROOT
 sock="my-team-test-$$"
 export MY_TEAM_TEST_TMUX="$sock"
 trap 'tmux -L "$sock" kill-server 2>/dev/null; rm -f "/tmp/tmux-$(id -u)/$sock"' EXIT

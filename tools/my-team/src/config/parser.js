@@ -15,6 +15,9 @@ import { validateTeamName } from '../lib/team-name.js';
 
 const VALID_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor']);
 const VALID_ROLES = new Set(['orchestrator', 'worker']);
+/** Who and where a worker is: my-team sets them at launch, a config may not (T58). */
+const IDENTITY_KEYS = new Set(['MY_TEAM_WORKER', 'OMC_TEAM_WORKER', 'MY_TEAM_STATE_ROOT']);
+
 export const WORKER_NAME_PATTERN = /^[a-zA-Z0-9-]+$/;
 
 function expandTilde(p) {
@@ -227,6 +230,9 @@ export function validateWorker(w, idx, seen) {
             }
             if (typeof v !== 'string') {
                 throw new Error(`${where}.env.${k} must be a string`);
+            }
+            if (IDENTITY_KEYS.has(k)) {
+                throw new Error(`${where}.env.${k} is set by my-team: it names the worker (send-message checks the sender against it)`);
             }
             env[k] = v;
         }

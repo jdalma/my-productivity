@@ -317,10 +317,11 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
             launchBinary: agentBin,
             launchArgs,
             envVars: {
+                ...(w.env || {}),
+                // after the config's env, so nothing there can rename the worker (T58)
                 MY_TEAM_WORKER: `${config.team_name}/${w.name}`,
                 MY_TEAM_STATE_ROOT: config.state_root,
                 OMC_TEAM_WORKER: `${config.team_name}/${w.name}`, // OMC compat
-                ...(w.env || {}),
             },
         };
         const launched = await spawnWorkerInPane(session.sessionName, pane.paneId, startConfig);

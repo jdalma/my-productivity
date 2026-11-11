@@ -66,11 +66,37 @@ function teamUsesRoles(manifest) {
     return (manifest.workers ?? []).some((w) => w.role === 'orchestrator' || w.role === 'worker');
 }
 
+/**
+ * The sender a worker process may claim (T58): the worker MY_TEAM_WORKER names (`<team>/<worker>`, set by
+ * start and add-worker), in its own team only. A cross-team send still names the sender's own team as
+ * team_name (to_team is the recipient's), so a worker naming another team as team_name is posing as that
+ * team's member. Without the variable (the user's shell) the input stands. Catches mistakes, not intent:
+ * a process can run with the variable changed.
+ */
+function senderFrom(env, teamName, fromWorker) {
+    const pinned = env.MY_TEAM_WORKER;
+    if (!pinned) {
+        if (!fromWorker) throw new Error('from_worker is required');
+        return fromWorker;
+    }
+    const slash = pinned.indexOf('/');
+    const team = pinned.slice(0, slash), worker = pinned.slice(slash + 1);
+    if (team !== teamName) {
+        throw new Error(`This process is worker '${worker}' of team '${team}' (MY_TEAM_WORKER=${pinned}); send with team_name "${team}"`
+            + ' and, for another team, to_team.');
+    }
+    if (fromWorker && sanitizeName(fromWorker) !== sanitizeName(worker)) {
+        throw new Error(`This process was started as '${worker}' (MY_TEAM_WORKER=${pinned}); send with from_worker "${worker}"`
+            + ' or leave it out.');
+    }
+    return worker;
+}
+
 export async function runApiSendMessage(input, deps = {}) {
     const resolvePane = deps.resolvePaneBySessionWorker ?? resolvePaneBySessionWorker;
-    const { team_name, from_worker, to_worker, body, reply_to, expects_reply, to_team, to_session } = input ?? {};
+    const { team_name, to_worker, body, reply_to, expects_reply, to_team, to_session } = input ?? {};
     if (!team_name) throw new Error('team_name is required');
-    if (!from_worker) throw new Error('from_worker is required');
+    const from_worker = senderFrom(deps.env ?? process.env, team_name, input?.from_worker);
     if (!to_worker) throw new Error('to_worker is required');
     if (typeof body !== 'string' || !body) throw new Error('body is required');
     if (expects_reply !== undefined && typeof expects_reply !== 'boolean') {

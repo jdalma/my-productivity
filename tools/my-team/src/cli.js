@@ -4,9 +4,10 @@
  * Subcommands (user-facing):
  *   start, status, shutdown, monitor, add-worker, remove-worker
  *
- * api subcommands (called by worker LLMs from AGENTS.md) — peer messaging only:
+ * api subcommands (called by worker LLMs from AGENTS.md):
  *   api send-message, api mailbox-list, api mailbox-mark-delivered,
- *   api archive-lookup
+ *   api archive-lookup, api roster
+ *   api board-status, api board-inbox, api board-review-queue (the team's board, T63)
  */
 
 import { Command } from 'commander';
@@ -26,6 +27,9 @@ import { runApiMailboxList } from './commands/api/mailbox-list.js';
 import { runApiMailboxMarkDelivered } from './commands/api/mailbox-mark-delivered.js';
 import { runApiArchiveLookup } from './commands/api/archive-lookup.js';
 import { runApiRoster } from './commands/api/roster.js';
+import { runApiBoardStatus } from './commands/api/board-status.js';
+import { runApiBoardInbox } from './commands/api/board-inbox.js';
+import { runApiBoardReviewQueue } from './commands/api/board-review-queue.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +53,22 @@ function parseApiInput(opts) {
         return JSON.parse(opts.input);
     } catch (err) {
         throw new Error(`--input is not valid JSON: ${err.message}`);
+    }
+}
+
+/**
+ * A board command's run: its result as JSON, or, on an error, a stderr line "<code>: <message>" and exit 1;
+ * with --json the error is also {ok:false, code, message} on stdout so the app can branch on the code
+ * (rfc/board-design.md §6).
+ */
+async function boardRun(opts, fn) {
+    try {
+        emit(await fn(parseApiInput(opts)), opts.json);
+    } catch (err) {
+        const code = typeof err?.code === 'string' && !err.code.startsWith('ERR_') ? err.code : 'error';
+        if (opts.json) console.log(JSON.stringify({ ok: false, code, message: err.message }));
+        console.error(`[my-team] error: ${code}: ${err.message}`);
+        process.exit(1);
     }
 }
 
@@ -185,6 +205,15 @@ async function main() {
         .requiredOption('--input <json>', 'JSON payload: {"team_name":"<team>"}')
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiRoster(parseApiInput(opts)), opts.json));
+
+    const board = (name, description, fn) => api.command(name)
+        .description(description)
+        .requiredOption('--input <json>', 'JSON payload')
+        .option('--json', 'JSON output (errors too: {ok:false, code, message})')
+        .action((opts) => boardRun(opts, fn));
+    board('board-status', '[pure] The team board: every task, each worker\'s load, open findings, recent changes; with "task", that task\'s family', runApiBoardStatus);
+    board('board-inbox', '[pure] Your unfinished tasks, your review requests, notes to you and announcements after "since" (pass back "cursor")', runApiBoardInbox);
+    board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
 
     try {
         await program.parseAsync(process.argv);

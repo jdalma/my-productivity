@@ -2,7 +2,7 @@
  * Config parser and validator for my-team.
  *
  * Schema (TeamConfig):
- *   { team_name, state_root?, new_window?, detached?, workers: WorkerConfig[] }
+ *   { team_name, state_root?, new_window?, detached?, board?, workers: WorkerConfig[] }
  *
  * Implements AC-1, AC-19, AC-20, AC-24, AC-26, AC-27 from PLAN.md.
  */
@@ -68,6 +68,24 @@ function isAbsoluteOrTilde(p) {
     return typeof p === 'string' && (p === '~' || p.startsWith('~/') || p.startsWith('~\\') || isAbsolute(p));
 }
 
+const BOARD_STORES = ['sqlite', 'memory'];
+
+/**
+ * board (optional, T63d): its presence makes the team a board team (rfc/board-design.md §7). store picks the
+ * adapter; memory keeps nothing between calls and is for tests.
+ */
+function boardOf(board) {
+    if (board === undefined) return null;
+    if (!board || typeof board !== 'object' || Array.isArray(board)) {
+        throw new Error(`board must be an object like {"store": "sqlite"}. Got: ${JSON.stringify(board)}`);
+    }
+    const extra = Object.keys(board).filter((k) => k !== 'store');
+    if (extra.length) throw new Error(`board takes only "store". Got: ${extra.join(', ')}`);
+    const store = board.store ?? 'sqlite';
+    if (!BOARD_STORES.includes(store)) throw new Error(`board.store must be ${BOARD_STORES.join('|')}. Got: ${JSON.stringify(store)}`);
+    return { store };
+}
+
 /**
  * Validate + normalize an in-memory config object.
  * Returns a normalized config with expanded paths and defaults filled in.
@@ -77,7 +95,7 @@ export function validateConfig(cfg, { configPath } = {}) {
         throw new Error('Config must be a JSON object');
     }
 
-    const { team_name, state_root, new_window, detached, workers } = cfg;
+    const { team_name, state_root, new_window, detached, board, workers } = cfg;
 
     if (typeof team_name !== 'string' || !team_name) {
         throw new Error('team_name is required (string)');
@@ -124,6 +142,7 @@ export function validateConfig(cfg, { configPath } = {}) {
     return {
         team_name,
         state_root: resolvedStateRoot,
+        board: boardOf(board),
         new_window: Boolean(new_window),
         detached: Boolean(detached),
         workers: normalizedWorkers,

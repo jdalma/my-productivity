@@ -5,6 +5,10 @@
  * masked), and is run on a fixture first so a rule that stops catching fails here instead of passing on a
  * clean tree. A mistake guard, not a sandbox: a load it cannot read (import() of anything but one string,
  * require, createRequire) is a failure anywhere under src (R66 R4).
+ *
+ * Known limits (R67a L1), accepted for a mistake guard: an import() inside a template literal's ${…} is masked
+ * with the template and not seen; a regular expression right after `return`, `typeof` or `if (…)` is read as
+ * division, so a quote inside it can hide an import later on the same line.
  */
 
 import test from 'node:test';

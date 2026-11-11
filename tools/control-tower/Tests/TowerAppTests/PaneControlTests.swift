@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 @testable import TowerApp
 import SwiftTerm
@@ -384,6 +384,33 @@ struct PaneTmuxTests {
         #expect(view.font.pointSize < 13)
         #expect(link.size.width <= 700)
         #expect(server.run("display-message", "-p", "-t", pane, "#{pane_width}") == "120")
+    }
+
+    /// A window never shown, on a screen of whatever pixel density the test says.
+    private final class Density: NSWindow {
+        var scale: CGFloat = 2
+        override var backingScaleFactor: CGFloat { scale }
+    }
+
+    @MainActor @Test func movedToAScreenOfAnotherDensityTheTerminalStillFitsTheWidth() async throws {
+        let server = ScratchServer()
+        server.run("new-session", "-d", "-s", "w", "-x", "120", "-y", "12", "cat")
+        let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+        let link = PaneLink()
+        let window = Density(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: .borderless,
+                             backing: .buffered, defer: true)
+        let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 13, weight: .regular))
+        window.contentView?.addSubview(view)
+        view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: link)
+        defer { view.detach() }
+        view.place(width: 900, preferred: 13)
+        #expect(await until { link.size.width > 0 })
+        #expect(link.size.width <= 900)
+        // AppKit tells the view when its window moves to a 1x screen; at 2x's font the 120 cells come to 960 points
+        window.scale = 1
+        view.viewDidChangeBackingProperties()
+        #expect(view.getOptimalFrameSize().width <= 900)
+        #expect(link.size == view.getOptimalFrameSize().size)
     }
 
     /// What reaches the stdin of a pane program that writes terminal queries once `go` exists, until it quits.

@@ -138,6 +138,12 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
         link?.size = getOptimalFrameSize().size
     }
 
+    /// On a screen of another pixel density SwiftTerm snaps its cells anew; the font that fits changes with them.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        fit()
+    }
+
     private var keys: Any?
 
     // Esc, ⌘V and ⌘C for a focused terminal, taken before AppKit offers them to anything else. Esc: the board's own

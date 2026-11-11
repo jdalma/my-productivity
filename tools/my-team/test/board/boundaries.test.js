@@ -1,5 +1,5 @@
 /**
- * The board's module boundaries (T63a, rfc/board-design.md §1): core imports only core; an adapter imports
+ * The board's module boundaries (T63a): core imports only core; an adapter imports
  * only its own folder, core/contract.js and node: builtins; nothing but board/compose.js reaches an adapter.
  * The checker reads import specifiers from the source text (comments dropped, strings and regular expressions
  * masked), and is run on a fixture first so a rule that stops catching fails here instead of passing on a

@@ -1,5 +1,5 @@
 /**
- * One task through the board's write commands, end to end (T63e, rfc/board-design.md §9): the real CLI, a
+ * One task through the board's write commands, end to end (T63e; docs/board.md, One cycle): the real CLI, a
  * scratch git repository, a temporary state base, and panes on the test run's own tmux server (run-isolated.sh
  * names it; tmux-utils adds -L). add → take → land → verdict(changes) → take → land → verdict(approve), each
  * by the worker MY_TEAM_WORKER names. Then the mailbox notices (one line, no state in them) and the events.

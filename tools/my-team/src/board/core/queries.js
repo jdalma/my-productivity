@@ -1,5 +1,5 @@
 /**
- * The board's read side (T63d, rfc/board-design.md §6.1): what a reviewer, a worker and the app ask of it.
+ * The board's read side (T63d; docs/board.md, Commands): what a reviewer, a worker and the app ask of it.
  * Plain reads over the store contract; nothing here writes, so nothing waits on a writer (R67 R2).
  */
 
@@ -20,7 +20,7 @@ async function familyOf(store, task) {
     return [root, ...(await store.list('task', { parent_id: rootId }))];
 }
 
-/** Open: `open`, or `fixed` in a landing no approve has covered yet (§3.2). */
+/** Open: `open`, or `fixed` in a landing no approve has covered yet. */
 const isOpen = (f, approved) => f.state === 'open' || (f.state === 'fixed' && !approved.has(f.fixed_in));
 
 /** R64 §1: what a review request row must answer from the board alone. */
@@ -90,7 +90,7 @@ export async function inbox(store, roster, worker, cursor = {}) {
 
 /**
  * The whole board (the app's view, D1·D2), or with `task` that task's family in full. `workers` counts work
- * only; whether a worker is alive is status.json's and tmux's to say (§6.1).
+ * only; whether a worker is alive is status.json's and tmux's to say.
  */
 export async function status(store, roster, { task } = {}) {
     const approved = await approvedLandings(store);

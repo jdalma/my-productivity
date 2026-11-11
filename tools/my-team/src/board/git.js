@@ -1,5 +1,5 @@
 /**
- * The git port of the board (T63e, rfc/board-design.md §2.2, §6.1): land's checks in the assignee's
+ * The git port of the board (T63e; docs/board.md, Commands): land's checks in the assignee's
  * repository. Local reads only (cat-file, merge-base, rev-list, rev-parse); nothing touches a remote.
  * GIT_DIR and friends are dropped so `-C <repo>` is the repository asked, whatever the caller's environment.
  */

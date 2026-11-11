@@ -1,5 +1,5 @@
 /**
- * The board's read side (T63d, rfc/board-design.md §6.1): the review queue (R64 §1 rows), a worker's inbox
+ * The board's read side (T63d; docs/board.md, Commands): the review queue (R64 §1 rows), a worker's inbox
  * and the whole board's status, on every store. Boards are filled through the write service.
  */
 

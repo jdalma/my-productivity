@@ -1,5 +1,5 @@
 /**
- * The board store contract (T63a, rfc/board-design.md §2 and §4). Core owns the shape of every row (KINDS)
+ * The board store contract (T63a). Core owns the shape of every row (KINDS)
  * and the errors; an adapter imports this file only, stores rows of these shapes and throws these errors.
  * The checks below are shared so every adapter accepts and refuses the same rows.
  *

@@ -1,9 +1,9 @@
 /**
- * The board's one assembly point (T63d, rfc/board-design.md §1): the only module that knows the adapters.
+ * The board's one assembly point (T63d): the only module that knows the adapters.
  * A team is a board team when its manifest carries the config's `board` item; its store is then
  * <state_root>/board.db (sqlite) or a memory store (tests). A team without the item gets board-unavailable
  * before any file is touched. The write service gets its ports here: the git checks (git.js), notices through
- * the mailbox (one line, no state: `[board] <ref> <action>`, §6.2) and a `board` line in events.jsonl.
+ * the mailbox (one line, no state: `[board] <ref> <action>`; docs/board.md, Commands) and a `board` line in events.jsonl.
  */
 
 import { existsSync } from 'node:fs';

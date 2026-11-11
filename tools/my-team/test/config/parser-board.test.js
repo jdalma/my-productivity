@@ -1,5 +1,5 @@
 /**
- * Config `board` item (T63d, rfc/board-design.md §7): its presence makes a team a board team; `store` picks
+ * Config `board` item (T63d; docs/board.md, Turning it on): its presence makes a team a board team; `store` picks
  * the adapter (sqlite by default, memory for tests). start copies it into the manifest, where the board
  * commands read it.
  */

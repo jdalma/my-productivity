@@ -1,5 +1,5 @@
 /**
- * The board section of the AGENTS.md overlay (T63g, rfc/board-design.md §7): only a board team's workers get
+ * The board section of the AGENTS.md overlay (T63g; docs/board.md, Turning it on): only a board team's workers get
  * it; a team without a board gets the overlay it had before, to the byte.
  */
 
@@ -45,6 +45,9 @@ test('a worker of a board team: inbox on a [board] notice, take, land instead of
     assert.match(text, /open must finding/);
     assert.match(text, /left_out[^\n]*next_verdict/);
     assert.match(text, /"reopen"/);
+    // R71a L1, L2
+    assert.match(text, /incomplete[^\n]*send-message[^\n]*missing/);
+    assert.match(text, /`hold`[^\n]*cannot verify[^\n]*not `changes`/);
 });
 
 test('no example in the board section nests double quotes inside its double-quoted --input (R71 L1)', () => {

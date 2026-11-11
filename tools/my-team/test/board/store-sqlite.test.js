@@ -1,5 +1,5 @@
 /**
- * The SQLite adapter (T63b, rfc/board-design.md §5): the store contract, plus what only a file shared by
+ * The SQLite adapter (T63b): the store contract, plus what only a file shared by
  * processes has — concurrent writers, the PRAGMA order, migration, a schema newer than the code, the
  * ExperimentalWarning and a Node without node:sqlite. Every database lives in a temporary folder. On a Node
  * without node:sqlite (before 22.13 / 23.4) every test that needs it is skipped, not failed.

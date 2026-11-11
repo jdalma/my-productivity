@@ -1,5 +1,5 @@
 /**
- * The board's git port (T63e, rfc/board-design.md §2.2, §6.1): what land checks in the assignee's repository —
+ * The board's git port (T63e; docs/board.md, Commands): what land checks in the assignee's repository —
  * the commits exist, base is an ancestor of commit, the commits between them, the repository's top level.
  * On a scratch repository.
  */

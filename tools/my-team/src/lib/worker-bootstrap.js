@@ -121,7 +121,7 @@ function roleGuidance(workerRole, orchestratorNames) {
 }
 
 /**
- * The board section (T63g, rfc/board-design.md §7): only for a board team (config `board`). Work state lives on
+ * The board section (T63g; docs/board.md, Turning it on): only for a board team (config `board`). Work state lives on
  * the board, not in message bodies; the mailbox carries one-line `[board]` notices and questions. Every worker
  * gets the worker and reviewer parts (a reviewer is set per task); an orchestrator, or anyone in a team that
  * declares no roles, also gets the pm part.
@@ -146,6 +146,8 @@ function boardGuidance(teamName, workerName, workerRole) {
         '- Check `left_out` (rev-list commits the landing leaves out) before judging, and use the row\'s `next_verdict` as your report section\'s name.',
         '- approve is refused while the family has an open must finding: settle it with pm first, or answer `changes`.',
         '- To reopen a finding that was fixed, list it in the verdict\'s `"reopen"`.',
+        '- Use `hold` when you cannot verify the landing at all (its commit is missing, your environment cannot run the check), not `changes`: `changes` asks the assignee to fix findings.',
+        '- A row under `incomplete` cannot be reviewed yet: tell pm with `send-message` which fields are missing (the row says), and leave it.',
         '- A task assigned to you or that you landed commits for is not yours to judge; tell pm with `send-message` and leave it.',
         '- Do not send pm or the assignee a message about a verdict: the board notifies them.',
     ];

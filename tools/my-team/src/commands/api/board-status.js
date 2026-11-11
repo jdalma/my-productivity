@@ -1,4 +1,4 @@
-/** `my-team api board-status` — the whole board, or one task's family (T63d, rfc/board-design.md §6.1). */
+/** `my-team api board-status` — the whole board, or one task's family (T63d; docs/board.md, Commands). */
 
 import { refuseOutsider, withBoard } from '../../board/compose.js';
 import { status } from '../../board/core/queries.js';

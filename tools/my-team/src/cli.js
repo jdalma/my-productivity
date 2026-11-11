@@ -61,7 +61,7 @@ function parseApiInput(opts) {
 /**
  * A board command's run: its result as JSON, or, on an error, a stderr line "<code>: <message>" and exit 1;
  * with --json the error is also {ok:false, code, message} on stdout so the app can branch on the code
- * (rfc/board-design.md §6).
+ * (docs/board.md, Commands).
  */
 async function boardRun(opts, fn) {
     try {

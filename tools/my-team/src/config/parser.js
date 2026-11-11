@@ -71,7 +71,7 @@ function isAbsoluteOrTilde(p) {
 const BOARD_STORES = ['sqlite', 'memory'];
 
 /**
- * board (optional, T63d): its presence makes the team a board team (rfc/board-design.md §7). store picks the
+ * board (optional, T63d): its presence makes the team a board team (docs/board.md, Turning it on). store picks the
  * adapter; memory keeps nothing between calls and is for tests.
  */
 function boardOf(board) {

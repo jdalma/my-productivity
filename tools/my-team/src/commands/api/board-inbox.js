@@ -1,4 +1,4 @@
-/** `my-team api board-inbox` — the asking worker's own work, reviews, notes and announcements (T63d, §6.1). */
+/** `my-team api board-inbox` — the asking worker's own work, reviews, notes and announcements (T63d; docs/board.md, Commands). */
 
 import { actorOf, withBoard } from '../../board/compose.js';
 import { BoardError } from '../../board/core/rules.js';

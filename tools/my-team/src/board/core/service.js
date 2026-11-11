@@ -1,13 +1,13 @@
 /**
- * The board's write commands (T63c, rfc/board-design.md §3, §4.1, §6.2). One function per command. Each
+ * The board's write commands (T63c; docs/board.md, States). One function per command. Each
  * attempt reads, decides by the tables in rules.js, and applies one change set; a Conflict from the store
  * means someone changed what was read, so the attempt runs again from the read (3 attempts).
  *
- * The task row is the lock of its task (§4.1): every write that affects a task, its landings, verdicts or
+ * The task row is the lock of its task: every write that affects a task, its landings, verdicts or
  * findings updates the task row at the version it read, even when the state stays. Writes that look at or
  * change findings lock the family's root task too, since findings span the family.
  *
- * Ports (all injected, §1.1):
+ * Ports (all injected):
  *   store     the store contract (contract.js)
  *   roster    () => [{name, role}]
  *   actor     the worker acting (resolved from MY_TEAM_WORKER by compose)
@@ -93,7 +93,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
     const judgesOf = (task) => (task.reviewer ? [task.reviewer] : pms());
 
     return {
-        /** board-add: a task, new or ready; a derived task locks its parent (§4.1). */
+        /** board-add: a task, new or ready; a derived task locks its parent. */
         add: (input = {}) => run(async () => {
             needPm();
             const title = text(input.title, 'title');
@@ -313,7 +313,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             };
         }),
 
-        /** board-finding: settle or reopen a finding (§3.2 FINDING_MOVES). */
+        /** board-finding: settle or reopen a finding (FINDING_MOVES in rules.js). */
         finding: (input = {}) => run(async () => {
             const f = (await store.get('finding', text(input.id, 'id'))) ?? fail('not-found', `no finding ${input.id}`);
             const to = text(input.state, 'state');

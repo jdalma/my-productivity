@@ -1,4 +1,4 @@
-/** `my-team api board-review-queue` — the review requests the asking worker judges (T63d, §6.1, R64). */
+/** `my-team api board-review-queue` — the review requests the asking worker judges (T63d, R64; docs/board.md, Commands). */
 
 import { actorOf, withBoard } from '../../board/compose.js';
 import { reviewQueue } from '../../board/core/queries.js';

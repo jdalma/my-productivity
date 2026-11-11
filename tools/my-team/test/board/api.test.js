@@ -1,5 +1,5 @@
 /**
- * The board's read commands through the real CLI (T63d, rfc/board-design.md §6, §7): a team is a board team
+ * The board's read commands through the real CLI (T63d; docs/board.md, Turning it on and Commands): a team is a board team
  * when its config (and so its manifest) has a `board` item; the board file is <state_root>/board.db; who asks
  * comes from MY_TEAM_WORKER like send-message (T58); with --json an error is also a JSON line on stdout.
  * Every team lives under a temporary state base, never the user's.

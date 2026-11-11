@@ -1,5 +1,5 @@
 /**
- * The board store contract as tests (T63a, rfc/board-design.md §4): an adapter that passes runStoreContract
+ * The board store contract as tests (T63a): an adapter that passes runStoreContract
  * can replace any other. Each adapter's test file calls it with a factory that returns a fresh, unopened store.
  * Cross-process concurrency is adapter-specific (memory is not shared between processes) and lives with the
  * adapter that has it. A store that keeps a schema passes makeNewerStore: a store over data written by a newer

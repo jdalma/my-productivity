@@ -1,6 +1,7 @@
 /**
- * The board's write commands (T63c) on every store (memory and, where node:sqlite runs, SQLite): every row of the transition tables
- * (rfc/board-design.md §3.1, §3.2), the id rules (§2.8), the lock table (§4.1) and the notices (§6.2).
+ * The board's write commands (T63c) on every store (memory and, where node:sqlite runs, SQLite): every row of
+ * the transition tables and the id rules (docs/board.md, States), the task-row lock (core/service.js) and the
+ * notices.
  */
 
 import test from 'node:test';
@@ -103,7 +104,7 @@ function recording(store) {
     return proxy;
 }
 
-// §3.1 — tasks
+// tasks
 
 both('add: a task without an assignee is new, with one ready and the assignee is told; only pm adds', async (setup) => {
     const b = await setup();
@@ -347,7 +348,7 @@ both('R68 L2: a reviewer can be set from new, ready, doing and changes; the stat
     }
 });
 
-// §2.8 — ids
+// ids
 
 both('ids: roots number past every T<n> in use, derived tasks take the next letters, a given id is checked', async (setup) => {
     const b = await setup();
@@ -415,7 +416,7 @@ both('land: base defaults to the family\'s last approved commit, then the task\'
     }
 });
 
-// §3.2 — findings
+// findings
 
 both('closes: only open findings of the same family', async (setup) => {
     const b = await setup();
@@ -481,9 +482,9 @@ both('approve: refused while the family has an open must finding, from any of it
     assert.equal((await b.as('rv').verdict(judge('T1a#1', H('5'), 'approve'))).task.state, 'done');
 });
 
-// §4.1 — the task row is the lock
+// the task row is the lock
 
-both('each command puts version conditions on exactly the rows of §4.1, and every task write raises the task version', async (setup) => {
+both('each command puts version conditions on exactly the rows its lock rule names, and every task write raises the task version', async (setup) => {
     const b = await setup();
     const rec = recording(b.store);
     const as = (who) => b.as(who, { store: rec });

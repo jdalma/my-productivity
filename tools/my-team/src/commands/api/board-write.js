@@ -1,5 +1,5 @@
 /**
- * `my-team api board-<command>` for the board's write commands (T63e, rfc/board-design.md §6.1): add, assign,
+ * `my-team api board-<command>` for the board's write commands (T63e; docs/board.md, Commands): add, assign,
  * take, note, land, verdict, finding, cancel, announce. The worker acting is the one MY_TEAM_WORKER names
  * (`by` in the input from the user's shell). land's repository is the top level of the acting worker's cwd,
  * not an input.

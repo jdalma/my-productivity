@@ -1,5 +1,5 @@
 /**
- * Board rules as data (T63c, rfc/board-design.md §2.8 and §3): states, who may do what, and how ids are made.
+ * Board rules as data (T63c; docs/board.md, States): states, who may do what, and how ids are made.
  * service.js reads these tables; a rule changes here, not in a branch of a command.
  */
 
@@ -20,7 +20,7 @@ export const VERDICTS = { approve: 'done', changes: 'changes', hold: 'held' };
 export const SETTLED = ['backlog', 'accepted-limit', 'rejected'];
 
 /**
- * Task transitions (§3.1): command → the states it may start from and the state it leaves. `assign` has
+ * Task transitions: command → the states it may start from and the state it leaves. `assign` has
  * three forms, told apart by its input (see service.assign).
  */
 export const TASK_MOVES = {
@@ -42,7 +42,7 @@ export function move(name, task) {
     return m.to ?? task.state;
 }
 
-/** Finding transitions (§3.2) through board-finding: [from states, to states, who]. */
+/** Finding transitions through board-finding: [from states, to states, who]. */
 export const FINDING_MOVES = [
     { from: ['open', 'fixed'], to: SETTLED, who: 'pm' },
     { from: SETTLED, to: ['open'], who: 'pm' },
@@ -93,7 +93,7 @@ export function nextDerived(base, ids) {
 /** R<n>[letters] split into its numbered base. */
 export const verdictBase = (id) => /^R\d+/.exec(id)?.[0] ?? null;
 
-/** The id the next verdict on a family takes: the next R<n> for its first, R<n>a, R<n>b … after (§2.8). */
+/** The id the next verdict on a family takes: the next R<n> for its first, R<n>a, R<n>b … after. */
 export function nextVerdictId(allIds, familyIds) {
     const base = familyIds.length ? verdictBase(familyIds[0]) : null;
     return base ? nextDerived(base, allIds) : nextNumbered('R', allIds);

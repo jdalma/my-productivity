@@ -1,5 +1,5 @@
 /**
- * The board store on SQLite (T63b, rfc/board-design.md §5), through node:sqlite: no dependency to install,
+ * The board store on SQLite (T63b), through node:sqlite: no dependency to install,
  * one file per team (<state_root>/board.db). Each my-team call opens, does its work and closes.
  *
  * - busy_timeout is set before journal_mode: switching a new file to WAL takes a lock, and without the

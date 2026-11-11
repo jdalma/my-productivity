@@ -5,8 +5,8 @@
  * is refused. A tmux called by absolute path skips the shim: this guards against mistakes, not intent.
  */
 
-import { accessSync, constants, realpathSync, statSync } from 'fs';
-import { basename, dirname, join, normalize, resolve } from 'path';
+import { accessSync, constants, readFileSync, realpathSync, statSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 export const SHIM_DIR = fileURLToPath(new URL('../../shim', import.meta.url));
@@ -61,11 +61,6 @@ function getopt(args, i, flags, withArg) {
     return { seen, next: i };
 }
 
-function canonical(path) {
-    const abs = resolve(path);
-    try { return join(realpathSync(dirname(abs)), abs.slice(dirname(abs).length + 1)); } catch { return normalize(abs); }
-}
-
 /**
  * A socket as the file system finds it (R57 M1): symlinks followed and names in their stored case, through
  * realpath.native on the socket or, while it does not exist yet, on its nearest existing folder. Lowercased
@@ -89,12 +84,19 @@ function socketDirs(env, uid) {
     return [env.TMUX_TMPDIR, '/tmp'].filter(Boolean).map((d) => join(d, `tmux-${uid}`));
 }
 
+/** A socket file's identity, which a hard link shares (R57a L5); null while there is none. */
+function fileId(path) {
+    try { const st = statSync(path); return `${st.dev}:${st.ino}`; } catch { return null; }
+}
+
 /** The sockets of the user's server: the default one, and $TMUX's, the server the worker is in. */
 function userSockets(env, uid) {
     const sockets = socketDirs(env, uid).map((d) => join(d, 'default'));
     const inTmux = (env.TMUX ?? '').split(',')[0];
     if (inTmux) sockets.push(inTmux);
-    return new Set(sockets.map(socketKey));
+    const keys = new Set(sockets.map(socketKey));
+    const ids = new Set(sockets.map(fileId).filter(Boolean));
+    return { has: (p) => keys.has(socketKey(p)) || ids.has(fileId(p)) };
 }
 
 /** `{ allow }` for a tmux call with `args`, made by a worker whose environment is `env`. */
@@ -108,7 +110,7 @@ export function tmuxShimVerdict(args, env = process.env, uid = process.getuid())
     const named = path !== undefined ? (path ? [path] : [])
         : label ? socketDirs(env, uid).map((d) => join(d, label)) : [];
     const user = userSockets(env, uid);
-    if (named.length > 0 && named.every((p) => !user.has(socketKey(p)))) return { allow: true };
+    if (named.length > 0 && named.every((p) => !user.has(p))) return { allow: true };
     if (seen.has('C') || seen.has('c')) return { allow: false };
 
     const rest = args.slice(next);
@@ -122,16 +124,25 @@ export function tmuxShimVerdict(args, env = process.env, uid = process.getuid())
     return { allow: true };
 }
 
-/** The first executable `tmux` on `pathVar` that is not the shim, or null. */
+/**
+ * Whether `path` is a my-team shim, of this copy or any other (R58 M1): a worker started under one copy
+ * (the repo, through npm link) keeps that copy's shim on PATH while `my-team` is now another (a deployed
+ * one), and that shim would refuse my-team's own send-keys. Every shim is a small script naming tmux-shim.js;
+ * tmux is a binary of hundreds of KB.
+ */
+function isShim(path) {
+    const st = statSync(path);
+    return st.size < 4096 && readFileSync(path, 'utf-8').includes('tmux-shim.js');
+}
+
+/** The first executable `tmux` on `pathVar` that is not a my-team shim, or null. */
 export function findRealTmux(pathVar = process.env.PATH ?? '') {
-    const shim = canonical(join(SHIM_DIR, 'tmux'));
     for (const dir of pathVar.split(':')) {
         if (!dir) continue;
         const candidate = join(dir, 'tmux');
         try {
             accessSync(candidate, constants.X_OK);
-            if (!statSync(candidate).isFile()) continue;
-            if (canonical(realpathSync(candidate)) === shim) continue;
+            if (!statSync(candidate).isFile() || isShim(candidate)) continue;
             return candidate;
         } catch { /* not here */ }
     }

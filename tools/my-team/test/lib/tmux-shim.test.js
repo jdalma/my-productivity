@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -174,8 +174,8 @@ test('a refusal is one events.jsonl line with the team, the worker and the argum
     assert.ok(!Number.isNaN(Date.parse(e.ts)));
 });
 
-test('my-team itself skips the shim: send-message from a worker with the shim on PATH still notifies (f)', async (t) => {
-    const s = setup(t);
+/** send-message from a worker whose PATH starts with `shimDir`, to a pane of the control server. */
+function notify(t, s, shimDir) {
     const base = join(s.dir, 'teams');
     const stateRoot = join(base, 't56');
     mkdirSync(join(stateRoot, 'mailbox'), { recursive: true });
@@ -186,7 +186,8 @@ test('my-team itself skips the shim: send-message from a worker with the shim on
     }));
     const input = JSON.stringify({ team_name: 't56', from_worker: 'alice', to_worker: 'bob', body: 'hi' });
     const r = spawnSync(process.execPath, [MY_TEAM, 'api', 'send-message', '--input', input], {
-        env: { ...s.env, MY_TEAM_STATE_ROOT_BASE: base, MY_TEAM_STATE_ROOT: stateRoot, OMC_TEAM_WORKER: 't56/alice' },
+        env: { ...s.env, PATH: `${shimDir}:${s.bin}:/usr/bin:/bin`,
+               MY_TEAM_STATE_ROOT_BASE: base, MY_TEAM_STATE_ROOT: stateRoot, OMC_TEAM_WORKER: 't56/alice' },
         encoding: 'utf-8', timeout: 20000,
     });
     assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -194,6 +195,18 @@ test('my-team itself skips the shim: send-message from a worker with the shim on
     assert.equal(existsSync(join(s.state, 'events.jsonl')), false, 'the shim refused nothing');
     const events = readFileSync(join(stateRoot, 'events.jsonl'), 'utf-8');
     assert.doesNotMatch(events, /tmux-denied/);
+}
+
+test('my-team itself skips the shim: send-message from a worker with the shim on PATH still notifies (f)', (t) => {
+    const s = setup(t);
+    notify(t, s, SHIM_DIR);
+});
+
+test('my-team skips another copy\'s shim too: a worker started under the repo copy, my-team now the installed one (R58 M1)', (t) => {
+    const s = setup(t);
+    const other = join(s.dir, 'other copy');
+    for (const p of ['shim', 'src']) cpSync(fileURLToPath(new URL(`../../${p}`, import.meta.url)), join(other, p), { recursive: true });
+    notify(t, s, join(other, 'shim'));
 });
 
 test('the default server under another name is still the default server: symlink, case, -L paths, -L of $TMUX (R57 M1)', (t) => {
@@ -212,8 +225,10 @@ test('the default server under another name is still the default server: symlink
         }
     };
     const alive = (path) => spawnSync(s.real, ['-S', path, 'has-session'], LIMIT).status === 0;
-    t.after(() => { for (const p of Object.values(fake)) spawnSync(s.real, ['-S', p, 'kill-server'], LIMIT); });
     const env = { ...s.env, PATH: `${SHIM_DIR}:${dirname(s.real)}:/usr/bin:/bin`, TMUX_TMPDIR: tmpdir };
+    // killed here, not in t.after: setup's t.after runs first and deletes the sockets, and a server whose
+    // socket is gone cannot be reached to be killed (R57a R1)
+    try {
     for (const [args, server, extra] of [
         [['-S', join(s.dir, 'l', 'sock')], 'default'],
         [['-S', join(tmpdir, `TMUX-${uid}`, 'DEFAULT')], 'default'],
@@ -221,8 +236,10 @@ test('the default server under another name is still the default server: symlink
         [['-L', './default'], 'default'],
         [['-L', `../tmux-${uid}/default`], 'default'],
         [['-L', 'work'], 'work', { TMUX: `${fake.work},1,0` }],
+        [['-S', join(s.dir, 'l', 'hard')], 'default'],
     ]) {
         up(fake[server]);
+        if (args[1].endsWith('hard') && !existsSync(args[1])) linkSync(fake.default, args[1]);  // a hard link (R57a L5)
         assert.ok(existsSync(sockets), 'the fake socket folder is there');
         const r = spawnSync('tmux', [...args, 'kill-server'], { env: { ...env, ...extra }, encoding: 'utf-8', ...LIMIT });
         assert.notEqual(r.status, 0, args.join(' '));
@@ -232,4 +249,8 @@ test('the default server under another name is still the default server: symlink
     // a name of its own still passes
     const r = spawnSync('tmux', ['-L', 'scratch-of-its-own', 'kill-server'], { env, encoding: 'utf-8', ...LIMIT });
     assert.doesNotMatch(r.stderr, /거부됨/);
+    } finally {
+        for (const p of Object.values(fake)) spawnSync(s.real, ['-S', p, 'kill-server'], LIMIT);
+    }
+    for (const p of Object.values(fake)) assert.equal(alive(p), false, `${p} left running`);
 });

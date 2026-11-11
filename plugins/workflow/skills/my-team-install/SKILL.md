@@ -26,6 +26,10 @@ command -v my-team && my-team --version 2>/dev/null || echo "not installed"
 
 - 출력 예: `0.1.0 (1a94352c0d3e)`. 괄호 안은 설치된 커밋이다.
 - `0.1.0 (working tree)`는 레포 작업 트리를 직접 쓰는 상태다(예전 `npm link` 설치). 이번 배포가 그것을 사본으로 바꾼다는 점을 사용자에게 알린다.
+- 배포 전 점검: tmux shim을 PATH에 가진 실행 중 워커 수를 센다. 0이 아니면 사용자에게 알린다(Step 5의 재기동 안내 대상).
+  ```bash
+  ps eww -axo pid,command | grep "my-team/shim" | grep -vc grep
+  ```
 - 괄호가 없는 `0.1.0`은 이 스킬 이전의 설치다. 역시 이번 배포가 덮어쓴다.
 
 설치돼 있든 아니든 다음 단계는 같다.
@@ -92,7 +96,11 @@ my-team CLI 설치 완료
    버전: <my-team --version 출력>
 
 이미 실행 중인 팀의 워커도 다음 my-team 호출부터 새 사본을 쓴다.
+단, 워커 PATH의 tmux shim은 그 워커를 띄울 때의 사본 그대로다. 배포 전 점검에서 센
+워커는 재기동해야 새 사본의 shim을 쓴다.
 ```
+
+배포 전 점검의 수가 0이 아니었으면 위 마지막 두 문장을 빼지 말고 보고한다.
 
 ## Done When
 

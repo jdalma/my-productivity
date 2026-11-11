@@ -1,13 +1,18 @@
 #!/bin/sh
 # Checks commits for private identifiers before they reach this public repository (T61):
-#   scripts/public-scan.sh <rev-list arguments>      e.g. origin/feat/x..HEAD, or <sha> --not --remotes=origin
-# Looks at each commit's added lines (with file and line), its whole message (subject, body, trailers) and
-# the paths it adds or renames to. The patterns come from outside the repository, since the list itself is
-# private: $PUBLIC_SCAN_PATTERNS, default ~/.config/my-claude-plugin/private-patterns.txt, one extended
-# regular expression per line, `#` comments, case ignored. Hits are printed without the pattern.
+#   scripts/public-scan.sh <range>...      e.g. origin/feat/x..HEAD, or <sha> --not --remotes=origin
+# A range is revisions (A, ^A, A..B, A...B) and --not, --all, --branches, --tags, --remotes, --glob; any
+# other argument (a pathspec, --since, ...) would narrow what is checked and is refused (exit 2).
+# Looks at each commit's added lines (with file and line), its whole message (subject, body, trailers), its
+# author and committer (name and address), and the paths it adds or renames to; an annotated tag named in
+# the range is checked too (message and tagger). The patterns come from outside the repository, since the
+# list itself is private: $PUBLIC_SCAN_PATTERNS, default ~/.config/my-claude-plugin/private-patterns.txt,
+# one extended regular expression per line, `#` comments, case ignored, CRLF line ends allowed. Hits are
+# printed without the pattern.
 # Exit 0: nothing found. 1: something found. 2: could not check (no pattern file, no pattern, bad pattern,
 # bad range) — not checking is never passing.
-# Not seen: binary files, commits outside the range (already pushed), text produced at build time.
+# Not seen: the content of binary files, and of text files a .gitattributes marks binary or -diff (their
+# diff is "Binary files differ"); commits outside the range (already pushed); text produced at build time.
 set -u
 
 [ $# -gt 0 ] || { echo "usage: public-scan.sh <rev-list arguments>" >&2; exit 2; }
@@ -16,15 +21,29 @@ file=${PUBLIC_SCAN_PATTERNS:-$HOME/.config/my-claude-plugin/private-patterns.txt
 
 tmp=$(mktemp -d) || exit 2
 trap 'rm -rf "$tmp"' EXIT
-grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$file" > "$tmp/patterns"
+tr -d '\r' < "$file" | grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' > "$tmp/patterns"
 [ -s "$tmp/patterns" ] || { echo "public-scan: no pattern in $file" >&2; exit 2; }
 # a pattern grep cannot compile would make every search "fail" quietly: check them once
 printf '' | grep -i -E -f "$tmp/patterns" >/dev/null 2>"$tmp/err"
 [ $? -le 1 ] || { echo "public-scan: a pattern in $file is not a valid regular expression" >&2; exit 2; }
 
+# only arguments that name revisions: anything else could quietly narrow the check (R62 L5)
+: > "$tmp/tags"
+for a in "$@"; do
+    case $a in
+        --not | --all | --branches | --branches=* | --tags | --tags=* | --remotes | --remotes=* | --glob=*) continue ;;
+        -*) echo "public-scan: '$a' is not a range; give revisions only" >&2; exit 2 ;;
+    esac
+    for rev in $(printf '%s\n' "${a#^}" | sed 's/\.\.\.*/\n/' ); do
+        git rev-parse -q --verify "$rev^{object}" >/dev/null || { echo "public-scan: '$rev' is not a revision" >&2; exit 2; }
+        # an annotated tag is pushed with its own message and tagger (R62 M1)
+        [ "$(git cat-file -t "$rev")" = tag ] && echo "$rev" >> "$tmp/tags"
+    done
+done
 git rev-list --reverse "$@" > "$tmp/commits" 2>"$tmp/err" || { echo "public-scan: bad range: $(cat "$tmp/err")" >&2; exit 2; }
 
 hits=0 commits=0 lines=0
+q="-c core.quotePath=false"   # paths as written (non-ASCII too), not octal escapes (R62 R3)
 # `grep -n` over $1, each hit printed as "<prefix>: <line>" where prefix comes from line N of $2 (or $2 itself)
 search() {
     grep -n -i -E -f "$tmp/patterns" "$1" > "$tmp/found"
@@ -45,15 +64,21 @@ while read -r sha; do
     lines=$((lines + $(wc -l < "$tmp/message")))
     search "$tmp/message" "$short message"
 
+    # who wrote and committed it (R62 R1)
+    git log -1 --format='%an <%ae>%n%cn <%ce>' "$sha" > "$tmp/people"
+    printf '%s author\n%s committer\n' "$short" "$short" > "$tmp/where"
+    lines=$((lines + 2))
+    search "$tmp/people" "$tmp/where"
+
     # paths added or renamed to (a rename's new name is the last field)
-    git diff-tree -r --root --no-commit-id --name-status -M --diff-filter=AR --diff-merges=first-parent "$sha" \
+    git $q diff-tree -r --root --no-commit-id --name-status -M --diff-filter=AR --diff-merges=first-parent "$sha" \
         | awk -F'\t' '{ print $NF }' > "$tmp/paths"
     lines=$((lines + $(wc -l < "$tmp/paths")))
     awk -v c="$short" '{ print c " path" }' "$tmp/paths" > "$tmp/where"
     search "$tmp/paths" "$tmp/where"
 
     # added lines, each with its file and its line number in the new version
-    git diff-tree -p -U0 --root --no-commit-id --no-color --no-ext-diff -M --diff-merges=first-parent "$sha" | awk -v c="$short" -v out="$tmp/added" -v where="$tmp/where" '
+    git $q diff-tree -p -U0 --root --no-commit-id --no-color --no-ext-diff -M --diff-merges=first-parent "$sha" | awk -v c="$short" -v out="$tmp/added" -v where="$tmp/where" '
         /^\+\+\+ / { f = substr($0, 5); sub(/^b\//, "", f); next }
         /^@@ / { split($3, a, ","); n = substr(a[1], 2) + 0; next }
         /^\+/ { print substr($0, 2) > out; print c " " f ":" n > where; n++ }
@@ -63,6 +88,12 @@ while read -r sha; do
     search "$tmp/added" "$tmp/where"
     rm -f "$tmp/added" "$tmp/where"
 done < "$tmp/commits"
+
+while read -r tag; do
+    git cat-file -p "$tag" > "$tmp/tag"
+    lines=$((lines + $(wc -l < "$tmp/tag")))
+    search "$tmp/tag" "tag $tag"
+done < "$tmp/tags"
 
 if [ "$hits" -gt 0 ]; then
     echo "public-scan: $hits hit(s) in $commits commit(s). Remove them before pushing." >&2

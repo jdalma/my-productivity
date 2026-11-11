@@ -15,7 +15,7 @@ contains() {  # contains <name> <file> <text>
     if grep -qF -- "$3" "$2"; then echo "ok   $1"; else echo "FAIL $1: no '$3' in:"; sed 's/^/     /' "$2"; failed=1; fi
 }
 
-printf '%s\n' '# fake identifiers for the test' '' 'internal\.example\.com' 'example-secret-team' > "$work/patterns"
+printf '%s\n' '# fake identifiers for the test' '' 'internal\.example\.com' 'example-secret-team' '예시비밀팀' > "$work/patterns"
 export PUBLIC_SCAN_PATTERNS="$work/patterns"
 
 git init -q --bare "$work/remote.git"
@@ -71,6 +71,29 @@ printf '# only\n\n  # comments\n' > "$work/comments"; PUBLIC_SCAN_PATTERNS="$wor
 printf 'ok\n(unclosed\n' > "$work/bad"; PUBLIC_SCAN_PATTERNS="$work/bad" sh "$scan" "$mid..HEAD" > "$work/out" 2>&1; check "(e) an invalid pattern" 2 $?
 sh "$scan" no-such-ref..HEAD > "$work/out" 2>&1; check "(e) a range git cannot read" 2 $?
 
+# R62 R1: author and committer names and addresses
+git -c user.email=dev@internal.example.com commit -q --allow-empty -m "plain subject"
+sh "$scan" "$mid..HEAD" > "$work/out" 2>&1; check "(R1) author address" 1 $?
+contains "(R1) shown as the author" "$work/out" "author: t <dev@internal.example.com>"
+git reset -q --hard "$mid"
+
+# R62 R2: a pattern file with CRLF line ends
+printf 'internal\\.example\\.com\r\n' > "$work/crlf"
+echo "x internal.example.com" > e.txt; commit -m e
+PUBLIC_SCAN_PATTERNS="$work/crlf" sh "$scan" "$mid..HEAD" > "$work/out" 2>&1; check "(R2) CRLF pattern file" 1 $?
+git reset -q --hard "$mid"
+
+# R62 R3: a non-ASCII path
+mkdir -p "문서/예시비밀팀"; echo x > "문서/예시비밀팀/a.md"; commit -m "korean path"
+sh "$scan" "$mid..HEAD" > "$work/out" 2>&1; check "(R3) non-ASCII path" 1 $?
+contains "(R3) shown as written" "$work/out" "path: 문서/예시비밀팀/a.md"
+git reset -q --hard "$mid"
+
+# R62 L5: rev-list ranges only
+sh "$scan" --since=1.day HEAD > "$work/out" 2>&1; check "(L5) an option that is not a range" 2 $?
+sh "$scan" HEAD -- a.txt > "$work/out" 2>&1; check "(L5) a pathspec" 2 $?
+sh "$scan" "$mid" --not --remotes=origin > "$work/out" 2>&1; check "(L5) --not --remotes is a range" 0 $?
+
 # (g) the hook: a dirty commit is refused and stays off the remote, a clean one goes
 sh "$here/install-pre-push.sh" > "$work/out" 2>&1; check "(g) install" 0 $?
 mkdir -p scripts; cp "$scan" scripts/public-scan.sh; commit -m "scan script"
@@ -82,6 +105,15 @@ git checkout -q -b topic "$dirty"
 git push -q origin topic > "$work/out" 2>&1; check "(g) a new branch carrying it is refused too" 1 $?
 git checkout -q main; git reset -q --hard HEAD~1; echo "clean" > d.txt; commit -m "clean"
 git push -q origin main > "$work/out" 2>&1; check "(g) a clean commit after it goes through" 0 $?
+
+# R62 M1: an annotated tag's message is pushed too
+git tag -a v-dirty -m "release notes for example-secret-team"
+git push -q origin v-dirty > "$work/out" 2>&1; check "(M1) a tag whose message matches is refused" 1 $?
+if git --git-dir="$work/remote.git" rev-parse -q --verify refs/tags/v-dirty >/dev/null; then echo "FAIL (M1) the tag reached the remote"; failed=1; else echo "ok   (M1) the tag is not on the remote"; fi
+git -c user.email=rel@internal.example.com tag -a v-tagger -m "clean notes"
+git push -q origin v-tagger > "$work/out" 2>&1; check "(M1) a tagger address that matches is refused" 1 $?
+git tag -a v-clean -m "clean notes"
+git push -q origin v-clean > "$work/out" 2>&1; check "(M1) a clean tag goes through" 0 $?
 
 # (h) an existing pre-push hook is never replaced
 hook=$(git rev-parse --git-path hooks/pre-push)

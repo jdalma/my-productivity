@@ -107,6 +107,30 @@ private final class Quiet: TerminalDelegate {
     #expect(terminal.getLine(row: 0)?.translateToString(trimRight: true, skipNullCellsFollowingWide: true) == "x한y")
 }
 
+// MARK: - the terminal's font for the detail's width
+
+/// A cell 0.6 of the font size wide, as a monospaced font's.
+private func cell(_ size: CGFloat) -> CGFloat { size * 0.6 }
+
+@Test func aWideDetailShowsThePaneAtTheBoardsTextSize() {
+    #expect(paneFontSize(width: 1000, cols: 80, preferred: 13, smallest: 9, cellWidth: cell) == 13)
+}
+
+@Test func aNarrowerDetailShrinksTheFontUntilEveryColumnFits() {
+    let size = paneFontSize(width: 500, cols: 80, preferred: 13, smallest: 9, cellWidth: cell)
+    #expect(size < 13 && size >= 9)
+    #expect(cell(size) * 80 <= 500)
+    #expect(cell(size + 0.5) * 80 > 500)
+}
+
+@Test func aDetailTooNarrowForTheSmallestFontKeepsTheSmallestAndScrolls() {
+    #expect(paneFontSize(width: 200, cols: 80, preferred: 13, smallest: 9, cellWidth: cell) == 9)
+}
+
+@Test func aBoardTextSizeUnderTheSmallestStaysAsTheUserSetIt() {
+    #expect(paneFontSize(width: 200, cols: 80, preferred: 8, smallest: 9, cellWidth: cell) == 8)
+}
+
 // MARK: - a control mode client against a throwaway tmux server (`tmux -L`), never the user's
 // Serialized: each test waits on its own tmux server with short timeouts; run side by side, a dozen servers
 // and their clients slowed every test past them (R52c L5).
@@ -342,6 +366,24 @@ struct PaneTmuxTests {
         #expect(await until { server.run("capture-pane", "-p", "-t", pane).contains("ea  b0  80  1b  42") })
         view.detach()
         #expect(await until { server.run("list-clients").isEmpty })
+    }
+
+    @MainActor @Test func theTerminalFitsThePanesColumnsInTheDetailsWidthAndLeavesDragsToSelection() async throws {
+        let server = ScratchServer()
+        server.run("new-session", "-d", "-s", "w", "-x", "120", "-y", "12", "cat")
+        let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
+        let link = PaneLink()
+        let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 13, weight: .regular))
+        view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: link)
+        defer { view.detach() }
+        #expect(!view.allowMouseReporting)
+        view.place(width: 3000, preferred: 13)
+        #expect(await until { link.size.width > 0 })
+        #expect(view.font.pointSize == 13)
+        view.place(width: 700, preferred: 13)
+        #expect(view.font.pointSize < 13)
+        #expect(link.size.width <= 700)
+        #expect(server.run("display-message", "-p", "-t", pane, "#{pane_width}") == "120")
     }
 
     /// What reaches the stdin of a pane program that writes terminal queries once `go` exists, until it quits.

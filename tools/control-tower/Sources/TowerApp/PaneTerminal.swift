@@ -5,12 +5,14 @@ import TowerCore
 
 /// A live tmux pane in the detail, in place of the recent conversation: what the pane shows, as it changes, and
 /// what the user types while the terminal has focus goes to the pane (PaneStream says what that touches).
-/// The terminal is exactly the pane's size; a detail narrower than that scrolls sideways, so lines wrap as they do
-/// in the user's own terminal.
+/// The terminal has the pane's columns and rows, so lines wrap as they do in the user's own terminal. Its font is the
+/// board's text size, made smaller when that is what fits every column in the detail's width; under the macOS mini
+/// control size the detail scrolls sideways instead.
 struct PaneTerminal: View {
     let ref: TmuxRef
     @Environment(\.boardFontScale) private var scale
     @State private var link = PaneLink()
+    @State private var width: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -26,9 +28,10 @@ struct PaneTerminal: View {
             } else {
                 ScrollView(.horizontal) {
                     PaneTerminalRepresentable(ref: ref, fontSize: NSFont.preferredFont(forTextStyle: .body).pointSize * scale,
-                                              link: link)
+                                              width: width, link: link)
                         .frame(width: link.size.width, height: link.size.height)
                 }
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width = $0 }
             }
         }
     }
@@ -44,6 +47,7 @@ final class PaneLink {
 private struct PaneTerminalRepresentable: NSViewRepresentable {
     let ref: TmuxRef
     let fontSize: CGFloat
+    let width: CGFloat
     let link: PaneLink
 
     func makeNSView(context: Context) -> PaneTerminalView {
@@ -53,10 +57,19 @@ private struct PaneTerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PaneTerminalView, context: Context) {
-        if view.font.pointSize != fontSize { view.setFont(.monospacedSystemFont(ofSize: fontSize, weight: .regular)) }
+        if width > 0 { view.place(width: width, preferred: fontSize) }
     }
 
     static func dismantleNSView(_ view: PaneTerminalView, coordinator: ()) { view.detach() }
+}
+
+/// The font size at which `cols` cells fit in `width`: `preferred` when they do, else the largest half point under it
+/// that does, but not under `smallest` (a `preferred` already under it stays). `cellWidth` is a cell's width at a size.
+func paneFontSize(width: CGFloat, cols: Int, preferred: CGFloat, smallest: CGFloat,
+                  cellWidth: (CGFloat) -> CGFloat) -> CGFloat {
+    var size = preferred
+    while cellWidth(size) * CGFloat(cols) > width, size - 0.5 >= smallest { size -= 0.5 }
+    return size
 }
 
 /// SwiftTerm's view fed by a PaneStream instead of a local process.
@@ -75,6 +88,8 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
         self.stream = stream
         self.link = link
         terminalDelegate = self
+        // a drag selects text even while the pane's program has asked for mouse reports, which go nowhere anyway
+        allowMouseReporting = false
         stream.onOutput = { [weak self] bytes in self?.feed(byteArray: bytes[...]) }
         stream.onSize = { [weak self] cols, rows in self?.follow(cols: cols, rows: rows) }
         stream.onGone = { [weak self] why in self?.link?.gone = why }
@@ -88,8 +103,14 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
         keys = nil
     }
 
-    func setFont(_ font: NSFont) {
-        self.font = font
+    private var width = CGFloat.infinity
+    private var preferred: CGFloat?
+
+    /// Lays the terminal out for a detail `width` points wide at the board's text size `preferred`.
+    func place(width: CGFloat, preferred: CGFloat) {
+        guard width != self.width || preferred != self.preferred else { return }
+        self.width = width
+        self.preferred = preferred
         fit()
     }
 
@@ -102,18 +123,26 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
         fit()
     }
 
-    /// The pane's columns and rows, and the frame that holds them at the current font.
+    /// The pane's columns and rows, the font that fits them in the width, and the frame that holds them.
     private func fit() {
         guard paneSize.cols > 0 else { return }
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1  // as SwiftTerm snaps cells
+        let size = paneFontSize(width: width, cols: paneSize.cols, preferred: preferred ?? font.pointSize,
+                                smallest: NSFont.systemFontSize(for: .mini)) { size in
+            // SwiftTerm's cell: the advance of W, snapped to the pixel grid
+            let f = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+            return (f.advancement(forGlyph: f.glyph(withName: "W")).width * scale).rounded() / scale
+        }
+        if font.pointSize != size { font = .monospacedSystemFont(ofSize: size, weight: .regular) }
         resize(cols: paneSize.cols, rows: paneSize.rows)
         link?.size = getOptimalFrameSize().size
     }
 
     private var keys: Any?
 
-    // Esc and ⌘V for a focused terminal, taken before AppKit offers them to anything else. Esc: the board's own
-    // Esc shortcut must not take it from the pane. ⌘V: the app has no Edit menu (it is a menu bar app), so nothing
-    // else would turn it into a paste.
+    // Esc, ⌘V and ⌘C for a focused terminal, taken before AppKit offers them to anything else. Esc: the board's own
+    // Esc shortcut must not take it from the pane. ⌘V and ⌘C (with a selection): the app has no Edit menu (it is a
+    // menu bar app), so nothing else would turn them into a paste or a copy.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let keys { NSEvent.removeMonitor(keys) }
@@ -126,6 +155,7 @@ final class PaneTerminalView: TerminalView, TerminalViewDelegate {
                 guard let self, window === self.window, self.window?.firstResponder === self else { return false }
                 if mods.isEmpty, code == 53 { self.sendEscape(); return true }
                 if mods == .command, key == "v" { self.paste(self); return true }
+                if mods == .command, key == "c", self.selectionActive { self.copy(self); return true }
                 return false
             }
             return taken ? nil : event

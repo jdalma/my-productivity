@@ -26,10 +26,16 @@ test('push: every form that runs git push is refused, mentions of it are not (a)
         'bash -c "git push"', "sh -lc 'git push'", 'eval "git push"', 'echo $(git push)', 'echo "$(git push)"',
         'echo `git push`', '(git push)', '{ git push; }', 'nohup git push &', 'time git push --dry-run',
         'if true; then git push; fi', 'echo x | xargs git push', 'git push "unterminated',
+        // a wrapper's option values are not the command (R60 R1)
+        'env -u X git push', 'env -C /tmp git push', 'sudo -u me git push', 'nice -n 10 git push', 'timeout -s KILL 5 git push',
+        'xargs -n 1 git push', 'xargs -I {} git push', 'exec -a foo git push', 'find . -exec git push \\;', 'watch git push',
+        'parallel git push ::: a', 'npx git push', 'git subtree push --prefix x origin b', 'git send-pack origin',
+        'git $(echo push)', 'git "$SUB"', 'env -u X sh -c "git push"',
     ]) assert.equal(push(cmd), 'push', cmd);
     for (const cmd of [
         'git status', 'git log --grep push', 'echo "git push"', "echo 'git push'", 'grep -rn "git push" .',
-        'git commit -m "push later"', 'git pushx', 'ls # git push', 'npm run push',
+        'git commit -m "push later"', 'git pushx', 'ls # git push', 'npm run push', 'env FOO=1 git status',
+        'sudo -u me ls', 'find . -name "*.js"',
     ]) assert.equal(push(cmd), null, cmd);
 });
 
@@ -37,7 +43,8 @@ test('repo-write: git commands that change the repository are refused; reading o
     const w = (cmd) => bashDenial(cmd, ['repo-write'])?.rule ?? null;
     for (const cmd of ['git commit -m x', 'git add .', 'git stash', 'git checkout main', 'git reset --hard',
         'git -C /elsewhere commit -m x', 'git restore f', 'git switch b', 'git rm f', 'git mv a b', 'git merge b',
-        'git rebase main', 'git cherry-pick abc', 'git revert abc', 'git pull', 'git clean -fd', 'git apply p.diff', 'git am p'])
+        'git rebase main', 'git cherry-pick abc', 'git revert abc', 'git pull', 'git clean -fd', 'git apply p.diff', 'git am p',
+        'env -u X git commit -m x', 'xargs -n 1 git add', 'git $(echo commit)'])
         assert.equal(w(cmd), 'repo-write', cmd);
     for (const cmd of ['git status', 'git diff', 'git log -3', 'git show HEAD', 'git push'])
         assert.equal(w(cmd), null, cmd);

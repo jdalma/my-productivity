@@ -22,10 +22,12 @@ export const DENY_RULES = ['push', 'repo-write'];
 
 const HOOK = fileURLToPath(new URL('../worker-guard-hook.js', import.meta.url));
 
-/** Words that run the rest of the line as a command: skipped, with their own options. */
+/** Words that run a command given later on the line (after options of their own, some taking values). */
 const WRAPPERS = new Set(['command', 'builtin', 'exec', 'nohup', 'time', 'sudo', 'env', 'nice', 'xargs', 'timeout',
-    'then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}']);
+    'find', 'watch', 'parallel', 'npx', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}']);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+/** The commands the rules look into. */
+const RUNNERS = new Set(['git', 'eval', ...SHELLS]);
 
 /** git's own options before the subcommand (git(1)); a value follows those in GIT_WITH_ARG. */
 const GIT_FLAGS = new Set(['-p', '-P', '--paginate', '--no-pager', '--bare', '--no-replace-objects', '--literal-pathspecs',
@@ -96,24 +98,30 @@ function lex(src) {
     return { cmds, subs, ok };
 }
 
-/** The command a list of words runs, past assignments and wrappers: `{ name, args }`, or null. */
+/**
+ * The command a list of words runs, past assignments and wrappers: `{ name, args }`, or null. A wrapper's
+ * options may take values (`env -u X`, `nice -n 10`, `xargs -I {}`), which no table here could list for
+ * every tool: after a wrapper, the command is the first word naming git, a shell or eval (R60 R1).
+ */
 function commandOf(words) {
     let k = 0;
-    while (k < words.length) {
-        const w = words[k];
-        if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) { k++; continue; }
-        if (!WRAPPERS.has(w)) break;
-        k++;
-        while (k < words.length && words[k].startsWith('-')) k++;
-        if (w === 'timeout' && k < words.length) k++;  // its duration
+    while (k < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[k])) k++;
+    if (k >= words.length) return null;
+    if (WRAPPERS.has(words[k])) {
+        const next = words.findIndex((w, i) => i > k && RUNNERS.has(basename(w)));
+        return next < 0 ? null : commandOf(words.slice(next));
     }
-    return k < words.length ? { name: basename(words[k]), args: words.slice(k + 1) } : null;
+    return { name: basename(words[k]), args: words.slice(k + 1) };
 }
 
-/** git's subcommand, or `undefined` when an option is unknown or -c defines an alias (it could be anything). */
+/**
+ * git's subcommand, or `undefined` when it cannot be told: an unknown option, an alias defined with -c, a
+ * subcommand that is empty or starts with `$` (made by a substitution or a variable).
+ */
 function gitSubcommand(args) {
     for (let k = 0; k < args.length; k++) {
         const a = args[k];
+        if (a === '' || a.startsWith('$')) return undefined;
         if (!a.startsWith('-')) return a;
         const name = a.split('=')[0];
         if (GIT_FLAGS.has(a)) continue;
@@ -146,9 +154,9 @@ export function bashDenial(command, rules) {
             if (inner) return inner;
         } else if (cmd.name === 'git') {
             const sub = gitSubcommand(cmd.args);
-            if (rules.includes('push') && (sub === 'push' || sub === undefined)) {
-                return { rule: 'push', reason: sub === 'push' ? 'git push' : 'a git command it cannot read (unknown option or -c alias)' };
-            }
+            if (sub === undefined) return { rule: rules[0], reason: 'a git command it cannot read (unknown option, -c alias, or a subcommand from a variable)' };
+            const pushes = sub === 'push' || sub === 'send-pack' || (sub === 'subtree' && cmd.args.slice(cmd.args.indexOf(sub) + 1).includes('push'));
+            if (rules.includes('push') && pushes) return { rule: 'push', reason: `git ${sub}` };
             if (rules.includes('repo-write') && GIT_WRITES.has(sub)) return { rule: 'repo-write', reason: `git ${sub}` };
         }
     }

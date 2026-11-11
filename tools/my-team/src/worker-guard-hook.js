@@ -2,6 +2,8 @@
  * The PreToolUse hook a worker with deny rules runs (T59): `--deny <rules> [--repo <root>]`, the tool call
  * as JSON on stdin. Exit 0 lets the call run; exit 2 refuses it, stderr going to the model, and the refusal
  * is one events.jsonl line. Input it cannot read is refused (hookCommand turns a crash into exit 2 too).
+ * Run by hand (a worker's shell has the team's MY_TEAM_STATE_ROOT), give it MY_TEAM_STATE_ROOT=<a temp folder>,
+ * or its refusals land in the real team's events.jsonl.
  */
 
 import { appendEvent } from './lib/events.js';

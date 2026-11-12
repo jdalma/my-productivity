@@ -193,7 +193,7 @@ Documents this worker may need. Before work a line below describes, read that do
 ```
 
 - **외부 시스템 안전 규칙**은 대상이 클라우드 CLI·운영 DB·결제·외부 서비스에 닿을 때만 넣는다. 계정·프로파일을 사용자가 정하지 않았으면 Step 6 질문 때 함께 묻는다.
-- **Worker Knowledge**는 Step 6a의 1~3에서 그 워커용으로 고른 문서다. 6a의 1~3을 이 조립보다 먼저 한다. 팀 전체용 문서는 `## Team Knowledge`로 따로 들어가므로 여기에 다시 적지 않는다.
+- **Worker Knowledge**는 Step 6a의 1~3에서 그 워커용으로 고른 문서다. 6a의 1~3을 이 조립보다 먼저 한다. 고른 문서가 없으면 절을 제목째 넣지 않는다. 팀 전체용 문서는 `## Team Knowledge`로 따로 들어가므로 여기에 다시 적지 않는다.
 - **orchestrator**의 `## 협업` 끝에 다음 줄을 덧붙인다: `워커를 추가할 때는 my-team-config 스킬(추가 모드)로 plugin·extra_prompt·권한 플래그를 조합한다.`
 
 ## Step 6 — launch_args (권한 플래그 + plugin)

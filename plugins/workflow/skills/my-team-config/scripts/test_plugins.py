@@ -197,11 +197,21 @@ with tempfile.TemporaryDirectory() as d:
     write(kdir / "plain.md", "# no frontmatter\nabout: 본문의 about은 설명이 아니다\n")
     write(kdir / "late.md", "---\ntitle: y\n---\nabout: frontmatter 밖\n")
     write(kdir / "notes.txt", "---\nabout: md가 아니다\n---\n")
+    # R5: 닫히지 않은 frontmatter는 본문과 구분할 수 없다, 들여쓴 하위 키는 about이 아니다, BOM은 읽는다, md 이름의 폴더는 건너뛴다
+    write(kdir / "unclosed.md", "---\ntitle: z\n# body\nabout: 본문 깊은 곳\n")
+    write(kdir / "unclosed2.md", "---\nabout: 닫히지 않음\n# body\ntext\n")
+    write(kdir / "nested.md", "---\nmeta:\n  about: 하위 키\n---\n")
+    (kdir / "bom.md").write_bytes("﻿---\nabout: BOM 문서\n---\n".encode("utf-8"))
+    (kdir / "dir.md").mkdir()
     k = kdir.resolve()
-    assert knowledge(kdir) == (f"{k / 'cloud.md'}\t클라우드 프로필과 보호 정책\n"
+    assert knowledge(kdir) == (f"{k / 'bom.md'}\tBOM 문서\n"
+                               f"{k / 'cloud.md'}\t클라우드 프로필과 보호 정책\n"
                                f"{k / 'db.md'}\tDB 조회 절차. db.example.com에 붙기 전에 읽는다\n"
                                f"{k / 'late.md'}\t(설명 없음)\n"
-                               f"{k / 'plain.md'}\t(설명 없음)\n"), knowledge(kdir)
+                               f"{k / 'nested.md'}\t(설명 없음)\n"
+                               f"{k / 'plain.md'}\t(설명 없음)\n"
+                               f"{k / 'unclosed.md'}\t(설명 없음)\n"
+                               f"{k / 'unclosed2.md'}\t(설명 없음)\n"), knowledge(kdir)
     assert knowledge(d / "no-such-folder") == ""
     (d / "empty").mkdir()
     assert knowledge(d / "empty") == ""

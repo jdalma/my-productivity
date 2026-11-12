@@ -354,22 +354,24 @@ def cmd_ensure(targets):
 # ── knowledge (T69) ──────────────────────────────────────────────────────
 
 def frontmatter_about(path):
-    """맨 위 frontmatter(--- … ---)의 about 한 줄. 닫는 줄에서 멈춰 본문은 읽지 않는다."""
-    with open(path, encoding="utf-8", errors="replace") as f:
+    """맨 위 frontmatter(--- … ---)의 최상위 about 한 줄. 닫는 줄을 만났을 때만 돌려준다: 닫히지 않은
+    frontmatter는 본문과 구분할 수 없다(R5 R1). 들여쓴 줄은 하위 키라 보지 않는다. BOM은 건너뛴다."""
+    about = None
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
         if f.readline().strip() != "---":
             return None
         for line in f:
             if line.strip() == "---":
-                return None
-            m = re.match(r"about:\s*(.*)$", line.strip())
-            if m:
-                return one_line(m.group(1).strip("\"'"), 200) or None
+                return about
+            m = re.match(r"about:\s*(.*)$", line.rstrip())
+            if m and about is None:
+                about = one_line(m.group(1).strip("\"'"), 200) or None
     return None
 
 
 def cmd_knowledge():
-    # 폴더가 없으면 glob이 빈 목록이다
-    for p in sorted(KNOWLEDGE.resolve().glob("*.md")):
+    # 폴더가 없으면 glob이 빈 목록이다. md 이름의 폴더 같은 파일이 아닌 항목은 건너뛴다(R5 L1)
+    for p in sorted(q for q in KNOWLEDGE.resolve().glob("*.md") if q.is_file()):
         print(f"{p}\t{frontmatter_about(p) or '(설명 없음)'}")
     return 0
 

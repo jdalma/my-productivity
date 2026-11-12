@@ -372,6 +372,40 @@ test('T63g R3 R1: git config files are not edited directly, by a tool or a shell
     assert.equal(plain.status, 0, 'push alone keeps edits inside the repository allowed');
 });
 
+test('T63g R3a M1: a heredoc body is judged unless its command surely only stores or reads it', () => {
+    const push = (cmd) => bashDenial(cmd, ['push'])?.rule ?? null;
+    const body = 'git push https://example.com/x.git HEAD';
+    for (const cmd of [
+        `source /dev/stdin <<'EOF'\n${body}\nEOF`, `. /dev/stdin <<'EOF'\n${body}\nEOF`, `eval "$(cat)" <<'EOF'\n${body}\nEOF`,
+        `cat <<'EOF' | sh\n${body}\nEOF`, `cat <<EOF | bash -s\n${body}\nEOF`, `xargs -I{} sh -c {} <<'EOF'\n${body}\nEOF`,
+        `awk 1 <<'EOF'\n${body}\nEOF`, `./run.sh <<'EOF'\n${body}\nEOF`, `while read l; do $l; done <<'EOF'\n${body}\nEOF`,
+    ]) assert.equal(push(cmd), 'push', cmd);
+    for (const cmd of [
+        `cat > /tmp/f <<'EOF'\n${body}\nEOF`, `tee /tmp/f >/dev/null <<EOF\n${body}\nEOF`, `python3 - <<'PY'\nprint("${body}")\nPY`,
+        `node --input-type=module <<'EOF'\nconsole.log("${body}")\nEOF`, `git commit -q -F - <<'EOF'\n${body}\nEOF`,
+    ]) assert.equal(push(cmd), null, cmd);
+});
+
+test('T63g R3a M2: a worker does not turn the pre-push hook off: core.hooksPath, the hooks folder', (t) => {
+    const r = twoRepos(t);
+    const hooks = join(r.root, '.git', 'hooks');
+    for (const rules of [['push'], ['push', 'repo-write']]) {
+        const deny = (cmd, cwd = r.other) => bashDenial(cmd, rules, { cwd, repoRoot: r.root })?.rule ?? null;
+        for (const cmd of [
+            'git config --global core.hooksPath /tmp/none', `git -C ${r.root} config core.hooksPath /tmp/none`,
+            `git -C ${r.root} config core.hookspath /tmp/none`, `git -C ${r.root} config --unset core.hooksPath`,
+            'git config --global --remove-section core', `printf 'exit 0' > ${hooks}/pre-push`, `rm ${hooks}/push-gate.sh`,
+            `rm -rf ${hooks}`, `mv ${hooks} /tmp/h`, `chmod -x ${hooks}/pre-push`, `cp /tmp/x ${hooks}/public-scan.sh`,
+            `cd ${r.root} && rm .git/hooks/pre-push`,
+        ]) assert.notEqual(deny(cmd), null, `${rules}: ${cmd}`);
+        for (const cmd of [`git -C ${r.root} config --get core.hooksPath`, `cat ${hooks}/pre-push`, `ls ${hooks}`, 'git config --global core.editor vim'])
+            assert.equal(deny(cmd), null, `${rules}: ${cmd}`);
+        const path = (p) => pathDenial(p, r.other, r.root, rules)?.rule ?? null;
+        assert.notEqual(path(join(hooks, 'pre-push')), null, `${rules}: Write a hook`);
+        assert.notEqual(path(join(hooks, 'push-gate.sh')), null, `${rules}: Edit the gate's copy`);
+    }
+});
+
 test('T63g: a heredoc body is data unless a shell reads it; an unquoted one still runs its substitutions', () => {
     const push = (cmd) => bashDenial(cmd, ['push'])?.rule ?? null;
     for (const cmd of [

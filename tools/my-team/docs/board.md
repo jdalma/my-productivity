@@ -136,8 +136,9 @@ git config my-team.baseline <commit>     # its ancestors count as reviewed: work
 - From the pane of another team's worker, `board-pushable` refuses to read the board, so the gate refuses
   the push. This is meant: push from your own team's pane, or from the user's shell.
 - A worker with a `push` or `repo-write` deny rule cannot turn the gate off. Its guard refuses any
-  `git config` write of a `my-team.*` key that reaches the repository: in its config, in the user's or the
-  system's. It also refuses direct edits of those config files, by a tool or a shell redirect. With
+  `git config` write of a `my-team.*` key or of `core.hooksPath` that reaches the repository: in its
+  config, in the user's or the system's. It also refuses direct edits of those config files and of the
+  repository's hooks folder, by a tool, a shell redirect or a command such as `rm`, `mv` or `chmod`. With
   `repo-write`, it refuses every write to the repository's config.
 
 ## One cycle

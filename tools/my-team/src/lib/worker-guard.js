@@ -6,12 +6,13 @@
  * - `push`: a Bash command that runs `git push`, in any of the shell forms below.
  * - `repo-write`: an edit inside the git repository of the worker's cwd, or a git command that changes a
  *   repository (commit, add, stash, checkout, reset, config writes, ...).
- * - Both: no write of the push gate's settings (`git config` of my-team.* reaching the repository) and no
- *   direct edit of a git config file the repository reads (T63g).
+ * - Both: the push gate stays on (T63g). No `git config` write of my-team.* or core.hooksPath reaching the
+ *   repository, and no direct edit of a git config file it reads or of its hooks folder.
  *
  * The hook reads the command string. What a script, an alias or a Makefile runs is not seen: this guards
- * against mistakes, not intent. A form it cannot read is refused. A heredoc body is data unless a shell
- * reads it (`sh <<EOF`); an unquoted one's substitutions still run and are read.
+ * against mistakes, not intent. A form it cannot read is refused. A heredoc body is judged as commands
+ * unless its command only stores or reads it (`cat > f <<EOF`); an unquoted one's substitutions still run
+ * and are read.
  */
 
 import { execFileSync } from 'child_process';
@@ -178,6 +179,21 @@ function lex(src) {
     return { cmds, subs, heredocs, ok };
 }
 
+/**
+ * Commands that take a heredoc body as data, never running it as shell commands (R3a M1): they store, read or
+ * show it. A language interpreter (node, python) runs it as a program of its own, which the guard does not
+ * read, as with any script. Everything else, or a body piped on, is judged as commands: `source /dev/stdin`,
+ * `eval "$(cat)"`, `cat <<EOF | sh`, a while loop, an unknown program.
+ */
+const HEREDOC_DATA = new Set(['cat', 'tee', 'node', 'python', 'python3', 'ruby', 'perl', 'jq', 'git', 'wc', 'head', 'tail',
+    'grep', 'sort', 'uniq', 'base64']);
+
+function heredocIsData(h) {
+    if (h.words.sep === '|') return false;
+    const cmds = commandsOf(h.words);
+    return cmds.length > 0 && cmds.every((c) => c.name !== undefined && HEREDOC_DATA.has(c.name));
+}
+
 /** A word whose value is known only when the line runs: a variable, a substitution, or nothing. */
 function unknownWord(w) {
     return w === '' || w.includes('$') || w.includes(SUBST);
@@ -339,25 +355,28 @@ function touchesProtected(targets, protectedRepo) {
 }
 
 /**
- * Whether `path` is a git config file the protected repository reads (T63g, R3 R1): its own config and its
- * worktrees', the user's and the system's. The push gate's settings (my-team.*) live there. Without a
- * protected repository, any repository's config counts.
+ * Whether `path` is part of the push gate (T63g, R3 R1, R3a M2): a git config file the protected repository
+ * reads (its own and its worktrees', the user's and the system's), where my-team.* and core.hooksPath live;
+ * or its hooks folder or anything in it, where the pre-push hook and its copies live. Without a protected
+ * repository, any repository's counts.
  */
-function gitConfigFile(path, protectedRepo) {
+function gateFile(path, protectedRepo) {
     const key = pathKey(path);
     const home = homedir();
     if ([join(home, '.gitconfig'), join(home, '.config', 'git', 'config'), '/etc/gitconfig'].map(pathKey).includes(key)) return true;
-    if (!protectedRepo) return /[/\\]\.git[/\\]config(\.worktree)?$/.test(key);
+    if (!protectedRepo) return /[/\\]\.git[/\\](config(\.worktree)?|hooks([/\\].*)?)$/s.test(key);
     const common = protectedRepo.common ?? pathKey(join(protectedRepo.root, '.git'));
-    return key === common + sep + 'config' || (key.startsWith(common + sep) && key.endsWith('config.worktree'));
+    const hooks = common + sep + 'hooks';
+    return key === common + sep + 'config' || (key.startsWith(common + sep) && key.endsWith('config.worktree'))
+        || key === hooks || key.startsWith(hooks + sep);
 }
 
 /** Commands that only read the files they name; any other may write them. */
 const FILE_READERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'grep', 'egrep', 'fgrep', 'rg', 'wc', 'diff', 'cmp',
     'stat', 'ls', 'file', 'shasum', 'md5', 'echo', 'printf', 'test', '[']);
 
-/** The git config file a command writes, by a redirect or as a file argument of a command that may write; or null. */
-function writtenGitConfig(cmd, dir, protectedRepo) {
+/** The gate file a command writes, by a redirect or as a file argument of a command that may write; or null. */
+function writtenGateFile(cmd, dir, protectedRepo) {
     const at = (p) => {
         if (!p || unknownWord(p)) return null;
         const full = expandHome(p);
@@ -370,7 +389,7 @@ function writtenGitConfig(cmd, dir, protectedRepo) {
         if (m) targets.push(m[1] || cmd.args[++k]);
         else if (!FILE_READERS.has(cmd.name) && !cmd.args[k].startsWith('-')) targets.push(cmd.args[k]);
     }
-    return targets.map(at).find((p) => p !== null && gitConfigFile(p, protectedRepo)) ?? null;
+    return targets.map(at).find((p) => p !== null && gateFile(p, protectedRepo)) ?? null;
 }
 
 /**
@@ -422,12 +441,13 @@ function configDenial(git, dir, rules, protectedRepo) {
     if (c.scope === 'global' || c.scope === 'system') reaches = 'everywhere';
     else if (c.scope === 'file') {
         const path = c.file === undefined || unknownWord(c.file) ? null : resolve(git.targets[0] ?? dir ?? '/', expandHome(c.file));
-        reaches = path === null || (dir === null && !isAbsolute(expandHome(c.file))) || gitConfigFile(path, protectedRepo) || touchesProtected([path], protectedRepo) ? 'repository' : null;
+        reaches = path === null || (dir === null && !isAbsolute(expandHome(c.file))) || gateFile(path, protectedRepo) || touchesProtected([path], protectedRepo) ? 'repository' : null;
     } else reaches = touchesProtected(git.targets, protectedRepo) ? 'repository' : null;
     if (!reaches) return null;
     if (rules.includes('repo-write') && reaches === 'repository') return { rule: 'repo-write', reason: 'git config writes the protected repository\'s config' };
-    const gateKey = c.key === null || /^my-team(\.|$)/i.test(c.key);
-    if (gateKey) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: 'git config my-team.* holds the push gate\'s settings' };
+    // my-team.* sets the gate up; core.hooksPath (or removing its section) moves the pre-push hook away (R3a M2)
+    const gateKey = c.key === null || /^(my-team(\..*)?|core(\.hookspath)?)$/is.test(c.key);
+    if (gateKey) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `git config ${c.key ?? '<unknown key>'} reaches the push gate's settings or its hook` };
     return null;
 }
 
@@ -473,8 +493,8 @@ function denial(command, rules, start, protectedRepo) {
         }
         if (cmd.name === 'eval') return denial(cmd.args.join(' '), rules, dir, protectedRepo);
         if (cmd.name !== 'git') {
-            const config = writtenGitConfig(cmd, dir, protectedRepo);
-            return config ? { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `it writes ${config}, a git config file` } : null;
+            const file = writtenGateFile(cmd, dir, protectedRepo);
+            return file ? { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `it writes ${file}, part of the push gate (git config or hooks)` } : null;
         }
         const git = gitCall(cmd.args, cmd.env, dir);
         if (gitEnvUnknown && git.targets) git.targets.push(null);
@@ -508,10 +528,10 @@ function denial(command, rules, start, protectedRepo) {
         const found = denial(sub, rules, moved ? null : start, protectedRepo);
         if (found) return found;
     }
-    // a heredoc body is data to its command (T63g), unless that command is a shell, which runs it; an unquoted
-    // delimiter still runs the body's substitutions (bash(1), Here Documents)
+    // a heredoc body is judged as commands unless its command surely only stores or reads it (T63g, R3a M1);
+    // as data, an unquoted delimiter still runs the body's substitutions (bash(1), Here Documents)
     for (const h of heredocs) {
-        if (commandsOf(h.words).some((c) => SHELLS.has(c.name))) {
+        if (!heredocIsData(h)) {
             const found = denial(h.body, rules, moved ? null : start, protectedRepo);
             if (found) return found;
             continue;
@@ -528,8 +548,8 @@ function denial(command, rules, start, protectedRepo) {
 }
 
 /**
- * For an edit of `path` (relative to `cwd`): a git config file the protected repository reads is refused by
- * either rule (T63g, R3 R1: the push gate's settings live there); with `repo-write`, so is anything inside
+ * For an edit of `path` (relative to `cwd`): a gate file (git config or hooks, see gateFile) is refused by
+ * either rule (T63g, R3 R1, R3a M2); with `repo-write`, so is anything inside
  * `repoRoot`. Null when the edit may go.
  */
 export function pathDenial(path, cwd, repoRoot, rules = ['repo-write']) {
@@ -537,7 +557,7 @@ export function pathDenial(path, cwd, repoRoot, rules = ['repo-write']) {
     const full = isAbsolute(path) ? path : resolve(cwd, path);
     if (rules.includes('push') || rules.includes('repo-write')) {
         const protectedRepo = repoRoot ? { root: repoRoot, common: gitCommonDir(repoRoot) } : null;
-        if (gitConfigFile(full, protectedRepo)) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `${path} is a git config file, where the push gate's settings live` };
+        if (gateFile(full, protectedRepo)) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `${path} is part of the push gate (git config or hooks)` };
     }
     if (!repoRoot || !rules.includes('repo-write')) return null;
     const target = pathKey(full);

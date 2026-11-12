@@ -36,9 +36,10 @@ let denial = null, target = null;
 if (tool === 'Bash') {
     target = String(input.command ?? '');
     denial = bashDenial(target, rules, { cwd, repoRoot });
-} else if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) && rules.includes('repo-write')) {
+} else if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) && rules.length) {
+    // push too: a git config file holds the push gate's settings (T63g)
     target = String(input.file_path ?? input.notebook_path ?? '');
-    denial = pathDenial(target, cwd, repoRoot);
+    denial = pathDenial(target, cwd, repoRoot, rules);
 }
 
 if (denial) {

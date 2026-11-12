@@ -33,6 +33,7 @@ process.stdin.on("data", (d) => { raw += d; }).on("end", () => {
     const say = (s) => process.stderr.write(s + "\n");
     if (!Array.isArray(r.uncovered)) {
         say(`push-gate: cannot judge this push on board ${board} (${r.code}: ${r.message}); refusing.`);
+        if (/no commit/.test(String(r.message))) say("  A commit the remote has may not be here yet: run git fetch, then push again.");
         say("  Fix that, or skip the pre-push checks once with: git push --no-verify");
         process.exit(1);
     }

@@ -299,3 +299,92 @@ test('set only hides git locations with allexport; config that redirects a push 
     assert.equal(deny('git -c user.name=x commit -m x', r.other), null);
     assert.equal(deny(`git -c user.name=x push ${r.bare} HEAD`, r.other, ['push']), null);
 });
+
+test('T63g R3 R1: a repo-write worker does not write the protected repository\'s git config; reading it passes', (t) => {
+    const r = twoRepos(t);
+    const deny = (cmd, cwd = r.root, rules = ['repo-write']) => bashDenial(cmd, rules, { cwd, repoRoot: r.root })?.rule ?? null;
+    for (const cmd of [
+        'git config my-team.baseline HEAD', `git -C ${r.root} config --unset my-team.board`, `cd ${r.root} && git config --add x.y z`,
+        'git config --unset-all a.b', 'git config --replace-all a.b c', 'git config --rename-section a b', 'git config --remove-section a',
+        'git config -e', 'git config --edit', 'git config set a.b c', 'git config unset a.b', 'git config --local a.b c',
+        'git config --frobnicate a.b', `git config --file ${r.root}/.git/config a.b c`, 'git config --file .git/config a.b c',
+        'git config "$KEY" x',
+    ]) assert.equal(deny(cmd, cmd.startsWith('cd ') || cmd.includes('-C ') ? r.other : r.root), 'repo-write', cmd);
+    for (const cmd of [
+        'git config --get my-team.board', 'git config --get-all a.b', 'git config --get-regexp my-team', 'git config --list',
+        'git config -l', 'git config user.name', 'git config get my-team.board', 'git config list', 'git config --get --global a.b',
+    ]) assert.equal(deny(cmd), null, cmd);
+    assert.equal(deny(`git -C ${r.other} config user.name x`), null, 'another repository is not protected');
+    assert.equal(deny('git config user.name x', r.other), null);
+
+    // acceptance through the hook: (a) the three writes rc 2, (b) reads rc 0, (c) heredoc data rc 0, (d) sh heredoc rc 2
+    const state = join(r.dir, 'state');
+    const rc = (command, deny = 'push,repo-write') => hook(t, { tool_name: 'Bash', tool_input: { command }, cwd: r.other },
+        ['--deny', deny, '--repo', r.root], { MY_TEAM_STATE_ROOT: state, MY_TEAM_WORKER: 'tt/w' }).status;
+    for (const cmd of [`git -C ${r.root} config my-team.baseline HEAD`, `git -C ${r.root} config --unset my-team.board`, `cd ${r.root} && git config my-team.board x`])
+        assert.equal(rc(cmd), 2, `(a) ${cmd}`);
+    for (const cmd of [`git -C ${r.root} config --get my-team.board`, `git -C ${r.root} config --list`]) assert.equal(rc(cmd), 0, `(b) ${cmd}`);
+    // a destination off this machine: outside the protected repository a local one would pass (T59c)
+    assert.equal(rc('cat > /tmp/f <<EOF\ngit push https://example.com/x.git main\nEOF', 'push'), 0, '(c)');
+    assert.equal(rc('sh <<EOF\ngit push https://example.com/x.git main\nEOF', 'push'), 2, '(d)');
+});
+
+test('T63g R3 R1: a push-only worker does not write my-team.* git config where it reaches the protected repository', (t) => {
+    const r = twoRepos(t);
+    const deny = (cmd, cwd = r.root) => bashDenial(cmd, ['push'], { cwd, repoRoot: r.root })?.rule ?? null;
+    for (const cmd of [
+        'git config my-team.baseline HEAD', 'git config --unset my-team.board', `git -C ${r.root} config my-team.board x`,
+        'git config --global my-team.board x', 'git config --system my-team.baseline y', 'git config --remove-section my-team',
+        'git config -e', 'git config "$KEY" x', 'git config set my-team.board x',
+    ]) assert.equal(deny(cmd), 'push', cmd);
+    for (const cmd of ['git config user.name x', 'git config --get my-team.board', 'git config --global user.email a@example.com'])
+        assert.equal(deny(cmd), null, cmd);
+    assert.equal(deny('git config my-team.board x', r.other), null, 'a scratch repository of its own');
+});
+
+test('T63g R3 R1: git config files are not edited directly, by a tool or a shell redirect', (t) => {
+    const r = twoRepos(t);
+    const home = process.env.HOME;
+    for (const rules of [['push'], ['repo-write']]) {
+        const path = (p) => pathDenial(p, r.other, r.root, rules)?.rule ?? null;
+        assert.equal(path(join(r.root, '.git', 'config')), rules[0], `${rules}: the protected repository's config`);
+        assert.equal(path(join(home, '.gitconfig')), rules[0], `${rules}: the user's config`);
+        assert.equal(path(join(home, '.config', 'git', 'config')), rules[0]);
+        assert.equal(path(join(r.other, 'notes.md')), null, `${rules}: an ordinary file elsewhere`);
+        const sh = (cmd, cwd = r.root) => bashDenial(cmd, rules, { cwd, repoRoot: r.root })?.rule ?? null;
+        assert.equal(sh('echo "[my-team]" >> .git/config'), rules[0], `${rules}: a redirect`);
+        assert.equal(sh('printf x >~/.gitconfig'), rules[0]);
+        assert.equal(sh(`printf x | tee -a ${r.root}/.git/config`), rules[0]);
+        assert.equal(sh(`cp /tmp/x ${home}/.gitconfig`), rules[0]);
+        assert.equal(sh('cat .git/config'), null, `${rules}: reading it passes`);
+        assert.equal(sh('grep my-team ~/.gitconfig'), null);
+    }
+    assert.equal(pathDenial(join(r.other, 'x.md'), r.other, r.root, ['push']), null, 'push alone keeps edits elsewhere allowed');
+
+    // through the hook itself: a push-only worker (no repo-write) editing the repository's config
+    const state = join(r.dir, 'state');
+    const args = ['--deny', 'push', '--repo', r.root];
+    const env = { MY_TEAM_STATE_ROOT: state, MY_TEAM_WORKER: 'tt/core' };
+    const edit = hook(t, { tool_name: 'Edit', tool_input: { file_path: join(r.root, '.git', 'config'), old_string: 'a', new_string: 'b' }, cwd: r.root }, args, env);
+    assert.equal(edit.status, 2, edit.stderr);
+    assert.match(edit.stderr, /"push" rule/);
+    const plain = hook(t, { tool_name: 'Write', tool_input: { file_path: join(r.root, 'src', 'a.js'), content: 'x' }, cwd: r.root }, args, env);
+    assert.equal(plain.status, 0, 'push alone keeps edits inside the repository allowed');
+});
+
+test('T63g: a heredoc body is data unless a shell reads it; an unquoted one still runs its substitutions', () => {
+    const push = (cmd) => bashDenial(cmd, ['push'])?.rule ?? null;
+    for (const cmd of [
+        'cat > /tmp/f <<EOF\ngit push origin main\nEOF',
+        "python3 - <<'PY'\nprint(\"git push\")\nopen('x').write(\"don't\")\nPY",
+        'node --input-type=module -e x <<EOF\ncommitsToPush("git push")\nEOF\necho done',
+        'cat <<-EOF\n\tgit push\n\tEOF',
+        "cat <<'EOF'\n$(git push)\nEOF",
+    ]) assert.equal(push(cmd), null, cmd);
+    for (const cmd of [
+        'sh <<EOF\ngit push\nEOF', 'bash <<-EOF\n\tgit push\n\tEOF', "zsh <<'X'\ngit push\nX", 'env -i bash <<EOF\ngit push\nEOF',
+        'cat <<EOF\n$(git push)\nEOF', 'cat <<EOF\n`git push`\nEOF',
+        'cat <<EOF\nx\nEOF\ngit push', 'cat <<EOF >/tmp/f\nx\nEOF\ngit push',
+        'cat <<EOF\ngit push', '(( x = 1 << 2 ))\ngit push',
+    ]) assert.equal(push(cmd), 'push', cmd);
+});

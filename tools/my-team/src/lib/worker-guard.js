@@ -5,10 +5,13 @@
  *
  * - `push`: a Bash command that runs `git push`, in any of the shell forms below.
  * - `repo-write`: an edit inside the git repository of the worker's cwd, or a git command that changes a
- *   repository (commit, add, stash, checkout, reset, ...).
+ *   repository (commit, add, stash, checkout, reset, config writes, ...).
+ * - Both: no write of the push gate's settings (`git config` of my-team.* reaching the repository) and no
+ *   direct edit of a git config file the repository reads (T63g).
  *
  * The hook reads the command string. What a script, an alias or a Makefile runs is not seen: this guards
- * against mistakes, not intent. A form it cannot read is refused.
+ * against mistakes, not intent. A form it cannot read is refused. A heredoc body is data unless a shell
+ * reads it (`sh <<EOF`); an unquoted one's substitutions still run and are read.
  */
 
 import { execFileSync } from 'child_process';
@@ -48,9 +51,74 @@ const GIT_WRITES = new Set(['commit', 'add', 'stash', 'checkout', 'reset', 'rest
 const OPEN = ['\u0000('], CLOSE = ['\u0000)'];
 const SUBST = '\u0001';
 
+/**
+ * The command substitutions in heredoc text, which run even when the text is data (an unquoted delimiter):
+ * `$(…)` and backticks, quotes being plain text there. `ok` is false when one is not closed.
+ */
+function substitutionsIn(text) {
+    const subs = [];
+    let ok = true;
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] === '\\') { i++; continue; }
+        if (text[i] === '$' && text[i + 1] === '(') {
+            let depth = 1, j = i + 2;
+            for (; j < text.length && depth; j++) { if (text[j] === '(') depth++; else if (text[j] === ')') depth--; }
+            if (depth) { ok = false; subs.push(text.slice(i + 2)); break; }
+            subs.push(text.slice(i + 2, j - 1));
+            i = j - 1;
+        } else if (text[i] === '`') {
+            const j = text.indexOf('`', i + 1);
+            if (j < 0) { ok = false; subs.push(text.slice(i + 1)); break; }
+            subs.push(text.slice(i + 1, j));
+            i = j;
+        }
+    }
+    return { subs, ok };
+}
+
 function lex(src) {
-    const cmds = [], subs = [];
+    const cmds = [], subs = [], heredocs = [];
     let words = [], word = null, i = 0, ok = true;
+    // heredocs opened on this line: their bodies start after its newline (T63g)
+    let pending = [];
+    /** From the start of a line, each pending heredoc's body up to its delimiter line; none found: unreadable. */
+    const bodies = () => {
+        for (const h of pending) {
+            const lines = [];
+            let found = false;
+            while (i < src.length) {
+                const nl = src.indexOf('\n', i);
+                const end = nl < 0 ? src.length : nl;
+                const line = h.strip ? src.slice(i, end).replace(/^\t+/, '') : src.slice(i, end);
+                i = nl < 0 ? src.length : nl + 1;
+                if (line === h.delim) { found = true; break; }
+                lines.push(line);
+            }
+            if (!found) ok = false;
+            heredocs.push({ body: lines.join('\n'), quoted: h.quoted, words: h.words });
+        }
+        pending = [];
+    };
+    /** After `<<` or `<<-`: the delimiter word; quoted in any part, the body is not expanded. */
+    const heredoc = () => {
+        endWord();
+        i += 2;
+        const strip = src[i] === '-';
+        if (strip) i++;
+        while (src[i] === ' ' || src[i] === '\t') i++;
+        let delim = '', quoted = false;
+        while (i < src.length && !/[\s;&|()<>]/.test(src[i])) {
+            const d = src[i];
+            if (d === "'" || d === '"') {
+                const j = src.indexOf(d, i + 1);
+                if (j < 0) { ok = false; i = src.length; break; }
+                delim += src.slice(i + 1, j);
+                quoted = true;
+                i = j + 1;
+            } else if (d === '\\') { delim += src[i + 1] ?? ''; quoted = true; i += 2; } else { delim += d; i++; }
+        }
+        if (delim) pending.push({ delim, quoted, strip, words }); else ok = false;
+    };
     const endWord = () => { if (word !== null) words.push(word); word = null; };
     // each simple command keeps the operator that ended it (`.sep`): what follows a cd depends on it
     const endCmd = (sep = null) => { endWord(); if (words.length) { words.sep = sep; cmds.push(words); } words = []; };
@@ -81,7 +149,9 @@ function lex(src) {
         if (c === ' ' || c === '\t') { endWord(); i++; }
         else if (c === '(' || c === ')') { endCmd(); cmds.push(c === '(' ? OPEN : CLOSE); i++; }
         else if ((c === '&' || c === '|') && src[i + 1] === c) { endCmd(c + c); i += 2; }
-        else if (c === '\n' || c === ';' || c === '&' || c === '|') { endCmd(c); i++; }
+        else if (c === '\n') { endCmd(c); i++; if (pending.length) bodies(); }
+        else if (c === ';' || c === '&' || c === '|') { endCmd(c); i++; }
+        else if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') heredoc();
         else if (c === '#' && word === null) { while (i < src.length && src[i] !== '\n') i++; }
         else if (c === '\\') { if (src[i + 1] !== '\n') add(src[i + 1] ?? ''); i += 2; }
         else if (c === "'") {
@@ -103,7 +173,9 @@ function lex(src) {
         else { add(c); i++; }
     }
     endCmd();
-    return { cmds, subs, ok };
+    // a heredoc whose line never ended: its body cannot be told from what follows
+    if (pending.length) ok = false;
+    return { cmds, subs, heredocs, ok };
 }
 
 /** A word whose value is known only when the line runs: a variable, a substitution, or nothing. */
@@ -267,6 +339,99 @@ function touchesProtected(targets, protectedRepo) {
 }
 
 /**
+ * Whether `path` is a git config file the protected repository reads (T63g, R3 R1): its own config and its
+ * worktrees', the user's and the system's. The push gate's settings (my-team.*) live there. Without a
+ * protected repository, any repository's config counts.
+ */
+function gitConfigFile(path, protectedRepo) {
+    const key = pathKey(path);
+    const home = homedir();
+    if ([join(home, '.gitconfig'), join(home, '.config', 'git', 'config'), '/etc/gitconfig'].map(pathKey).includes(key)) return true;
+    if (!protectedRepo) return /[/\\]\.git[/\\]config(\.worktree)?$/.test(key);
+    const common = protectedRepo.common ?? pathKey(join(protectedRepo.root, '.git'));
+    return key === common + sep + 'config' || (key.startsWith(common + sep) && key.endsWith('config.worktree'));
+}
+
+/** Commands that only read the files they name; any other may write them. */
+const FILE_READERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'grep', 'egrep', 'fgrep', 'rg', 'wc', 'diff', 'cmp',
+    'stat', 'ls', 'file', 'shasum', 'md5', 'echo', 'printf', 'test', '[']);
+
+/** The git config file a command writes, by a redirect or as a file argument of a command that may write; or null. */
+function writtenGitConfig(cmd, dir, protectedRepo) {
+    const at = (p) => {
+        if (!p || unknownWord(p)) return null;
+        const full = expandHome(p);
+        if (!isAbsolute(full) && dir === null) return null;
+        return resolve(dir ?? '/', full);
+    };
+    const targets = [];
+    for (let k = 0; k < cmd.args.length; k++) {
+        const m = /^\d*>>?\|?(.*)$/s.exec(cmd.args[k]);
+        if (m) targets.push(m[1] || cmd.args[++k]);
+        else if (!FILE_READERS.has(cmd.name) && !cmd.args[k].startsWith('-')) targets.push(cmd.args[k]);
+    }
+    return targets.map(at).find((p) => p !== null && gitConfigFile(p, protectedRepo)) ?? null;
+}
+
+/**
+ * `git config` options (git-config(1)): those that only read, those taking a value, and those that change
+ * neither. Any other (--unset, --add, --replace-all, --rename-section, --remove-section, -e …) is a write.
+ */
+const CONFIG_READS = new Set(['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l', '--get-color', '--get-colorbool']);
+const CONFIG_WITH_ARG = new Set(['-f', '--file', '--blob', '--type', '--default', '--comment', '--value']);
+const CONFIG_FLAGS = new Set(['--global', '--system', '--local', '--worktree', '--bool', '--int', '--bool-or-int', '--path',
+    '--expiry-date', '-z', '--null', '--name-only', '--show-origin', '--show-scope', '--includes', '--no-includes', '--fixed-value', '--all']);
+/** git 2.46's subcommand form: `git config get|list|set|unset|…`. */
+const CONFIG_SUBCOMMANDS = { get: 'read', list: 'read', set: 'write', unset: 'write', 'rename-section': 'write', 'remove-section': 'write', edit: 'write' };
+
+/**
+ * What a `git config` line does: `write` (false only when it certainly only reads: an unknown option or a
+ * value from a variable counts as a write), the key or section (null: all of it, or unknown), and where:
+ * `scope` local, global, system or file (`file` the path given).
+ */
+function configCall(rest) {
+    let mode = null, scope = 'local', file;
+    const pos = [];
+    for (let k = 0; k < rest.length; k++) {
+        const a = rest[k];
+        if (a === '--') { pos.push(...rest.slice(k + 1)); break; }
+        if (!a.startsWith('-') || unknownWord(a)) { pos.push(a); continue; }
+        const name = a.split('=')[0];
+        if (CONFIG_READS.has(name)) mode = 'read';
+        else if (name === '--global' || name === '--system') scope = name.slice(2);
+        else if (CONFIG_WITH_ARG.has(name)) {
+            const value = a.includes('=') ? a.slice(a.indexOf('=') + 1) : rest[++k];
+            if (name === '-f' || name === '--file') { scope = 'file'; file = value; }
+        } else if (!CONFIG_FLAGS.has(name)) return { write: true, key: null, scope, file };
+    }
+    if (Object.hasOwn(CONFIG_SUBCOMMANDS, pos[0])) return { write: CONFIG_SUBCOMMANDS[pos[0]] === 'write', key: pos[1] ?? null, scope, file };
+    const key = pos[0] ?? null;
+    const write = mode === null && (pos.length >= 2 || (key !== null && unknownWord(key)));
+    return { write, key: key !== null && unknownWord(key) ? null : key, scope, file };
+}
+
+/**
+ * `git config` that writes where it reaches the protected repository (T63g, R3 R1): `repo-write` refuses any
+ * such write; `push` refuses one of a my-team.* key (the push gate's settings), in the repository's config or
+ * the user's or system's, which it reads too.
+ */
+function configDenial(git, dir, rules, protectedRepo) {
+    const c = configCall(git.rest);
+    if (!c.write) return null;
+    let reaches;
+    if (c.scope === 'global' || c.scope === 'system') reaches = 'everywhere';
+    else if (c.scope === 'file') {
+        const path = c.file === undefined || unknownWord(c.file) ? null : resolve(git.targets[0] ?? dir ?? '/', expandHome(c.file));
+        reaches = path === null || (dir === null && !isAbsolute(expandHome(c.file))) || gitConfigFile(path, protectedRepo) || touchesProtected([path], protectedRepo) ? 'repository' : null;
+    } else reaches = touchesProtected(git.targets, protectedRepo) ? 'repository' : null;
+    if (!reaches) return null;
+    if (rules.includes('repo-write') && reaches === 'repository') return { rule: 'repo-write', reason: 'git config writes the protected repository\'s config' };
+    const gateKey = c.key === null || /^my-team(\.|$)/i.test(c.key);
+    if (gateKey) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: 'git config my-team.* holds the push gate\'s settings' };
+    return null;
+}
+
+/**
  * The first rule of `rules` that `command` breaks, as `{ rule, reason }`, or null. `cwd` is where the
  * command starts and `repoRoot` the protected repository: git commands acting elsewhere (a scratch clone,
  * a local bare remote) pass. Without `repoRoot` every git push and write counts.
@@ -278,7 +443,7 @@ export function bashDenial(command, rules, { cwd = null, repoRoot = null } = {})
 }
 
 function denial(command, rules, start, protectedRepo) {
-    const { cmds, subs, ok } = lex(command);
+    const { cmds, subs, heredocs, ok } = lex(command);
     if (!ok && rules.includes('push') && /\bpush\b/.test(command)) return { rule: 'push', reason: 'an unclosed quote or substitution around push' };
     let dir = start, moved = false, gitEnvUnknown = false, gitConfigUnknown = false;
     const outer = [];
@@ -307,11 +472,15 @@ function denial(command, rules, start, protectedRepo) {
             return flag >= 0 && cmd.args[flag + 1] !== undefined ? denial(cmd.args[flag + 1], rules, dir, protectedRepo) : null;
         }
         if (cmd.name === 'eval') return denial(cmd.args.join(' '), rules, dir, protectedRepo);
-        if (cmd.name !== 'git') return null;
+        if (cmd.name !== 'git') {
+            const config = writtenGitConfig(cmd, dir, protectedRepo);
+            return config ? { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `it writes ${config}, a git config file` } : null;
+        }
         const git = gitCall(cmd.args, cmd.env, dir);
         if (gitEnvUnknown && git.targets) git.targets.push(null);
         if (git.sub === undefined) return { rule: rules[0], reason: 'a git command it cannot read (unknown option, -c alias, or a value from a variable)' };
         if (git.sub === null || git.help) return null;
+        if (git.sub === 'config') return configDenial(git, dir, rules, protectedRepo);
         const pushes = git.sub === 'push' || git.sub === 'send-pack' || (git.sub === 'subtree' && git.rest.includes('push'));
         const rule = rules.includes('push') && pushes ? 'push' : rules.includes('repo-write') && GIT_WRITES.has(git.sub) ? 'repo-write' : null;
         if (!rule) return null;
@@ -339,13 +508,39 @@ function denial(command, rules, start, protectedRepo) {
         const found = denial(sub, rules, moved ? null : start, protectedRepo);
         if (found) return found;
     }
+    // a heredoc body is data to its command (T63g), unless that command is a shell, which runs it; an unquoted
+    // delimiter still runs the body's substitutions (bash(1), Here Documents)
+    for (const h of heredocs) {
+        if (commandsOf(h.words).some((c) => SHELLS.has(c.name))) {
+            const found = denial(h.body, rules, moved ? null : start, protectedRepo);
+            if (found) return found;
+            continue;
+        }
+        if (h.quoted) continue;
+        const inner = substitutionsIn(h.body);
+        if (!inner.ok && rules.includes('push') && /\bpush\b/.test(h.body)) return { rule: 'push', reason: 'an unclosed substitution in a heredoc around push' };
+        for (const sub of inner.subs) {
+            const found = denial(sub, rules, moved ? null : start, protectedRepo);
+            if (found) return found;
+        }
+    }
     return null;
 }
 
-/** `repo-write` for an edit of `path` (relative to `cwd`) inside `repoRoot`, or null. */
-export function pathDenial(path, cwd, repoRoot) {
-    if (!repoRoot || !path) return null;
-    const target = pathKey(isAbsolute(path) ? path : resolve(cwd, path));
+/**
+ * For an edit of `path` (relative to `cwd`): a git config file the protected repository reads is refused by
+ * either rule (T63g, R3 R1: the push gate's settings live there); with `repo-write`, so is anything inside
+ * `repoRoot`. Null when the edit may go.
+ */
+export function pathDenial(path, cwd, repoRoot, rules = ['repo-write']) {
+    if (!path) return null;
+    const full = isAbsolute(path) ? path : resolve(cwd, path);
+    if (rules.includes('push') || rules.includes('repo-write')) {
+        const protectedRepo = repoRoot ? { root: repoRoot, common: gitCommonDir(repoRoot) } : null;
+        if (gitConfigFile(full, protectedRepo)) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `${path} is a git config file, where the push gate's settings live` };
+    }
+    if (!repoRoot || !rules.includes('repo-write')) return null;
+    const target = pathKey(full);
     const root = pathKey(repoRoot);
     return target === root || target.startsWith(root + sep) ? { rule: 'repo-write', reason: `inside ${repoRoot}` } : null;
 }

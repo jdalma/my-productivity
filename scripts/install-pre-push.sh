@@ -44,6 +44,12 @@ refs=\$(cat)
 echo "\$refs" | while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "\$local_ref" ] || continue
     case \$local_sha in *[!0]*) ;; *) continue ;; esac          # a deletion pushes no commit
+    # neither check can read a range from a remote commit that is not here yet (R3 L1)
+    case \$remote_sha in *[!0]*)
+        git cat-file -e "\$remote_sha^{commit}" 2>/dev/null || {
+            echo "pre-push: \$remote_ref on \$remote is at \$remote_sha, which is not here yet. Run git fetch \$remote, then push again." >&2
+            exit 1; } ;;
+    esac
     case \$remote_sha in
         *[!0]*) sh "\$dir/public-scan.sh" --ref "\$local_ref" --ref "\$remote_ref" "\$remote_sha..\$local_sha" ;;
         *) sh "\$dir/public-scan.sh" --ref "\$local_ref" --ref "\$remote_ref" "\$local_sha" --not --remotes="\$remote" ;;

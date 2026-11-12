@@ -113,4 +113,11 @@ git push -q origin main > "$work/out" 2>&1; check "(f) a commit with an identifi
 contains "  by public-scan" "$work/out" "public-scan refused"
 absent "  before the gate ran" "$work/out" "push-gate:"
 
+# R3 L1: the remote moved on and its commit is not here yet: refused, told to fetch
+git clone -q "$work/remote.git" "$work/other" 2>/dev/null
+( cd "$work/other" && git config user.name t && git config user.email t@t && git checkout -q main \
+    && echo o > o.txt && git add o.txt && git commit -q -m "elsewhere" && git push -q --no-verify origin main )
+git push -q origin main > "$work/out" 2>&1; check "R3 L1: a remote commit not fetched yet: refused" 1 $?
+contains "  and told to fetch" "$work/out" "git fetch origin"
+
 [ "$failed" = 0 ] && echo "all passed" || { echo "some failed"; exit 1; }

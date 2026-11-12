@@ -129,6 +129,16 @@ git config my-team.baseline <commit>     # its ancestors count as reviewed: work
   - get it reviewed on the board;
   - for your own commits, move the baseline;
   - or skip both checks once with `git push --no-verify`.
+- A remote that moved on to a commit not here yet is refused before either check, with
+  `git fetch <remote>` to run first.
+- An approval belongs to the repository top level it was landed in. A commit approved in a worktree goes
+  out from that worktree; from the main clone it counts as uncovered.
+- From the pane of another team's worker, `board-pushable` refuses to read the board, so the gate refuses
+  the push. This is meant: push from your own team's pane, or from the user's shell.
+- A worker with a `push` or `repo-write` deny rule cannot turn the gate off. Its guard refuses any
+  `git config` write of a `my-team.*` key that reaches the repository: in its config, in the user's or the
+  system's. It also refuses direct edits of those config files, by a tool or a shell redirect. With
+  `repo-write`, it refuses every write to the repository's config.
 
 ## One cycle
 

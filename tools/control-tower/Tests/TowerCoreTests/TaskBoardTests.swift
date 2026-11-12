@@ -130,6 +130,23 @@ private func status(_ json: String) throws -> TaskBoardStatus {
     #expect(st.problem(now: t0.addingTimeInterval(46))?.contains("전") == true, "older than 30 s: says when it is from")
     st.apply(.failed(.code("forbidden", "")), at: t0.addingTimeInterval(50))
     #expect(st.problem(now: t0.addingTimeInterval(50)) != nil, "anything else shows at once")
+    #expect(st.shownFailure == .code("forbidden", ""))
+}
+
+@Test func aFirstReadThatIsBusyStillSaysReadingAndAgeUnderAMinuteIsInSeconds() throws {
+    // R6 L1: no data yet and one busy: nothing to show as a failure, so the board keeps saying it is reading
+    var st = TaskBoardState()
+    st.apply(.failed(.code("busy", "")), at: Date())
+    #expect(st.status == nil && st.shownFailure == nil)
+    st.apply(.failed(.code("busy", "")), at: Date())
+    #expect(st.shownFailure == .code("busy", ""))
+    // R6 L2: 45 s old is not "0분 전"
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    var ok = TaskBoardState()
+    ok.apply(.ok(try status(statusJSON(tasks: []))), at: t0)
+    let line = try #require(ok.problem(now: t0.addingTimeInterval(45)))
+    #expect(line.contains("45초 전") && !line.contains("0분 전"), "\(line)")
+    #expect(ok.problem(now: t0.addingTimeInterval(130))?.contains("2분 전") == true)
 }
 
 @Test func noTaskBoardTeamMeansMyTeamNeverRuns() throws {

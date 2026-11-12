@@ -72,7 +72,7 @@ func taskElapsed(_ t: TaskBoardTask, now: Date) -> String {
 /// Shown at most in the finished group until "펼치기" (pm decision 7).
 let finishedShown = 5
 
-private func copy(_ text: String) {
+func copy(_ text: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
 }
@@ -125,9 +125,12 @@ struct TaskBoardView: View {
     let team: String
     let state: TaskBoardState?
     let model: SidebarModel
+    /// The picked task on this board, and its family's last read.
+    let selectedTask: String?
+    let family: TaskFamilyState?
+    let pick: (String?) -> Void
     let select: (RowID) -> Void
     let reload: () -> Void
-    @State private var selectedTask: String?
     @State private var finishedOpen = false
     @State private var allAnnouncements = false
     @State private var allRecent = false
@@ -144,9 +147,22 @@ struct TaskBoardView: View {
                 }
                 if let status = state?.status {
                     GeometryReader { geo in
-                        ScrollView { list(status, now: context.date, narrow: geo.size.width < 520 * scale) }
+                        let line = selectedTask.flatMap { id in taskGroups(status).values.joined().first { $0.task.id == id } }
+                        // design §8 R3: beside the list when there is room for both, else in its place
+                        if let line, geo.size.width >= 760 * scale {
+                            HStack(spacing: 0) {
+                                ScrollView { list(status, now: context.date, narrow: geo.size.width * 0.5 < 520 * scale) }
+                                    .frame(width: geo.size.width * 0.5)
+                                Divider()
+                                detail(line, now: context.date, back: false)
+                            }
+                        } else if let line {
+                            detail(line, now: context.date, back: true)
+                        } else {
+                            ScrollView { list(status, now: context.date, narrow: geo.size.width < 520 * scale) }
+                        }
                     }
-                } else if let failure = state?.failure {
+                } else if let failure = state?.shownFailure {
                     failed(failure)
                 } else {
                     Text("읽는 중…").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -154,13 +170,18 @@ struct TaskBoardView: View {
             }
         }
         .onChange(of: state?.status) { _, s in
-            if let s { selectedTask = keepTaskSelection(selectedTask, in: s) }
+            if let s, selectedTask != nil, keepTaskSelection(selectedTask, in: s) == nil { pick(nil) }
         }
+    }
+
+    private func detail(_ line: TaskLine, now: Date, back: Bool) -> some View {
+        TaskDetailView(team: team, line: line, family: family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil,
+                       now: now, workerRow: workerRow, pick: pick, select: select, back: back ? { pick(nil) } : nil)
     }
 
     private var teamGroup: TeamGroup? { model.teams.first { $0.name == team } }
 
-    private func workerRow(_ name: String?) -> LiveRow? {
+    func workerRow(_ name: String?) -> LiveRow? {
         name.flatMap { n in teamGroup?.rows.first { $0.worker?.workerName == n } }
     }
 
@@ -311,7 +332,7 @@ struct TaskBoardView: View {
         .padding(.vertical, 3).padding(.horizontal, 6)
         .background(selectedTask == t.id ? Color.accentColor.opacity(0.15) : .clear, in: .rect(cornerRadius: 5))
         .contentShape(.rect)
-        .onTapGesture { selectedTask = t.id }
+        .onTapGesture { pick(t.id) }
         .help(taskTooltip(t))
         .contextMenu {
             Button("id 복사") { copy(t.id) }

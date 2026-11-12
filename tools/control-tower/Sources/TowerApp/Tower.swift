@@ -18,6 +18,12 @@ final class Tower {
     private(set) var launches = TeamLaunches()
     /// Task boards of the running teams that keep one (T70), read only while the board window is open.
     private(set) var taskBoards: [String: TaskBoardState] = [:]
+    /// The task picked on a task board (T70a); its family is read with the boards.
+    var selectedTask: TaskRef? {
+        didSet { if selectedTask != oldValue { reloadTaskBoards() } }
+    }
+    /// The picked task's family, last read; kept while a read fails.
+    private(set) var taskFamily: TaskFamilyState?
     /// The board window shows; BoardView sets it.
     var boardWindowOpen = false {
         didSet { if boardWindowOpen && !oldValue { reloadTaskBoards() } }
@@ -72,13 +78,23 @@ final class Tower {
     func reloadTaskBoards() {
         guard boardWindowOpen, !taskBoardReading, let board else { return }
         taskBoardReading = true
+        let picked = selectedTask
         Task {
+            // the picked task first: its detail fills right after the click (U6), the lists follow
+            if let picked {
+                let read = await Task.detached { readTaskFamily(team: picked.team, task: picked.task) }.value
+                if selectedTask == picked { taskFamily = (taskFamily?.ref == picked ? taskFamily : nil).applying(read, to: picked) }
+            } else {
+                taskFamily = nil
+            }
             let reads = await Task.detached { readTaskBoards(board) }.value
             let now = Date()
             var next = taskBoards.filter { reads[$0.key] != nil }
             for (team, read) in reads { next[team, default: TaskBoardState()].apply(read, at: now) }
             taskBoards = next
             taskBoardReading = false
+            // picked while this read ran: read its family now
+            if selectedTask != picked { reloadTaskBoards() }
         }
     }
 
@@ -199,4 +215,28 @@ extension Session {
     /// A list id unique across teams and loose. A handle alone repeats when two processes
     /// claim one pane; a pid alone repeats as 0 for workers with no recognized process.
     var rowID: String { "\(handle)#\(pid)" }
+}
+
+/// A task on one team's board.
+struct TaskRef: Hashable {
+    var team: String
+    var task: String
+}
+
+/// The picked task's family over reads: the last answer stays when a read fails.
+struct TaskFamilyState: Equatable {
+    var ref: TaskRef
+    var family: TaskFamily?
+    var failure: TaskBoardFailure?
+}
+
+extension Optional where Wrapped == TaskFamilyState {
+    func applying(_ read: Result<TaskFamily, TaskBoardFailure>, to ref: TaskRef) -> TaskFamilyState {
+        var s = self ?? TaskFamilyState(ref: ref)
+        switch read {
+        case .success(let f): s.family = f; s.failure = nil
+        case .failure(let e): s.failure = e
+        }
+        return s
+    }
 }

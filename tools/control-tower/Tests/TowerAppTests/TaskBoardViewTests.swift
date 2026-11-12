@@ -71,3 +71,31 @@ private func team(_ name: String, board: Bool) -> Team {
     #expect(actionReasonText(.openFindings(2)).contains("열린 지적 2건"))
     #expect(actionReasonText(.incompleteReview(missing: ["ticket_path"])).contains("ticket_path"))
 }
+
+// T70a: the task detail's styles and the family read state.
+
+@Test func verdictsAndFindingStatesHaveTheirOwnShapesAndTheSymbolsExist() {
+    let verdicts = ["approve", "changes", "hold"].map(VerdictStyle.of)
+    #expect(Set(verdicts.map(\.symbol)).count == 3 && verdicts.map(\.label) == ["승인", "수정 요청", "보류"])
+    let findings = [FindingStatus.open, .fixedPending("T1#1"), .fixedApproved("T1#2"), .backlog, .acceptedLimit, .rejected].map(FindingStyle.of)
+    #expect(Set(findings.map(\.label)).count == 6)
+    #expect(findings[2].label == "수정됨 (T1#2)" && findings[5].struck)
+    #expect(findings.filter { $0.color != .secondary }.map(\.label) == ["열림", "수정됨 (T1#2)"], "only open and approved fixes stand out")
+    for name in verdicts.map(\.symbol) + findings.map(\.symbol) + ["doc.on.doc"] {
+        #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name) on this macOS")
+    }
+}
+
+@Test func aFailedFamilyReadKeepsTheLastFamily() throws {
+    let json = """
+        {"root":\(task("T1", "doing")),"tasks":[\(task("T1", "doing"))],"landings":[],"verdicts":[],"findings":[],"notes":[]}
+        """
+    let d = JSONDecoder()
+    d.keyDecodingStrategy = .convertFromSnakeCase
+    let fam = try d.decode(TaskFamily.self, from: Data(json.utf8))
+    let ref = TaskRef(team: "t", task: "T1")
+    let first = Optional<TaskFamilyState>.none.applying(.success(fam), to: ref)
+    let failed = Optional(first).applying(.failure(.timeout), to: ref)
+    #expect(failed.family == fam && failed.failure == .timeout, "the detail stays on screen with the failure beside it")
+    #expect(Optional(failed).applying(.success(fam), to: ref).failure == nil)
+}

@@ -13,6 +13,7 @@ public struct TaskBoardTask: Decodable, Hashable, Sendable {
     public var assignee: String?
     public var reviewer: String?
     public var priority: Int
+    public var baseCommit: String?
     public var constraints: String?
     public var createdAt: String?
     public var createdBy: String?
@@ -28,10 +29,14 @@ public struct TaskBoardWorker: Decodable, Hashable, Sendable {
 
 public struct TaskBoardFinding: Decodable, Hashable, Sendable {
     public var id: String
+    public var verdictId: String?
     public var taskId: String
     public var severity: String
     public var summary: String
+    public var repro: String?
     public var state: String
+    /// The landing that fixed it.
+    public var fixedIn: String?
 }
 
 public struct TaskBoardEvent: Decodable, Hashable, Sendable {
@@ -76,7 +81,7 @@ public struct TaskBoardStatus: Decodable, Hashable, Sendable {
     public var announcements: [TaskBoardAnnouncement]
 }
 
-public enum TaskBoardFailure: Hashable, Sendable {
+public enum TaskBoardFailure: Error, Hashable, Sendable {
     /// my-team (or the node it runs on) could not be started.
     case launch(String)
     /// `{"ok":false,"code","message"}`.
@@ -103,32 +108,51 @@ func liveTaskBoardRunner(_ argv: [String], _ timeout: TimeInterval, _ unset: Set
     try runCommand(argv, timeout: timeout, unset: unset)
 }
 
-func parseTaskBoard(_ r: CommandResult) -> TaskBoardRead {
+private struct BoardAnswer: Decodable { var ok: Bool; var code: String?; var message: String? }
+
+/// A `board-status` answer of type T, or why there is none.
+func parseBoardAnswer<T: Decodable>(_ r: CommandResult, as: T.Type) -> Result<T, TaskBoardFailure> {
     // runCommand ends a child that outlived its timeout with SIGTERM
-    if r.status == SIGTERM && r.stdout.isEmpty { return .failed(.timeout) }
+    if r.status == SIGTERM && r.stdout.isEmpty { return .failure(.timeout) }
     // 126 and 127: the shell's "cannot run" and "not found", here `env node` with no node
-    if r.status == 126 || r.status == 127 { return .failed(.launch(r.stderr.trimmed.nonEmpty ?? "exit \(r.status)")) }
+    if r.status == 126 || r.status == 127 { return .failure(.launch(r.stderr.trimmed.nonEmpty ?? "exit \(r.status)")) }
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     let data = Data(r.stdout.utf8)
-    struct Answer: Decodable { var ok: Bool; var code: String?; var message: String? }
-    guard let answer = try? decoder.decode(Answer.self, from: data) else {
-        return .failed(.unreadable((r.stdout.trimmed.nonEmpty ?? r.stderr.trimmed).utf16Slice(0, 300)))
+    guard let answer = try? decoder.decode(BoardAnswer.self, from: data) else {
+        return .failure(.unreadable((r.stdout.trimmed.nonEmpty ?? r.stderr.trimmed).utf16Slice(0, 300)))
     }
-    guard answer.ok else { return .failed(.code(answer.code ?? "unknown", answer.message ?? "")) }
+    guard answer.ok else { return .failure(.code(answer.code ?? "unknown", answer.message ?? "")) }
     do {
-        return .ok(try decoder.decode(TaskBoardStatus.self, from: data))
+        return .success(try decoder.decode(T.self, from: data))
     } catch {
-        return .failed(.unreadable("\(error)".utf16Slice(0, 300)))
+        return .failure(.unreadable("\(error)".utf16Slice(0, 300)))
+    }
+}
+
+func parseTaskBoard(_ r: CommandResult) -> TaskBoardRead {
+    switch parseBoardAnswer(r, as: TaskBoardStatus.self) {
+    case .success(let s): .ok(s)
+    case .failure(let f): .failed(f)
+    }
+}
+
+/// `board-status` for `team`, with `task` for one task's family.
+func runBoardStatus<T: Decodable>(team: String, task: String? = nil, bin: String, run: TaskBoardRunner, as: T.Type) -> Result<T, TaskBoardFailure> {
+    var input = ["team_name": team]
+    input["task"] = task
+    let json = String(decoding: try! JSONSerialization.data(withJSONObject: input, options: .sortedKeys), as: UTF8.self)
+    do {
+        return parseBoardAnswer(try run([bin, "api", "board-status", "--input", json, "--json"], taskBoardTimeout, Set(taskBoardUnset)), as: T.self)
+    } catch {
+        return .failure(.launch("\(error)"))
     }
 }
 
 func readTaskBoard(team: String, bin: String, run: TaskBoardRunner) -> TaskBoardRead {
-    let input = String(decoding: try! JSONSerialization.data(withJSONObject: ["team_name": team]), as: UTF8.self)
-    do {
-        return parseTaskBoard(try run([bin, "api", "board-status", "--input", input, "--json"], taskBoardTimeout, Set(taskBoardUnset)))
-    } catch {
-        return .failed(.launch("\(error)"))
+    switch runBoardStatus(team: team, bin: bin, run: run, as: TaskBoardStatus.self) {
+    case .success(let s): .ok(s)
+    case .failure(let f): .failed(f)
     }
 }
 
@@ -260,17 +284,199 @@ public struct TaskBoardState: Hashable, Sendable {
         }
     }
 
-    /// Why the board on screen may be wrong, or nil: a failure (a single busy passes quietly), or data older than 30 s.
+    /// The failure to show: a single busy passes quietly, with or without data on screen (R6 L1).
+    public var shownFailure: TaskBoardFailure? { busyStreak == 1 ? nil : failure }
+
+    /// Why the board on screen may be wrong, or nil: a shown failure, or data older than 30 s.
     public func problem(now: Date, bin: String = myTeamBin) -> String? {
         var parts: [String] = []
         if let lastOK, now.timeIntervalSince(lastOK) > 30 {
-            let minutes = Int(now.timeIntervalSince(lastOK) / 60)
-            parts.append("아래는 \(minutes)분 전(\(lastOK.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))) 내용")
+            let age = Int(now.timeIntervalSince(lastOK))
+            // under a minute in seconds: "0분 전" read as now (R6 L2)
+            let ago = age < 60 ? "\(age)초" : "\(age / 60)분"
+            parts.append("아래는 \(ago) 전(\(lastOK.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))) 내용")
         }
-        if let failure, busyStreak != 1 {
+        if let failure = shownFailure {
             let p = taskBoardProblem(failure, bin: bin)
             parts.append("\(p.title) · \(p.detail)")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
+}
+
+// MARK: - One task's family (T70a; design §3.3)
+
+public struct TaskBoardLanding: Decodable, Hashable, Sendable {
+    public var id: String
+    public var taskId: String
+    public var commit: String
+    public var checkCmd: String?
+    public var checkResult: String?
+    public var focus: [String]
+    public var closes: [String]
+    public var reportPath: String?
+    public var reviewReportPath: String?
+    /// Installed: the board keeps a record there; null when not.
+    public var deployed: Bool
+    public var supersededBy: String?
+    /// Commits of the range the landing did not take in.
+    public var leftOut: [String]
+    public var createdAt: String?
+    public var createdBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, taskId, commit, checkCmd, checkResult, focus, closes, reportPath, reviewReportPath, deployed, supersededBy,
+             leftOut, createdAt, createdBy
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        taskId = try c.decode(String.self, forKey: .taskId)
+        commit = try c.decode(String.self, forKey: .commit)
+        checkCmd = try c.decodeIfPresent(String.self, forKey: .checkCmd)
+        checkResult = try c.decodeIfPresent(String.self, forKey: .checkResult)
+        focus = try c.decodeIfPresent([String].self, forKey: .focus) ?? []
+        closes = try c.decodeIfPresent([String].self, forKey: .closes) ?? []
+        reportPath = try c.decodeIfPresent(String.self, forKey: .reportPath)
+        reviewReportPath = try c.decodeIfPresent(String.self, forKey: .reviewReportPath)
+        deployed = (try? c.decodeNil(forKey: .deployed)) == false
+        supersededBy = try c.decodeIfPresent(String.self, forKey: .supersededBy)
+        leftOut = try c.decodeIfPresent([String].self, forKey: .leftOut) ?? []
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        createdBy = try c.decodeIfPresent(String.self, forKey: .createdBy)
+    }
+}
+
+public struct TaskBoardVerdict: Decodable, Hashable, Sendable {
+    public var id: String
+    public var landingId: String
+    /// approve, changes or hold.
+    public var verdict: String
+    public var reportPath: String?
+    public var rerunCmd: String?
+    public var rerunResult: String?
+    /// A string note; any other shape is left out.
+    public var sideNotes: String?
+    public var createdAt: String?
+    public var createdBy: String?
+
+    enum CodingKeys: String, CodingKey { case id, landingId, verdict, reportPath, rerunCmd, rerunResult, sideNotes, createdAt, createdBy }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        landingId = try c.decode(String.self, forKey: .landingId)
+        verdict = try c.decode(String.self, forKey: .verdict)
+        reportPath = try c.decodeIfPresent(String.self, forKey: .reportPath)
+        rerunCmd = try c.decodeIfPresent(String.self, forKey: .rerunCmd)
+        rerunResult = try c.decodeIfPresent(String.self, forKey: .rerunResult)
+        sideNotes = try? c.decodeIfPresent(String.self, forKey: .sideNotes)
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        createdBy = try c.decodeIfPresent(String.self, forKey: .createdBy)
+    }
+}
+
+public struct TaskBoardNote: Decodable, Hashable, Sendable {
+    public var seq: Int
+    public var taskId: String?
+    public var body: String
+    public var to: [String]
+    public var createdAt: String?
+    public var createdBy: String?
+}
+
+/// What `board-status` with `task` answers: the task's root and every task under it, and their records.
+public struct TaskFamily: Decodable, Hashable, Sendable {
+    public var root: TaskBoardTask
+    public var tasks: [TaskBoardTask]
+    public var landings: [TaskBoardLanding]
+    public var verdicts: [TaskBoardVerdict]
+    public var findings: [TaskBoardFinding]
+    public var notes: [TaskBoardNote]
+}
+
+func parseTaskFamily(_ r: CommandResult) -> Result<TaskFamily, TaskBoardFailure> { parseBoardAnswer(r, as: TaskFamily.self) }
+
+public func readTaskFamily(team: String, task: String) -> Result<TaskFamily, TaskBoardFailure> {
+    runBoardStatus(team: team, task: task, bin: myTeamBin, run: liveTaskBoardRunner, as: TaskFamily.self)
+}
+
+/// A finding as the detail shows it (design §4.3).
+public enum FindingStatus: Hashable, Sendable {
+    case open
+    /// Fixed in this landing, which no approve covers yet.
+    case fixedPending(String)
+    case fixedApproved(String)
+    case backlog
+    case acceptedLimit
+    case rejected
+    case other(String)
+}
+
+public func findingStatus(_ f: TaskBoardFinding, approved: Set<String>) -> FindingStatus {
+    switch f.state {
+    case "open": .open
+    case "fixed": f.fixedIn.map { approved.contains($0) ? .fixedApproved($0) : .fixedPending($0) } ?? .fixedPending("?")
+    case "backlog": .backlog
+    case "accepted-limit": .acceptedLimit
+    case "rejected": .rejected
+    default: .other(f.state)
+    }
+}
+
+public struct VerdictCard: Hashable, Sendable {
+    public var verdict: TaskBoardVerdict
+    public var findings: [TaskBoardFinding]
+}
+
+public struct LandingCard: Hashable, Sendable {
+    public var landing: TaskBoardLanding
+    public var verdicts: [VerdictCard]
+}
+
+public struct TaskDetail: Hashable, Sendable {
+    public var task: TaskBoardTask
+    /// Root first, then its children by priority and id.
+    public var family: [TaskBoardTask]
+    /// Every landing of the family in time order, its verdicts and their findings under it.
+    public var cards: [LandingCard]
+    /// The selected task's findings still open: `open`, or fixed in a landing no approve covers yet.
+    public var openFindings: [TaskBoardFinding]
+    public var notes: [TaskBoardNote]
+    public var approvedLandings: Set<String>
+}
+
+private func byTime<T>(_ at: @escaping (T) -> String?) -> (T, T) -> Bool { { (at($0) ?? "") < (at($1) ?? "") } }
+
+public func taskDetail(_ f: TaskFamily, task id: String) -> TaskDetail? {
+    guard let task = f.tasks.first(where: { $0.id == id }) else { return nil }
+    let approved = Set(f.verdicts.filter { $0.verdict == "approve" }.map(\.landingId))
+    let cards = f.landings.sorted(by: byTime(\.createdAt)).map { l in
+        LandingCard(landing: l, verdicts: f.verdicts.filter { $0.landingId == l.id }.sorted(by: byTime(\.createdAt)).map { v in
+            VerdictCard(verdict: v, findings: f.findings.filter { $0.verdictId == v.id })
+        })
+    }
+    let children = f.tasks.filter { $0.id != f.root.id }.sorted { ($0.priority, $0.id) < ($1.priority, $1.id) }
+    let open = f.findings.filter { $0.taskId == id }.filter {
+        switch findingStatus($0, approved: approved) {
+        case .open, .fixedPending: true
+        default: false
+        }
+    }
+    return TaskDetail(task: task, family: [f.root] + children, cards: cards, openFindings: open,
+                      notes: f.notes.sorted { $0.seq < $1.seq }, approvedLandings: approved)
+}
+
+/// Superseded cards the user opened stay open over a read while the family still has them.
+public func keepOpenLandings(_ open: Set<String>, in d: TaskDetail) -> Set<String> {
+    open.intersection(d.cards.map(\.landing.id))
+}
+
+/// The worker detail's `작업` line (design §1): unfinished tasks the worker is assignee or reviewer of, in the
+/// board's order (action, review, active; each by priority, then id).
+public func workerTasks(_ name: String, in s: TaskBoardStatus) -> [TaskBoardTask] {
+    let groups = taskGroups(s)
+    return [TaskGroup.action, .review, .active].flatMap { groups[$0] ?? [] }.map(\.task)
+        .filter { !["done", "cancelled"].contains($0.state) && ($0.assignee == name || $0.reviewer == name) }
 }

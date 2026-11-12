@@ -80,6 +80,8 @@ struct BoardView: View {
                 Button("내 차례 목록") {
                     // an open candidate list first, then the file view: Esc returns to the diff
                     if changes.candidates != nil { changes.candidates = nil }
+                    // design §8 R6: task detail, then the task board, then the queue
+                    else if case .taskBoard(let team) = selection, tower.selectedTask?.team == team { tower.selectedTask = nil }
                     else if selection != nil, changes.history.current != nil { changes.history.toDiff() } else { selection = nil }
                 }
                 .keyboardShortcut(.escape, modifiers: [])
@@ -130,6 +132,15 @@ struct BoardView: View {
         } detail: {
             DetailView(board: board, model: model, history: tower.history, selection: selection, home: home, changes: changes,
                        taskBoards: tower.taskBoards, reloadTaskBoards: { tower.reloadTaskBoards() },
+                       selectedTask: tower.selectedTask, taskFamily: tower.taskFamily,
+                       openTask: { ref in
+                           query = ""
+                           if let ref {
+                               reveal(.taskBoard(ref.team))
+                               selection = .taskBoard(ref.team)
+                           }
+                           tower.selectedTask = ref
+                       },
                        select: { id in
                            query = ""  // a search could hide the row
                            reveal(id)
@@ -508,6 +519,10 @@ private struct DetailView: View {
     let changes: ChangesState
     let taskBoards: [String: TaskBoardState]
     let reloadTaskBoards: () -> Void
+    let selectedTask: TaskRef?
+    let taskFamily: TaskFamilyState?
+    /// Picks a task (nil: none), opening its team's board.
+    let openTask: (TaskRef?) -> Void
     let select: (RowID) -> Void
     let deselect: () -> Void
     /// The sidebar's double click on a live row: `Tower.focus`.
@@ -532,7 +547,12 @@ private struct DetailView: View {
                 case .history(let path):
                     if let h = (model.history + history).first(where: { $0.transcriptPath == path }) { past(h) } else { empty }
                 case .taskBoard(let team):
-                    TaskBoardView(team: team, state: taskBoards[team], model: model, select: select, reload: reloadTaskBoards)
+                    TaskBoardView(team: team, state: taskBoards[team], model: model,
+                                  selectedTask: selectedTask?.team == team ? selectedTask?.task : nil, family: taskFamily,
+                                  pick: { id in openTask(id.map { TaskRef(team: team, task: $0) }) },
+                                  select: select, reload: reloadTaskBoards)
+                        // one board's folds and "모두 보기" are not another's (R6 L3)
+                        .id(team)
                 case nil:
                     QueueView(model: model, select: select, focus: focus)
                 }
@@ -581,7 +601,8 @@ private struct DetailView: View {
             ],
             workspace: s.cwd,
             conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)],
-            terminal: s.tmux)
+            terminal: s.tmux,
+            tasks: workerTaskLine(row, team: team))
     }
 
     private func past(_ h: HistorySession) -> some View {
@@ -596,18 +617,26 @@ private struct DetailView: View {
             ],
             workspace: h.workspace,
             conversation: [("최근 프롬프트", h.lastPrompt ?? "")],
-            terminal: nil)
+            terminal: nil,
+            tasks: nil)
     }
 
     /// `terminal`: the tmux pane a live session runs in, shown in place of the recent conversation.
+    /// The worker's unfinished tasks on its team's board (design §1, pm decision 6); nil without a board or a read.
+    private func workerTaskLine(_ row: LiveRow, team: Team?) -> WorkerTaskLine? {
+        guard let team, team.hasTaskBoard, let name = row.worker?.workerName,
+              let status = taskBoards[team.name]?.status else { return nil }
+        return WorkerTaskLine(team: team.name, tasks: workerTasks(name, in: status))
+    }
+
     private func detailBody(title: String, @ViewBuilder badges: () -> some View,
                             facts: [(String, String)], workspace: String, conversation: [(String, String)],
-                            terminal: TmuxRef?) -> some View {
+                            terminal: TmuxRef?, tasks: WorkerTaskLine?) -> some View {
         let badges = badges()
         return HStack(spacing: 0) {
             ScrollViewReader { proxy in
                 scrollingBody(title: title, badges: badges, facts: facts, workspace: workspace, conversation: conversation,
-                              terminal: terminal)
+                              terminal: terminal, tasks: tasks)
                     .accessibilityHidden(changes.history.current != nil)
                     .overlay {
                         // over the diff, which keeps its scroll position underneath
@@ -663,7 +692,7 @@ private struct DetailView: View {
     }
 
     private func scrollingBody(title: String, badges: some View, facts: [(String, String)], workspace: String,
-                               conversation: [(String, String)], terminal: TmuxRef?) -> some View {
+                               conversation: [(String, String)], terminal: TmuxRef?, tasks: WorkerTaskLine?) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
@@ -676,6 +705,12 @@ private struct DetailView: View {
                             Text(k).foregroundStyle(.secondary)
                             Text(v).textSelection(.enabled)
                                 .scaledFont(.body, design: monoFacts.contains(k) ? .monospaced : .default)
+                        }
+                    }
+                    if let tasks {
+                        GridRow {
+                            Text("작업").foregroundStyle(.secondary)
+                            WorkerTasksView(line: tasks) { openTask(TaskRef(team: tasks.team, task: $0)) }
                         }
                     }
                 }

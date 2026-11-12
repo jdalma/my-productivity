@@ -352,6 +352,19 @@ and databases:
 - Put in these documents how to reach things (profile names, endpoints, lookup steps, protection policy).
   Never put in keys, tokens or passwords.
 - Knowing how is not being allowed to: limit what workers may change with `deny` rules or their instructions.
+- Keep these documents in one folder, `~/.my-team/knowledge/` (outside any repository). Each starts with
+  a front matter line `about: <one line>`, and needs no other index:
+
+  ```markdown
+  ---
+  about: database lookups on db.example.com; read before any database query
+  ---
+  ```
+
+  The `my-team-config` skill lists the folder (`plugins.py knowledge`: path and `about`, no body) and
+  suggests documents per worker, as it does plugins. A document two or more workers need goes in the team's
+  `knowledge`. A document only one worker needs goes in that worker's `extra_prompt`, under
+  `## Worker Knowledge`, one line per document. The CLI has no per-worker knowledge field.
 
 ## Parallel work on one repo (`--worktree`)
 

@@ -175,6 +175,10 @@ claude 워커별 plugin입니다. 'ok' 또는 "2번 pm-execution 빼줘", "2번�
 ## plugin 사용 규칙
 {Step 4에서 주입한 plugin 중 CATALOG.md §2 조각이 있는 것만, 조각 그대로}
 
+## Worker Knowledge
+Documents this worker may need. Before work a line below describes, read that document yourself instead of asking a peer:
+{Step 6a에서 이 워커용으로 고른 문서마다 한 줄: - `<절대경로>`: <about>}
+
 ## 외부 시스템 안전 규칙
 - 클라우드 CLI: 읽기 호출(describe/list/get)만. 생성·변경·삭제는 금지, 필요하면 orchestrator에게 제안만. 시크릿 값 조회 금지(키 이름만).
 - 운영 DB·결제 API·외부 서비스 쓰기 호출 금지.
@@ -189,6 +193,7 @@ claude 워커별 plugin입니다. 'ok' 또는 "2번 pm-execution 빼줘", "2번�
 ```
 
 - **외부 시스템 안전 규칙**은 대상이 클라우드 CLI·운영 DB·결제·외부 서비스에 닿을 때만 넣는다. 계정·프로파일을 사용자가 정하지 않았으면 Step 6 질문 때 함께 묻는다.
+- **Worker Knowledge**는 Step 6a의 1~3에서 그 워커용으로 고른 문서다. 6a의 1~3을 이 조립보다 먼저 한다. 팀 전체용 문서는 `## Team Knowledge`로 따로 들어가므로 여기에 다시 적지 않는다.
 - **orchestrator**의 `## 협업` 끝에 다음 줄을 덧붙인다: `워커를 추가할 때는 my-team-config 스킬(추가 모드)로 plugin·extra_prompt·권한 플래그를 조합한다.`
 
 ## Step 6 — launch_args (권한 플래그 + plugin)
@@ -210,15 +215,39 @@ N이면 워커가 첫 permission prompt에서 멈추고, 그 pane에서 직접 �
 "launch_args": ["--dangerously-skip-permissions", "--plugin-dir", "/Users/me/IdeaProjects/my-claude-plugin/stack/pstack-claude/plugins/pstack"]
 ```
 
-## Step 6a — 팀 공통 지식 (`knowledge`, 생성·수정 모드)
+## Step 6a — 지식 문서 (`knowledge`·`## Worker Knowledge`, 생성·수정 모드)
 
-사용자에게 묻는다: "팀의 모든 워커가 알아야 할 공통 문서가 있습니까? (예: 클라우드·DB 조회 절차, 프로필별 용도, 네이밍 규칙, 보호 정책)" 있으면 문서마다 절대경로(또는 `~/`)와 한 줄 `about`(무엇에 관한 문서이고 언제 읽는지)을 받는다.
+지식 문서 모음은 `~/.my-team/knowledge/*.md`이다(레포 밖). 각 문서는 맨 위 frontmatter에 `about: <한 줄>`(무엇에 관한 문서이고 언제 읽는지)을 둔다. 목록 파일은 따로 없다.
 
-```json
-"knowledge": [{"path": "~/docs/example.com/cloud-guide.md", "about": "클라우드 조회 절차와 보호 정책. 클라우드 CLI를 쓰기 전에 읽는다"}]
+1. **목록 조회** — `python3 -I <skill-dir>/scripts/plugins.py knowledge`
+   - 줄마다 `절대경로<TAB>about`. 본문은 읽지 않는다(이 단계에서 문서 본문을 열지 않는다).
+   - `(설명 없음)`인 문서는 목록에 보여 주기만 하고 추천하지 않는다.
+   - 출력이 없으면(폴더 없음·빈 폴더) 2~3을 건너뛰고 4의 질문만 한다.
+2. **워커별 선택** — Step 4와 같은 기준이다. 워커의 합류 이유·description과 문서 `about`의 대응을 한 줄로 설명할 수 있는 것만 고른다. 0개도 정상이다.
+   - 두 명 이상이 고른 문서는 팀 전체용(config의 `knowledge`)으로 올린다.
+   - 한 명만 고른 문서는 그 워커용이다. Step 5의 `## Worker Knowledge`에 넣는다.
+3. **표로 확인** — 사용자가 일괄 OK 하거나 빼거나 더한다. orchestrator 워커가 사용자 없이 실행하면 확인 대신 선택 근거를 보고에 남긴다.
+
+```
+지식 문서입니다. 'ok' 또는 "db-guide 빼줘", "2번에 cloud-guide 추가"처럼 알려주세요.
+
+  대상        문서                                        추천 이유
+  ──────────  ──────────────────────────────────────────  ─────────────────────────
+  팀 전체     /Users/me/.my-team/knowledge/cloud-guide.md  alpha·beta 모두 클라우드 조회
+  2 alpha     /Users/me/.my-team/knowledge/db-guide.md     캐시 키 설계에 DB 조회 필요
+  (설명 없음) /Users/me/.my-team/knowledge/old-notes.md    추천 안 함
 ```
 
-- my-team은 문서 본문을 복사하지 않고 경로와 about만 모든 워커의 AGENTS.md(`## Team Knowledge`)에 넣는다. 나중에 add-worker로 들어온 워커도 같은 절을 받는다.
+4. **모음 밖 문서** — 사용자에게 묻는다: "이 밖에 팀의 모든 워커가 알아야 할 공통 문서가 있습니까? (예: 클라우드·DB 조회 절차, 프로필별 용도, 네이밍 규칙, 보호 정책)" 있으면 문서마다 절대경로(또는 `~/`)와 한 줄 `about`을 받는다.
+
+경로는 모음 문서든 직접 받은 문서든 config에 **펼친 절대경로**로 쓴다.
+
+```json
+"knowledge": [{"path": "/Users/me/.my-team/knowledge/cloud-guide.md", "about": "클라우드 조회 절차와 보호 정책. 클라우드 CLI를 쓰기 전에 읽는다"}]
+```
+
+- my-team은 문서 본문을 복사하지 않고 경로와 about만 모든 워커의 AGENTS.md(`## Team Knowledge`)에 넣는다. 나중에 add-worker로 들어온 워커도 같은 절을 받는다. 워커용 문서도 extra_prompt에 경로와 about만 넣는다.
+- my-team CLI에는 워커별 knowledge 필드가 없다. 워커 한 명용은 extra_prompt의 `## Worker Knowledge` 절로만 넣는다.
 - 문서에는 접속 **방법**(프로필 이름, 엔드포인트, 조회 절차, 보호 정책)만 둔다. 키·토큰·비밀번호는 넣지 않는다. 변경 권한은 지식과 별개라서 `deny` 규칙이나 extra_prompt의 외부 시스템 안전 규칙으로 따로 제한한다.
 - 공통 지식으로 줄지 전용 워커를 둘지: 대부분의 조회는 공통 지식으로 충분하다. 각 워커가 문서를 읽고 직접 조회하므로 묻고 기다리는 일이 없어진다. 전용 워커는 둘 중 하나일 때만 둔다. 하나는 조회 결과가 커서 따로 조사·정리해야 하는 경우이고, 다른 하나는 한 번에 한 명만 해야 하는 변경(배포, 데이터 변경)이다.
 
@@ -242,7 +271,9 @@ my-team start --config <저장 경로>
 ## 추가 모드 — 실행 중인 팀에 워커 1명
 
 1. 입력: `team`, `name`, `agent_type`, 합류 이유, `role`(팀이 role을 쓰면), `--cwd`(항상 필수), 필요하면 `--worktree <branch>`. worktree 모드에서는 `--cwd`에 대상 git repo 경로를 주면 `<repo>/.worktrees/<name>`에서 뜬다. 같은 레포에서 코드를 수정할 워커는 `--worktree`로 띄운다 (add-worker는 다른 워커가 쓰는 cwd를 거부한다).
-2. Step 3(description), Step 4(plugin), Step 5(extra_prompt)를 이 워커 1명에 대해 수행한다. 팀의 `knowledge`는 manifest에서 자동으로 들어가므로 extra_prompt에 다시 적지 않는다. team_goal은 현재 팀 config 또는 호출자 자신의 Role Context에서 옮긴다.
+2. Step 3(description), Step 4(plugin), Step 6a의 1~3(지식 문서), Step 5(extra_prompt)를 이 워커 1명에 대해 수행한다. team_goal은 현재 팀 config 또는 호출자 자신의 Role Context에서 옮긴다.
+   - 팀의 `knowledge`는 manifest에서 자동으로 들어간다. `$MY_TEAM_STATE_ROOT/manifest.json`(사용자가 호출하면 `~/.my-team/sessions/<team>/manifest.json`, 팀 config에 `state_root`가 있으면 그 아래)의 `knowledge` 경로에 이미 있는 문서는 추천에서 뺀다.
+   - 고른 문서는 이 워커의 `## Worker Knowledge`에 넣는다.
 3. 권한 플래그:
    - orchestrator 워커가 호출할 때: `$MY_TEAM_STATE_ROOT/manifest.json`에서 자기(`$MY_TEAM_WORKER`의 `/` 뒤 이름) 항목의 `launch_args`를 본다. `--dangerously-*` 플래그가 있으면 **새 워커의 agent_type에 맞는 플래그**(Step 6 목록: claude `--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`, gemini/cursor 없음)를 넘긴다. 호출자 플래그를 그대로 복사하면 agent_type이 다를 때 새 CLI가 모르는 플래그로 기동에 실패한다. **`--launch-arg`를 하나라도 주면 호출자 인자 상속이 꺼지므로**, plugin만 넘기고 권한 플래그를 빠뜨리면 새 워커가 첫 permission prompt에서 멈춘다.
    - 사용자가 호출할 때: Step 6의 질문을 한다.
@@ -256,7 +287,8 @@ my-team add-worker --team <team> --name <name> --agent-type <type> --cwd <절대
   --launch-arg <권한 플래그> --launch-arg --plugin-dir --launch-arg <plugin 절대경로> ...
 ```
 
-6. 저장된 팀 config(`~/teams/<team>.json`)에 이 워커를 반영할지 묻는다. 반영하면 다음 `start`에도 같은 워커가 뜬다.
+6. 저장된 팀 config(`~/teams/<team>.json`)에 이 워커를 반영할지 묻는다. 반영하면 다음 `start`에도 같은 워커가 뜬다. 이 워커의 `## Worker Knowledge` 문서도 extra_prompt와 함께 반영된다는 것을 질문에 적는다.
+7. 이미 떠 있는 워커에게 문서를 알려야 하면 `my-team api send-message`로 경로와 about 한 줄을 보낸다. 지침(AGENTS.md·extra_prompt)은 워커를 다시 띄워야 바뀐다.
 
 ## 중간 분기 — 워커 추가/제거 (생성 모드 도중)
 

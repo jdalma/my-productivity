@@ -12,6 +12,9 @@
         ok <절대경로>\t<fetched | updated <old>→<new> | up-to-date | no-upstream | update-failed: <이유>>
         fail <id>\t<이유>
       하나라도 fail이면 exit 1. update-failed는 현재 버전 그대로 ok다.
+  plugins.py knowledge
+      지식 문서 모음(~/.my-team/knowledge/*.md)의 절대경로와 frontmatter about. TSV: 절대경로 / about.
+      about이 없으면 "(설명 없음)". 본문은 읽지 않는다. 폴더가 없거나 비었으면 출력 없음(exit 0).
 
 받기 규칙: local 출처는 stack/<name>에 복사, url·git-subdir 출처는 stack/<owner>-<repo>에 기본 branch를 clone(.git 유지).
 plugin.json이 없으면 catalog 항목으로 만들어 둔다(stack 탐색·Claude 로드 모두 이 파일을 본다).
@@ -19,7 +22,8 @@ plugin.json이 없으면 catalog 항목으로 만들어 둔다(stack 탐색·Cla
 이미 받은 repo에서 없는 하위 경로를 요청하면 먼저 pull한다. 갱신 뒤 경로가 사라졌으면 fail.
 마켓플레이스 local 출처 복사본은 마켓플레이스 쪽 version이 다르면 다시 복사. 그 외 복사본은 no-upstream.
 
-환경변수(테스트용): MY_TEAM_STACK_DIR, MY_TEAM_MARKETPLACES_DIR, MY_TEAM_CLAUDE_SETTINGS, MY_TEAM_PLUGIN_STATS
+환경변수(테스트용): MY_TEAM_STACK_DIR, MY_TEAM_MARKETPLACES_DIR, MY_TEAM_CLAUDE_SETTINGS, MY_TEAM_PLUGIN_STATS,
+MY_TEAM_KNOWLEDGE_DIR
 """
 import json
 import os
@@ -38,6 +42,8 @@ SETTINGS = Path(os.environ.get("MY_TEAM_CLAUDE_SETTINGS", HOME / ".claude" / "se
 STATS = Path(os.environ.get("MY_TEAM_PLUGIN_STATS", HOME / ".claude" / "plugins" / "plugin-catalog-cache.json"))
 # strict:false 항목은 manifest가 catalog 쪽에 있다. 받을 때 이 키들을 빼고 plugin.json으로 쓴다.
 CATALOG_ONLY_KEYS = {"source", "category", "strict", "homepage", "tags", "keywords"}
+# 지식 문서 모음 (T69). 레포 밖이다: 문서에 접속 방법이 들어간다.
+KNOWLEDGE = Path(os.environ.get("MY_TEAM_KNOWLEDGE_DIR", HOME / ".my-team" / "knowledge"))
 
 
 def read_json(path, default=None):
@@ -345,9 +351,34 @@ def cmd_ensure(targets):
     return 1 if failed else 0
 
 
+# ── knowledge (T69) ──────────────────────────────────────────────────────
+
+def frontmatter_about(path):
+    """맨 위 frontmatter(--- … ---)의 about 한 줄. 닫는 줄에서 멈춰 본문은 읽지 않는다."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        if f.readline().strip() != "---":
+            return None
+        for line in f:
+            if line.strip() == "---":
+                return None
+            m = re.match(r"about:\s*(.*)$", line.strip())
+            if m:
+                return one_line(m.group(1).strip("\"'"), 200) or None
+    return None
+
+
+def cmd_knowledge():
+    # 폴더가 없으면 glob이 빈 목록이다
+    for p in sorted(KNOWLEDGE.resolve().glob("*.md")):
+        print(f"{p}\t{frontmatter_about(p) or '(설명 없음)'}")
+    return 0
+
+
 def main(argv):
     if argv[:1] == ["catalog"]:
         return cmd_catalog()
+    if argv[:1] == ["knowledge"]:
+        return cmd_knowledge()
     if argv[:1] == ["ensure"] and len(argv) > 1:
         return cmd_ensure(argv[1:])
     print(__doc__, file=sys.stderr)

@@ -184,4 +184,26 @@ with tempfile.TemporaryDirectory() as d:
     # git은 터미널 prompt를 띄우지 않는다 (에이전트 호출이 멈추지 않게)
     assert plugins.GIT_ENV["GIT_TERMINAL_PROMPT"] == "0" and "BatchMode=yes" in plugins.GIT_ENV["GIT_SSH_COMMAND"]
 
+    # knowledge (T69): 문서 모음의 경로와 frontmatter about만. 본문은 읽지 않는다
+    def knowledge(folder):
+        env = dict(os.environ, MY_TEAM_KNOWLEDGE_DIR=str(folder))
+        r = subprocess.run([sys.executable, "-I", plugins.__file__, "knowledge"], capture_output=True, text=True, env=env)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    kdir = d / "knowledge"
+    write(kdir / "db.md", "---\nabout: DB 조회 절차. db.example.com에 붙기 전에 읽는다\n---\n# DB\n")
+    write(kdir / "cloud.md", "---\ntitle: x\nabout: \"클라우드 프로필과 보호 정책\"\n---\nbody\n")
+    write(kdir / "plain.md", "# no frontmatter\nabout: 본문의 about은 설명이 아니다\n")
+    write(kdir / "late.md", "---\ntitle: y\n---\nabout: frontmatter 밖\n")
+    write(kdir / "notes.txt", "---\nabout: md가 아니다\n---\n")
+    k = kdir.resolve()
+    assert knowledge(kdir) == (f"{k / 'cloud.md'}\t클라우드 프로필과 보호 정책\n"
+                               f"{k / 'db.md'}\tDB 조회 절차. db.example.com에 붙기 전에 읽는다\n"
+                               f"{k / 'late.md'}\t(설명 없음)\n"
+                               f"{k / 'plain.md'}\t(설명 없음)\n"), knowledge(kdir)
+    assert knowledge(d / "no-such-folder") == ""
+    (d / "empty").mkdir()
+    assert knowledge(d / "empty") == ""
+
 print("ok")

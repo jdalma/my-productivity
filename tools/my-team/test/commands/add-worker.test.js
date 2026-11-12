@@ -247,6 +247,20 @@ test('success: writes new worker AGENTS.md containing the new roster', async () 
     } finally { cleanup(ctx); }
 });
 
+test('(T68 c) a new worker of a team with knowledge gets the Team Knowledge section from the manifest', async () => {
+    const ctx = setupTeam({ workers: ['alice'] });
+    try {
+        const m = readManifest(ctx);
+        m.knowledge = [{ path: '/docs/example.com/guide.md', about: 'lookup steps; read before a cloud CLI' }];
+        writeFileSync(join(ctx.stateRoot, 'manifest.json'), JSON.stringify(m), 'utf-8');
+        await runAddWorker(validOpts(), okDeps());
+        const body = readFileSync(join(ctx.stateRoot, 'workers', 'carol', 'AGENTS.md'), 'utf-8');
+        assert.match(body, /## Team Knowledge/);
+        assert.ok(body.includes('/docs/example.com/guide.md') && body.includes('lookup steps; read before a cloud CLI'));
+        assert.deepEqual(readManifest(ctx).knowledge, m.knowledge, 'the manifest keeps its knowledge');
+    } finally { cleanup(ctx); }
+});
+
 test('a board team\'s new worker gets the board section; a team without a board does not (T63g)', async () => {
     const ctx = setupTeam({ workers: ['alice'] });
     try {

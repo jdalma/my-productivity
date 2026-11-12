@@ -133,6 +133,10 @@ my-team은 기본이 **peer-to-peer 모델**이다 (task lifecycle 없음). 채�
 - Node 22.13 이상이 필요하다. 그보다 낮으면 작업판 명령만 `board-unavailable`로 실패한다.
 - 명령표, 오류 코드, 상태 전이, 한 주기 예시는 `tools/my-team/docs/board.md`에 있다.
 
+## 팀 공통 지식 (`knowledge`)
+
+팀 config 최상위의 `knowledge`(문서마다 `path`와 한 줄 `about`)는 모든 워커의 AGENTS.md에 `## Team Knowledge` 절로 들어간다. start, start --continue, add-worker 모두 같다. 본문은 복사하지 않고 경로와 about만 넣는다. 없는 파일이면 start가 경고하고 계속한다. 문서에는 접속 방법만 두고 키·토큰·비밀번호는 넣지 않는다. 변경 권한은 `deny` 규칙이나 워커 지침으로 따로 제한한다. 설정은 my-team-config 스킬(Step 6a)로 한다.
+
 ## Worker succession (컨텍스트가 찼을 때 워커 교대)
 
 `/clear` 대신 **후임 워커를 옆에 띄우고 전임과 대화하게 한다.** handoff 문서는 압축본이라 버려진 맥락이 있다 — 후임이 문서를 읽고 궁금한 것을 전임에게 직접 묻는 것이 이 절차의 핵심이다.

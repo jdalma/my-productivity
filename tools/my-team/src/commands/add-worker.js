@@ -241,6 +241,7 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
         cwd,
         teamRoster,
         board: manifest.board ?? null,
+        knowledge: manifest.knowledge ?? null,
     });
     const overlayPath = join(stateRoot, 'workers', opts.name, 'AGENTS.md');
     await writeFile(overlayPath, overlay, 'utf-8');

@@ -68,6 +68,30 @@ function isAbsoluteOrTilde(p) {
     return typeof p === 'string' && (p === '~' || p.startsWith('~/') || p.startsWith('~\\') || isAbsolute(p));
 }
 
+/**
+ * knowledge (optional, T68): the team's shared documents, [{path, about}], listed in every worker's AGENTS.md
+ * by path and one line about each; the documents are not copied. A path is absolute or under ~.
+ */
+function knowledgeOf(knowledge) {
+    if (knowledge === undefined) return null;
+    const bad = (why) => { throw new Error(`knowledge ${why}. Expected [{"path": "/abs/doc.md", "about": "one line"}]. Got: ${JSON.stringify(knowledge)}`); };
+    if (!Array.isArray(knowledge)) bad('must be a list');
+    const items = knowledge.map((k, i) => {
+        if (!k || typeof k !== 'object' || Array.isArray(k)) bad(`[${i}] must be an object`);
+        const extra = Object.keys(k).filter((key) => key !== 'path' && key !== 'about');
+        if (extra.length) bad(`[${i}] takes only path and about, not ${extra.join(', ')}`);
+        if (!isAbsoluteOrTilde(k.path)) bad(`[${i}].path must be absolute or start with ~/`);
+        if (typeof k.about !== 'string' || !k.about.trim() || /[\r\n]/.test(k.about)) bad(`[${i}].about must be one non-empty line`);
+        return { path: expandTilde(k.path), about: k.about.trim() };
+    });
+    return items.length ? items : null;
+}
+
+/** The knowledge documents that are not there: start warns about them and goes on. */
+export function missingKnowledge(knowledge) {
+    return (knowledge ?? []).map((k) => k.path).filter((p) => !existsSync(p));
+}
+
 const BOARD_STORES = ['sqlite', 'memory'];
 
 /**
@@ -95,7 +119,7 @@ export function validateConfig(cfg, { configPath } = {}) {
         throw new Error('Config must be a JSON object');
     }
 
-    const { team_name, state_root, new_window, detached, board, workers } = cfg;
+    const { team_name, state_root, new_window, detached, board, knowledge, workers } = cfg;
 
     if (typeof team_name !== 'string' || !team_name) {
         throw new Error('team_name is required (string)');
@@ -143,6 +167,7 @@ export function validateConfig(cfg, { configPath } = {}) {
         team_name,
         state_root: resolvedStateRoot,
         board: boardOf(board),
+        knowledge: knowledgeOf(knowledge),
         new_window: Boolean(new_window),
         detached: Boolean(detached),
         workers: normalizedWorkers,

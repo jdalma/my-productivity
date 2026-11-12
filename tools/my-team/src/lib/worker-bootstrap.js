@@ -166,6 +166,18 @@ function boardGuidance(teamName, workerName, workerRole) {
     return lines.join('\n');
 }
 
+/**
+ * The team's shared documents (T68; config `knowledge`): listed by path and what each is about, never copied
+ * in, so a document that changes is never stale here and the instructions stay short.
+ */
+function knowledgeGuidance(knowledge) {
+    return [
+        '## Team Knowledge',
+        'Documents every worker of this team may need. Before work a line below describes, read that document yourself instead of asking a peer:',
+        ...knowledge.map((k) => `- \`${k.path}\`: ${k.about}`),
+    ].join('\n');
+}
+
 export function generateWorkerOverlay(params) {
     const { teamName, workerName, agentType, bootstrapInstructions } = params;
     const workerRole = params.workerRole ?? null;
@@ -240,6 +252,8 @@ every \`mailbox-list\` call — trust that over this list when they differ.
 ${workerRole ? `${roleGuidance(workerRole, orchestratorNames)}
 
 ` : ''}${params.board ? `${boardGuidance(teamName, workerName, workerRole)}
+
+` : ''}${params.knowledge?.length ? `${knowledgeGuidance(params.knowledge)}
 
 ` : ''}## Message Protocol
 Talk to the user: surface output in this pane via your normal stdout. Permission

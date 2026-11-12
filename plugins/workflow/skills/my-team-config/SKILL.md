@@ -210,9 +210,21 @@ N이면 워커가 첫 permission prompt에서 멈추고, 그 pane에서 직접 �
 "launch_args": ["--dangerously-skip-permissions", "--plugin-dir", "/Users/me/IdeaProjects/my-claude-plugin/stack/pstack-claude/plugins/pstack"]
 ```
 
+## Step 6a — 팀 공통 지식 (`knowledge`, 생성·수정 모드)
+
+사용자에게 묻는다: "팀의 모든 워커가 알아야 할 공통 문서가 있습니까? (예: 클라우드·DB 조회 절차, 프로필별 용도, 네이밍 규칙, 보호 정책)" 있으면 문서마다 절대경로(또는 `~/`)와 한 줄 `about`(무엇에 관한 문서이고 언제 읽는지)을 받는다.
+
+```json
+"knowledge": [{"path": "~/docs/example.com/cloud-guide.md", "about": "클라우드 조회 절차와 보호 정책. 클라우드 CLI를 쓰기 전에 읽는다"}]
+```
+
+- my-team은 문서 본문을 복사하지 않고 경로와 about만 모든 워커의 AGENTS.md(`## Team Knowledge`)에 넣는다. 나중에 add-worker로 들어온 워커도 같은 절을 받는다.
+- 문서에는 접속 **방법**(프로필 이름, 엔드포인트, 조회 절차, 보호 정책)만 둔다. 키·토큰·비밀번호는 넣지 않는다. 변경 권한은 지식과 별개라서 `deny` 규칙이나 extra_prompt의 외부 시스템 안전 규칙으로 따로 제한한다.
+- 공통 지식으로 줄지 전용 워커를 둘지: 대부분의 조회는 공통 지식으로 충분하다. 각 워커가 문서를 읽고 직접 조회하므로 묻고 기다리는 일이 없어진다. 전용 워커는 둘 중 하나일 때만 둔다. 하나는 조회 결과가 커서 따로 조사·정리해야 하는 경우이고, 다른 하나는 한 번에 한 명만 해야 하는 변경(배포, 데이터 변경)이다.
+
 ## Step 7 — 최종 JSON preview + 저장 + dry-run (생성·수정 모드)
 
-최종 JSON을 코드블록으로 보여준다. 바로 위에 `최종 config — <team_name> (워커 N명)` 헤더를 붙이고, "저장할까요? (y/N)"로 1회 확인한다. 키 순서는 `team_name`, `workers[].{name, cwd, agent_type, role, launch_args, description, extra_prompt}` 고정 (`role`은 팀이 role을 쓸 때만).
+최종 JSON을 코드블록으로 보여준다. 바로 위에 `최종 config — <team_name> (워커 N명)` 헤더를 붙이고, "저장할까요? (y/N)"로 1회 확인한다. 키 순서는 `team_name`, `knowledge`(있을 때), `workers[].{name, cwd, agent_type, role, launch_args, description, extra_prompt}` 고정 (`role`은 팀이 role을 쓸 때만).
 
 저장 경로 (`~/teams/`는 레포 밖이다 — 팀 config에는 업무 식별자가 들어가므로 이 레포에 두지 않는다):
 
@@ -230,7 +242,7 @@ my-team start --config <저장 경로>
 ## 추가 모드 — 실행 중인 팀에 워커 1명
 
 1. 입력: `team`, `name`, `agent_type`, 합류 이유, `role`(팀이 role을 쓰면), `--cwd`(항상 필수), 필요하면 `--worktree <branch>`. worktree 모드에서는 `--cwd`에 대상 git repo 경로를 주면 `<repo>/.worktrees/<name>`에서 뜬다. 같은 레포에서 코드를 수정할 워커는 `--worktree`로 띄운다 (add-worker는 다른 워커가 쓰는 cwd를 거부한다).
-2. Step 3(description), Step 4(plugin), Step 5(extra_prompt)를 이 워커 1명에 대해 수행한다. team_goal은 현재 팀 config 또는 호출자 자신의 Role Context에서 옮긴다.
+2. Step 3(description), Step 4(plugin), Step 5(extra_prompt)를 이 워커 1명에 대해 수행한다. 팀의 `knowledge`는 manifest에서 자동으로 들어가므로 extra_prompt에 다시 적지 않는다. team_goal은 현재 팀 config 또는 호출자 자신의 Role Context에서 옮긴다.
 3. 권한 플래그:
    - orchestrator 워커가 호출할 때: `$MY_TEAM_STATE_ROOT/manifest.json`에서 자기(`$MY_TEAM_WORKER`의 `/` 뒤 이름) 항목의 `launch_args`를 본다. `--dangerously-*` 플래그가 있으면 **새 워커의 agent_type에 맞는 플래그**(Step 6 목록: claude `--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`, gemini/cursor 없음)를 넘긴다. 호출자 플래그를 그대로 복사하면 agent_type이 다를 때 새 CLI가 모르는 플래그로 기동에 실패한다. **`--launch-arg`를 하나라도 주면 호출자 인자 상속이 꺼지므로**, plugin만 넘기고 권한 플래그를 빠뜨리면 새 워커가 첫 permission prompt에서 멈춘다.
    - 사용자가 호출할 때: Step 6의 질문을 한다.

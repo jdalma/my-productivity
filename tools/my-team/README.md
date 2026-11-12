@@ -336,6 +336,23 @@ review requests, verdicts and findings, notes and announcements. It is a SQLite 
 
 Commands, inputs, error codes, states and a full cycle: `docs/board.md`.
 
+## Team knowledge
+
+A team config may list documents every worker should know, such as how to look things up in the team's cloud
+and databases:
+
+```json
+{ "team_name": "shop", "knowledge": [{ "path": "~/docs/example.com/cloud-guide.md", "about": "cloud lookups and the protection policy; read before any cloud CLI" }], "workers": [ … ] }
+```
+
+- Every worker's AGENTS.md gets a `## Team Knowledge` section with each path and its `about`. This holds on
+  `start`, on `start --continue`, and for a worker added later with `add-worker`.
+- The documents are not copied in, so a document that changes is never stale there.
+- `path` is absolute or starts with `~/`, and `about` is one line. A missing file is a warning at start.
+- Put in these documents how to reach things (profile names, endpoints, lookup steps, protection policy).
+  Never put in keys, tokens or passwords.
+- Knowing how is not being allowed to: limit what workers may change with `deny` rules or their instructions.
+
 ## Parallel work on one repo (`--worktree`)
 
 Any worker (or the user) can split a task across several workers on the same

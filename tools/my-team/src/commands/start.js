@@ -21,7 +21,7 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, normalize, sep } from 'path';
 
-import { loadConfig, autoDiscoverConfig, parseInlineWorkerSpec, validateConfig } from '../config/parser.js';
+import { loadConfig, autoDiscoverConfig, missingKnowledge, parseInlineWorkerSpec, validateConfig } from '../config/parser.js';
 import { setStateRoot } from '../lib/state-root.js';
 import {
     createTeamSession, spawnWorkerInPane, waitForPaneReady,
@@ -239,6 +239,10 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
         return { dryRun: true, config };
     }
 
+    for (const path of missingKnowledge(config.knowledge)) {
+        console.warn(`[my-team] knowledge document ${path} is not there; workers will be told of it anyway (T68)`);
+    }
+
     await prepareStateRoot(config.state_root, { keep: Boolean(opts.continue) });
 
     // Build worker specs (name + cwd) for createTeamSession
@@ -262,6 +266,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
         leader_pane: session.leaderPaneId,
         started_at: new Date().toISOString(),
         ...(config.board ? { board: config.board } : {}),
+        ...(config.knowledge ? { knowledge: config.knowledge } : {}),
         workers: [],
     };
 
@@ -301,6 +306,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
             cwd: w.cwd,
             teamRoster,
             board: config.board,
+            knowledge: config.knowledge,
         });
         const overlayPath = join(workerDir, 'AGENTS.md');
         // under --continue, the one the worker read last time: its startup notice depends on what changed (T66)

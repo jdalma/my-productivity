@@ -56,7 +56,7 @@ func actionReasonText(_ r: ActionReason) -> String {
 
 /// `시각 누가 · 대상 행동 (이전 → 다음)` (design §3.2, 최근 활동).
 func recentLine(_ e: TaskBoardEvent) -> String {
-    let time = parseISO(e.at).map { Date(timeIntervalSince1970: $0 / 1000).formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) } ?? ""
+    let time = parseISO(e.at).map { boardClock(Date(timeIntervalSince1970: $0 / 1000)) } ?? ""
     var line = "\(time) \(e.actor ?? "?") · \([e.ref, e.action].compactMap { $0 }.joined(separator: " "))"
     if let from = e.stateFrom, let to = e.stateTo { line += " (\(from) → \(to))" }
     else if let to = e.stateTo { line += " (→ \(to))" }

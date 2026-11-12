@@ -41,7 +41,8 @@ private let familyJSON = """
        {"id":"R2 R1","verdict_id":"R2","task_id":"T5","severity":"should","summary":"r","repro":null,"state":"open","fixed_in":null}],
      "notes":[
        {"seq":2,"task_id":"T5","body":"second","to":["pm"],"created_at":"2026-11-11T02:40:00.000Z","created_by":"dev"},
-       {"seq":1,"task_id":"T5","body":"first","to":["dev","rv"],"created_at":"2026-11-11T01:40:00.000Z","created_by":"pm"}]}
+       {"seq":1,"task_id":"T5","body":"first","to":["dev","rv"],"created_at":"2026-11-11T01:40:00.000Z","created_by":"pm"},
+       {"seq":3,"task_id":"T5a","body":"to no one","to":null,"created_at":"2026-11-11T03:40:00.000Z","created_by":"pm"}]}
     """
 
 private func family() throws -> TaskFamily {
@@ -61,7 +62,8 @@ private func family() throws -> TaskFamily {
     #expect(d.cards.map { $0.verdicts.map(\.verdict.id) } == [["R1"], ["R2"], []], "verdicts under their landing")
     #expect(d.cards[0].verdicts[0].findings.map(\.id) == ["R1 M1", "R1 L1", "R1 L2", "R1 L3"])
     #expect(d.cards[1].verdicts[0].verdict.sideNotes == "looks fine")
-    #expect(d.notes.map(\.seq) == [1, 2], "notes oldest first")
+    #expect(d.notes.map(\.seq) == [1, 2, 3], "notes oldest first")
+    #expect(d.notes[2].to.isEmpty, "a note written without to (stored as null, contract: to is list(), not required) reads as to no one (R6a M1)")
     #expect(d.notes[0].to == ["dev", "rv"])
     var shuffled = try family()
     shuffled.landings.reverse()

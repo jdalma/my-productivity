@@ -294,7 +294,7 @@ public struct TaskBoardState: Hashable, Sendable {
             let age = Int(now.timeIntervalSince(lastOK))
             // under a minute in seconds: "0분 전" read as now (R6 L2)
             let ago = age < 60 ? "\(age)초" : "\(age / 60)분"
-            parts.append("아래는 \(ago) 전(\(lastOK.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))) 내용")
+            parts.append("아래는 \(ago) 전(\(boardClock(lastOK))) 내용")
         }
         if let failure = shownFailure {
             let p = taskBoardProblem(failure, bin: bin)
@@ -381,9 +381,22 @@ public struct TaskBoardNote: Decodable, Hashable, Sendable {
     public var seq: Int
     public var taskId: String?
     public var body: String
+    /// Empty for a note to no one: the board stores that as null (contract.js: `to: list()`, not required; R6a M1).
     public var to: [String]
     public var createdAt: String?
     public var createdBy: String?
+
+    enum CodingKeys: String, CodingKey { case seq, taskId, body, to, createdAt, createdBy }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        seq = try c.decode(Int.self, forKey: .seq)
+        taskId = try c.decodeIfPresent(String.self, forKey: .taskId)
+        body = try c.decode(String.self, forKey: .body)
+        to = try c.decodeIfPresent([String].self, forKey: .to) ?? []
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        createdBy = try c.decodeIfPresent(String.self, forKey: .createdBy)
+    }
 }
 
 /// What `board-status` with `task` answers: the task's root and every task under it, and their records.
@@ -479,4 +492,11 @@ public func workerTasks(_ name: String, in s: TaskBoardStatus) -> [TaskBoardTask
     let groups = taskGroups(s)
     return [TaskGroup.action, .review, .active].flatMap { groups[$0] ?? [] }.map(\.task)
         .filter { !["done", "cancelled"].contains($0.state) && ($0.assignee == name || $0.reviewer == name) }
+}
+
+/// `HH:mm`, or `MM/dd HH:mm`, in the local zone on a 24-hour clock whatever the locale (D1: 16:50, not 04:50).
+public func boardClock(_ date: Date, withDay: Bool = false) -> String {
+    let c = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: date)
+    let time = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    return withDay ? String(format: "%02d/%02d ", c.month ?? 0, c.day ?? 0) + time : time
 }

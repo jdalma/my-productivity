@@ -199,3 +199,17 @@ private func status(_ json: String) throws -> TaskBoardStatus {
     #expect(keepTaskSelection("T1", in: c) == nil, "gone from the board")
     #expect(keepTaskSelection(nil, in: a) == nil)
 }
+
+@Test func boardTimesAreTwentyFourHour() throws {
+    // D1 (designer review): 16:50 must not read as 04:50
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+    let afternoon = try #require(cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 16, minute: 50)))
+    #expect(boardClock(afternoon) == "16:50")
+    #expect(boardClock(afternoon, withDay: true) == "11/03 16:50")
+    let morning = try #require(cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 4, minute: 5)))
+    #expect(boardClock(morning) == "04:05")
+    var st = TaskBoardState()
+    st.apply(.ok(try status(statusJSON(tasks: []))), at: afternoon)
+    #expect(st.problem(now: afternoon.addingTimeInterval(120))?.contains("(16:50)") == true)
+}

@@ -43,7 +43,7 @@ struct FindingStyle: Equatable {
 
 /// `작성자 · MM/dd HH:mm` for a record.
 func byLine(_ who: String?, _ at: String?) -> String {
-    let time = parseISO(at).map { Date(timeIntervalSince1970: $0 / 1000).formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) }
+    let time = parseISO(at).map { boardClock(Date(timeIntervalSince1970: $0 / 1000), withDay: true) }
     return [who, time].compactMap { $0 }.joined(separator: " · ")
 }
 
@@ -246,7 +246,7 @@ struct TaskDetailView: View {
             section("메모 \(d.notes.count)")
             ForEach(d.notes, id: \.seq) { n in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(n.createdBy ?? "?") → \(n.to.joined(separator: ", ")) · \(byLine(nil, n.createdAt))\(n.taskId.map { $0 == line.task.id ? "" : " · \($0)" } ?? "")")
+                    Text("\(n.createdBy ?? "?")\(n.to.isEmpty ? "" : " → " + n.to.joined(separator: ", ")) · \(byLine(nil, n.createdAt))\(n.taskId.map { $0 == line.task.id ? "" : " · \($0)" } ?? "")")
                         .scaledFont(.caption1).foregroundStyle(.secondary)
                     Text(n.body).scaledFont(.callout).textSelection(.enabled)
                 }

@@ -99,3 +99,35 @@ private func team(_ name: String, board: Bool) -> Team {
     #expect(failed.family == fam && failed.failure == .timeout, "the detail stays on screen with the failure beside it")
     #expect(Optional(failed).applying(.success(fam), to: ref).failure == nil)
 }
+
+// T70b: the recent activity in the screen's words (D2, D3).
+
+private func event(_ action: String, ref: String, from: String? = nil, to: String? = nil, verdict: String? = nil) throws -> TaskBoardEvent {
+    func q(_ s: String?) -> String { s.map { "\"\($0)\"" } ?? "null" }
+    let detail = verdict.map { #"{"landing":"T1#1","verdict":"\#($0)"}"# } ?? "null"
+    let json = #"{"seq":1,"at":"2026-11-11T07:50:00.000Z","actor":"dev","action":"\#(action)","ref":"\#(ref)","state_from":\#(q(from)),"state_to":\#(q(to)),"detail":\#(detail)}"#
+    let d = JSONDecoder()
+    d.keyDecodingStrategy = .convertFromSnakeCase
+    return try d.decode(TaskBoardEvent.self, from: Data(json.utf8))
+}
+
+@Test func recentActivityReadsInKorean() throws {
+    func what(_ e: TaskBoardEvent) -> String { String(recentLine(e).split(separator: " · ", maxSplits: 1)[1]) }
+    #expect(try what(event("add", ref: "T1", to: "new")) == "T1 추가 (→ 미배정)")
+    #expect(try what(event("assign", ref: "T1", from: "new", to: "ready")) == "T1 배정 (미배정 → 착수 전)")
+    #expect(try what(event("take", ref: "T1", from: "ready", to: "doing")) == "T1 착수 (착수 전 → 진행 중)")
+    #expect(try what(event("land", ref: "T1#1", from: "doing", to: "review")) == "T1#1 완료 기록 (진행 중 → 리뷰 대기)")
+    #expect(try what(event("verdict", ref: "R1", from: "review", to: "done", verdict: "approve")) == "R1 판정 승인 (리뷰 대기 → 완료)")
+    #expect(try what(event("verdict", ref: "R1", from: "review", to: "changes", verdict: "changes")) == "R1 판정 수정 요청 (리뷰 대기 → 수정 요청)")
+    #expect(try what(event("verdict", ref: "R1", from: "review", to: "held", verdict: "hold")) == "R1 판정 보류 (리뷰 대기 → 보류)")
+    #expect(try what(event("finding", ref: "R1 L1", from: "open", to: "backlog")) == "R1 L1 지적 정리 (열림 → 나중에)", "a finding's own states")
+    #expect(try what(event("note", ref: "T1")) == "T1 메모")
+    #expect(try what(event("note", ref: "-")) == "메모", "no target: left out (D3)")
+    #expect(try what(event("announce", ref: "-")) == "공지")
+    #expect(try what(event("cancel", ref: "T1", from: "held", to: "cancelled")) == "T1 취소 (보류 → 취소)")
+    #expect(try recentLine(event("note", ref: "-")).hasSuffix("dev · 메모"))
+}
+
+@Test func peopleRolesHaveTheirWords() {
+    #expect([PersonRole.registered, .handled, .assignee, .reviewer].map(personRoleText) == ["등록", "처리", "담당", "판정"])
+}

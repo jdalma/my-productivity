@@ -49,8 +49,11 @@ public struct TaskBoardEvent: Decodable, Hashable, Sendable {
     public var stateTo: String?
     /// A string detail; any other shape is left out.
     public var detail: String?
+    /// approve, changes or hold: a verdict event's `detail.verdict`.
+    public var verdict: String?
 
     enum CodingKeys: String, CodingKey { case seq, at, actor, action, ref, stateFrom, stateTo, detail }
+    private struct Detail: Decodable { var verdict: String? }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -62,6 +65,7 @@ public struct TaskBoardEvent: Decodable, Hashable, Sendable {
         stateFrom = try c.decodeIfPresent(String.self, forKey: .stateFrom)
         stateTo = try c.decodeIfPresent(String.self, forKey: .stateTo)
         detail = try? c.decodeIfPresent(String.self, forKey: .detail)
+        verdict = (try? c.decodeIfPresent(Detail.self, forKey: .detail))?.verdict
     }
 }
 
@@ -241,6 +245,46 @@ public func taskGroups(_ s: TaskBoardStatus) -> [TaskGroup: [TaskLine]] {
 }
 
 public func actionCount(_ s: TaskBoardStatus) -> Int { taskGroups(s)[.action]?.count ?? 0 }
+
+/// Shown at most in the finished group until "펼치기" (pm decision 7).
+public let finishedShown = 5
+
+/// The lines on screen, top to bottom: the finished group folded unless opened or alone.
+public func visibleTaskIds(_ groups: [TaskGroup: [TaskLine]], finishedOpen: Bool) -> [String] {
+    let unfinished = [TaskGroup.action, .review, .active].flatMap { groups[$0] ?? [] }
+    let done = groups[.finished] ?? []
+    let open = finishedOpen || unfinished.isEmpty
+    return (unfinished + (open ? done : Array(done.prefix(finishedShown)))).map(\.task.id)
+}
+
+/// The pick an arrow key moves to: the next or previous line, held at the ends; from either end when nothing
+/// on screen is picked.
+public func stepTask(_ current: String?, by delta: Int, in ids: [String]) -> String? {
+    guard !ids.isEmpty else { return nil }
+    guard let i = current.flatMap(ids.firstIndex) else { return delta > 0 ? ids.first : ids.last }
+    return ids[min(max(i + delta, 0), ids.count - 1)]
+}
+
+/// The role word in front of a name (design v2 §B.3): 등록, 처리, 담당, 판정.
+public enum PersonRole: Sendable { case registered, handled, assignee, reviewer }
+
+/// A name on a task line; `turn` is the one whose move it is now, shown bold with the worker's state icon.
+public struct TaskPerson: Equatable, Sendable {
+    public var role: PersonRole
+    public var name: String?
+    public var turn: Bool
+}
+
+/// Who a line names (design v2 §B.1, §B.2): `등록 → 처리` once the task itself is over, else `담당 → 판정`,
+/// with the turn on the assignee while active and on the reviewer while in review. pm's group marks no one.
+public func taskPeople(_ line: TaskLine, in group: TaskGroup) -> [TaskPerson] {
+    let t = line.task
+    let over = group == .finished || t.state == "done"
+    if over { return [TaskPerson(role: .registered, name: t.createdBy, turn: false), TaskPerson(role: .handled, name: t.assignee, turn: false)] }
+    if t.state == "new" { return [TaskPerson(role: .registered, name: t.createdBy, turn: false), TaskPerson(role: .assignee, name: t.assignee, turn: false)] }
+    let assignee = TaskPerson(role: .assignee, name: t.assignee, turn: group == .active)
+    return [assignee] + (t.reviewer.map { [TaskPerson(role: .reviewer, name: $0, turn: group == .review)] } ?? [])
+}
 
 /// A selected task stays selected over a read while the board still has it.
 public func keepTaskSelection(_ id: String?, in s: TaskBoardStatus) -> String? {

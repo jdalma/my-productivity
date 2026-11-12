@@ -168,7 +168,8 @@ struct BoardView: View {
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
                         if team.hasTaskBoard {
-                            TaskBoardSidebarRow(counts: team.taskCounts)
+                            TaskBoardSidebarRow(counts: team.taskCounts, problem: tower.taskBoards[team.name]?.shownFailure.map {
+                                let p = taskBoardProblem($0, bin: myTeamBin); return "\(p.title)\n\(p.detail)" })
                                 .padding(.leading, TeamHeader.workerInset(scale.value))
                                 .tag(RowID.taskBoard(team.name))
                         }

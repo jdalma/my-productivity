@@ -90,3 +90,22 @@ func detailExtrasReadOnTheCanvas(_ name: NSAppearance.Name) {
     for count in [DiffColors.addedCount, DiffColors.removedCount] { #expect(contrast(resolve(count, name), canvas) >= 4.5) }
     #expect(contrast(resolve(DiffColors.mutedText, name), canvas) >= 4.5)
 }
+
+/// The task board's tags and bands (T70b, v2 §A.3): each state's word on its own tint, each group's count, the
+/// group name and whose move on the band, all over the canvas.
+@Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+func taskBoardTagsAndBandsReadAtFourPointFive(_ name: NSAppearance.Name) {
+    let canvas = resolve(DiffColors.canvas, name)
+    func tinted(_ c: Color, _ opacity: Double) -> RGBA { over(resolve(c.opacity(opacity), name), canvas) }
+    for state in TaskStateStyle.all {
+        let c = TaskStateStyle.of(state).color
+        #expect(contrast(resolve(c, name), tinted(c, TaskGroupStyle.tagOpacity)) >= 4.5, "\(state) tag \(name.rawValue)")
+        #expect(contrast(resolve(c, name), canvas) >= 4.5, "\(state) untinted on a finished line \(name.rawValue)")
+    }
+    for g in [TaskGroup.action, .review, .active, .finished] {
+        let band = tinted(TaskGroupStyle.of(g).color, TaskGroupStyle.bandOpacity)
+        for fg in [TaskGroupStyle.of(g).color, DiffColors.text, DiffColors.mutedText] {
+            #expect(contrast(resolve(fg, name), band) >= 4.5, "\(g) band \(name.rawValue)")
+        }
+    }
+}

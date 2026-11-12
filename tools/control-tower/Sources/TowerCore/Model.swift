@@ -221,6 +221,8 @@ public struct Team: Codable, Hashable, Sendable {
     public var startedAt: String?
     /// At least one tmux client is attached to the session.
     public var attached: Bool
+    /// The manifest names a task board (`my-team api board-status` reads it, T70). Not in the JSON form.
+    public var hasTaskBoard = false
     public var workers: [Worker]
 
     public init(name: String, sessionName: String, startedAt: String?, attached: Bool, workers: [Worker]) {

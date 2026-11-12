@@ -18,7 +18,14 @@ struct Manifest: Decodable {
     var stateRoot: String
     var sessionName: String
     var startedAt: String?
+    /// Present when the team keeps a task board (`my-team start` writes it, T63); its value is not needed.
+    var board: Present?
     var workers: [ManifestWorker]
+}
+
+/// A key whose presence is what counts: any value decodes, so a new shape never drops the team.
+struct Present: Decodable {
+    init(from decoder: any Decoder) {}
 }
 
 struct ManifestWorker: Decodable {
@@ -36,6 +43,7 @@ struct RawTeam {
     var session: String
     var startedAt: String?
     var teamAlive: Bool
+    var hasTaskBoard = false
     var workers: [RawWorker]
 }
 
@@ -62,7 +70,11 @@ struct TeamSeed: Decodable, Hashable {
     var sessionName: String
     var startedAt: String?
     var attached: Bool
+    /// Not in the fixtures' JSON form: the manifest gives it, `toTeam` copies it.
+    var hasTaskBoard = false
     var workers: [WorkerSeed]
+
+    enum CodingKeys: String, CodingKey { case name, sessionName, startedAt, attached, workers }
 }
 
 struct WorkerSeed: Decodable, Hashable {
@@ -125,6 +137,7 @@ func teamStatus(_ m: Manifest, panes: [Pane]) -> RawTeam {
         session: m.sessionName,
         startedAt: m.startedAt,
         teamAlive: !inSession.isEmpty,
+        hasTaskBoard: m.board != nil,
         workers: m.workers.map { w in
             var r = RawWorker(
                 name: w.name, paneId: w.paneId, cwd: w.cwd, agentType: w.agentType, role: w.role,
@@ -187,6 +200,7 @@ func toTeam(_ t: RawTeam, clients: [TmuxClient]) -> TeamSeed {
         sessionName: sessionName,
         startedAt: t.startedAt,
         attached: clients.contains { $0.session == sessionName },
+        hasTaskBoard: t.hasTaskBoard,
         workers: t.workers.map { w in
             WorkerSeed(
                 handle: "pane:\(sessionName):\(w.paneId)",

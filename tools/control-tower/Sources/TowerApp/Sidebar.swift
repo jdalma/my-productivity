@@ -9,6 +9,8 @@ enum RowID: Hashable {
     case live(String)
     /// `HistorySession.transcriptPath`.
     case history(String)
+    /// A team's task board (T70), by team name.
+    case taskBoard(String)
 }
 
 enum RowBadge: Equatable {
@@ -78,6 +80,29 @@ struct TeamGroup: Equatable {
     /// Workers waiting on me (permission and idle included), shown on the header.
     var waiting: Int
     var rows: [LiveRow]
+    /// The team keeps a task board: its `작업판` row shows, with counts once read.
+    var hasTaskBoard = false
+    var taskCounts: TaskCounts?
+}
+
+/// The `작업판` row's counts (design §3.1).
+struct TaskCounts: Equatable {
+    var action: Int
+    var review: Int
+    var active: Int
+
+    init(action: Int, review: Int, active: Int) {
+        self.action = action
+        self.review = review
+        self.active = active
+    }
+
+    init(_ s: TaskBoardStatus) {
+        let g = taskGroups(s)
+        action = g[.action]?.count ?? 0
+        review = g[.review]?.count ?? 0
+        active = g[.active]?.count ?? 0
+    }
 }
 
 /// Sessions outside teams, one group per agent.
@@ -150,6 +175,7 @@ struct CollapsedTeams: Equatable {
 
     /// Opens the team holding a row selected from outside the sidebar (menu bar, queue card).
     mutating func reveal(_ id: RowID, in board: Board) {
+        if case .taskBoard(let team) = id { names.remove(team) }
         guard case .live(let rowID) = id,
               let team = board.teams.first(where: { $0.workers.contains { $0.session.rowID == rowID } }) else { return }
         names.remove(team.name)
@@ -287,7 +313,7 @@ enum HistoryFilter: Hashable {
 let historyPageSize = 30
 
 func sidebarModel(board: Board, history: [HistorySession], query: String, filter: HistoryFilter, historyLimit: Int,
-                  home: String) -> SidebarModel {
+                  home: String, taskBoards: [String: TaskBoardStatus] = [:]) -> SidebarModel {
     let byTranscript = Dictionary(history.map { ($0.transcriptPath, $0) }, uniquingKeysWith: { a, _ in a })
     let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     func hit(_ fields: [String?]) -> Bool {
@@ -316,7 +342,8 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
         let shown = rows.filter { teamHit || matches($0) }
         if q.isEmpty || !shown.isEmpty {
             teams.append(TeamGroup(name: team.name, summary: teamSummaryLine(team), waiting: rows.filter(\.badge.waits).count,
-                                   rows: shown))
+                                   rows: shown, hasTaskBoard: team.hasTaskBoard,
+                                   taskCounts: team.hasTaskBoard ? taskBoards[team.name].map(TaskCounts.init) : nil))
         }
     }
 
@@ -413,7 +440,8 @@ func waitingText(_ n: Int) -> String? { n > 0 ? "\(n) 대기" : nil }
 
 /// A team header's counts, of the rows it lists (so a search's matches): "워커 3 · 1 대기".
 func teamHeaderDetail(_ team: TeamGroup) -> String {
-    (["워커 \(team.rows.count)"] + [waitingText(team.rows.filter(\.badge.waits).count)].compactMap { $0 }).joined(separator: " · ")
+    let action = team.taskCounts.flatMap { $0.action > 0 ? "조치 \($0.action)" : nil }
+    return (["워커 \(team.rows.count)"] + [waitingText(team.rows.filter(\.badge.waits).count), action].compactMap { $0 }).joined(separator: " · ")
 }
 
 func teamSummaryLine(_ team: Team) -> String {
@@ -556,7 +584,7 @@ enum SidebarPane {
 
     private func holds(_ id: RowID) -> Bool {
         switch id {
-        case .live: self == .live
+        case .live, .taskBoard: self == .live
         case .history: self == .history
         }
     }

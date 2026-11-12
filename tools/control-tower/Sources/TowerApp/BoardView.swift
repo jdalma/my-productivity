@@ -29,7 +29,8 @@ struct BoardView: View {
             }
             if let board = tower.board {
                 content(board, sidebarModel(board: board, history: tower.history, query: query, filter: filter,
-                                             historyLimit: historyLimit, home: home))
+                                             historyLimit: historyLimit, home: home,
+                                             taskBoards: tower.taskBoards.compactMapValues(\.status)))
             } else {
                 ProgressView("수집 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -82,6 +83,7 @@ struct BoardView: View {
                     else if selection != nil, changes.history.current != nil { changes.history.toDiff() } else { selection = nil }
                 }
                 .keyboardShortcut(.escape, modifiers: [])
+                Button("작업판 다시 읽기") { tower.reloadTaskBoards() }.keyboardShortcut("r")
                 Button("뒤로") { if selection != nil { changes.history.back() } }.keyboardShortcut("[")
                 Button("앞으로") { if selection != nil { changes.history.forward() } }.keyboardShortcut("]")
                 Button("글자 크게") { storedScale = scale.bigger().value }.keyboardShortcut("+")
@@ -97,8 +99,12 @@ struct BoardView: View {
         }
         .environment(\.boardFontScale, scale.value)
         .background(FullScreenCapable())
-        .onAppear { clickMonitor = CommandClick.install() }
+        .onAppear {
+            clickMonitor = CommandClick.install()
+            tower.boardWindowOpen = true
+        }
         .onDisappear {
+            tower.boardWindowOpen = false
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
             clickMonitor = nil
         }
@@ -123,6 +129,7 @@ struct BoardView: View {
             .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 520)
         } detail: {
             DetailView(board: board, model: model, history: tower.history, selection: selection, home: home, changes: changes,
+                       taskBoards: tower.taskBoards, reloadTaskBoards: { tower.reloadTaskBoards() },
                        select: { id in
                            query = ""  // a search could hide the row
                            reveal(id)
@@ -149,6 +156,11 @@ struct BoardView: View {
                 }
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
+                        if team.hasTaskBoard {
+                            TaskBoardSidebarRow(counts: team.taskCounts)
+                                .padding(.leading, TeamHeader.workerInset(scale.value))
+                                .tag(RowID.taskBoard(team.name))
+                        }
                         ForEach(team.rows, id: \.id) { LiveRowView(row: $0).padding(.leading, TeamHeader.workerInset(scale.value)).tag($0.id) }
                     } header: {
                         TeamHeader(team: team)
@@ -217,6 +229,8 @@ struct BoardView: View {
             if let row = model.liveRows.first(where: { $0.id == id }) { tower.focus(row.session.handle) }
         case .history:
             if let h = historyEntry(id, model) { tower.open(h) }
+        case .taskBoard:
+            break
         }
     }
 
@@ -283,6 +297,7 @@ struct BoardView: View {
         switch id {
         case .history(let path): model.history.first { $0.transcriptPath == path } ?? tower.history.first { $0.transcriptPath == path }
         case .live: model.liveRows.first { $0.id == id }?.matched
+        case .taskBoard: nil
         }
     }
 }
@@ -491,6 +506,8 @@ private struct DetailView: View {
     let selection: RowID?
     let home: String
     let changes: ChangesState
+    let taskBoards: [String: TaskBoardState]
+    let reloadTaskBoards: () -> Void
     let select: (RowID) -> Void
     let deselect: () -> Void
     /// The sidebar's double click on a live row: `Tower.focus`.
@@ -514,16 +531,24 @@ private struct DetailView: View {
                     if let row = model.liveRows.first(where: { $0.id == selection }) { live(row) } else { empty }
                 case .history(let path):
                     if let h = (model.history + history).first(where: { $0.transcriptPath == path }) { past(h) } else { empty }
+                case .taskBoard(let team):
+                    TaskBoardView(team: team, state: taskBoards[team], model: model, select: select, reload: reloadTaskBoards)
                 case nil:
                     QueueView(model: model, select: select, focus: focus)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             Divider()
-            Text("더블 클릭: 실행 중이면 pane으로 이동 · 종료된 세션이면 Ghostty에서 resume · 우클릭: resume 명령 복사")
+            Text(isTaskBoard ? "작업판은 읽기 전용입니다 · ⌘R 다시 읽기 · 우클릭: 경로 복사"
+                             : "더블 클릭: 실행 중이면 pane으로 이동 · 종료된 세션이면 Ghostty에서 resume · 우클릭: resume 명령 복사")
                 .scaledFont(.caption1).foregroundStyle(.secondary)
                 .padding(10)
         }
+    }
+
+    private var isTaskBoard: Bool {
+        if case .taskBoard = selection { return true }
+        return false
     }
 
     private var empty: some View {

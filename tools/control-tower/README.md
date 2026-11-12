@@ -25,6 +25,8 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
 - Menu bar: an icon, plus N while N sessions are waiting for you. Collects every 5 s.
 - Dropdown: the waiting sessions; click one to jump to it. Open Board (⌘B), Settings (⌘,), Quit (⌘Q).
 - Board window: one column per live my-team team, then Claude Code and Codex sessions outside any team.
+- Task board: a `작업판` row under a team that keeps one, with its counts. It lists the team's tasks grouped by who has
+  to move: needs pm, waiting for review, in progress, finished. Read only; ⌘R reads it again.
 - Notification when a session turns into your turn (not for the first snapshot after launch). Click it to jump.
 - Settings → Open at Login (off by default).
 
@@ -70,7 +72,12 @@ Prints `my turn N` while N > 0. Prints nothing and exits 0 when N is 0 or `.buil
 | transcript tails (last 200 KB) | last user / assistant message |
 | `~/.claude/projects/*/<id>.jsonl` (`CLAUDE_CONFIG_DIR`), `~/.codex/sessions/**/rollout-*.jsonl` and `session_index.jsonl` (`CODEX_HOME`), first and last 256 KB each | session history: title, workspace, branch, last prompt; only `entrypoint: cli` Claude sessions and Codex TUI / CLI / Desktop sessions |
 
-`MY_TEAM_STATE_ROOT_BASE` overrides `~/.my-team/sessions`, as it does for my-team. The my-team CLI itself is never run, so neither it nor `node` needs to be installed. Requires `tmux`.
+`MY_TEAM_STATE_ROOT_BASE` overrides `~/.my-team/sessions`, as it does for my-team. Requires `tmux`.
+
+The my-team CLI runs only for a team whose manifest names a task board (its `board` key), and only while the board
+window is open: `my-team api board-status --input '{"team_name":"<team>"}' --json`, every 5 s, without
+`MY_TEAM_WORKER`, `MY_TEAM_STATE_ROOT` and `OMC_TEAM_WORKER` in its environment. That call only reads, and the app
+never opens `board.db` itself. With no such team, neither my-team nor `node` needs to be installed.
 
 ## Test
 

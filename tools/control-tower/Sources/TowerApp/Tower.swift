@@ -16,7 +16,14 @@ final class Tower {
     var boardOpenRequested = false
     /// Teams the board asked to start and has not seen running yet: their resume button waits.
     private(set) var launches = TeamLaunches()
+    /// Task boards of the running teams that keep one (T70), read only while the board window is open.
+    private(set) var taskBoards: [String: TaskBoardState] = [:]
+    /// The board window shows; BoardView sets it.
+    var boardWindowOpen = false {
+        didSet { if boardWindowOpen && !oldValue { reloadTaskBoards() } }
+    }
     @ObservationIgnored private var notifier: Notifier?
+    @ObservationIgnored private var taskBoardReading = false
 
     init() {
         notifier = Notifier { [weak self] in self?.focus($0) }
@@ -25,6 +32,13 @@ final class Tower {
             while true {
                 await refresh()
                 try? await Task.sleep(for: .seconds(5))
+            }
+        }
+        // 5 s: the open board within 10 s of the truth, every team's counts within 15 s (design §6 U1, U2)
+        Task {
+            while true {
+                try? await Task.sleep(for: .seconds(5))
+                reloadTaskBoards()
             }
         }
         Task {
@@ -52,6 +66,21 @@ final class Tower {
     }
 
     var myTurn: Int { board.map(myTurnCount) ?? 0 }
+
+    /// Reads every task board now (⌘R, the timer). Nothing while the board window is closed (U3), or when no
+    /// running team keeps a task board: then my-team is never run.
+    func reloadTaskBoards() {
+        guard boardWindowOpen, !taskBoardReading, let board else { return }
+        taskBoardReading = true
+        Task {
+            let reads = await Task.detached { readTaskBoards(board) }.value
+            let now = Date()
+            var next = taskBoards.filter { reads[$0.key] != nil }
+            for (team, read) in reads { next[team, default: TaskBoardState()].apply(read, at: now) }
+            taskBoards = next
+            taskBoardReading = false
+        }
+    }
 
     /// Moves focus to `handle`. Failures surface as an alert; the app never crashes on them.
     func focus(_ handle: String) {

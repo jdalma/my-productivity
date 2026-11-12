@@ -94,12 +94,13 @@ func childEnvironment(base: [String: String], extra: [String: String]) -> [Strin
 /// Runs `argv` directly, never through a shell. A non-zero exit is a result, not a
 /// throw; the caller decides what to do with the output. Throws only when
 /// the program cannot be found or started.
-func runCommand(_ argv: [String], timeout: TimeInterval, env: [String: String] = [:]) throws -> CommandResult {
+/// `unset` names variables the child must not inherit.
+func runCommand(_ argv: [String], timeout: TimeInterval, env: [String: String] = [:], unset: Set<String> = []) throws -> CommandResult {
     guard let exe = resolveExecutable(argv[0]) else { throw CommandError(description: "\(argv[0]): not found") }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: exe)
     p.arguments = Array(argv.dropFirst())
-    p.environment = childEnvironment(base: ProcessInfo.processInfo.environment, extra: env)
+    p.environment = childEnvironment(base: ProcessInfo.processInfo.environment, extra: env).filter { !unset.contains($0.key) }
     // stderr goes to a file so a chatty child can never fill a second pipe while we drain stdout
     let errURL = FileManager.default.temporaryDirectory.appending(path: "tower-\(UUID().uuidString).err")
     FileManager.default.createFile(atPath: errURL.path, contents: nil)

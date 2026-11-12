@@ -102,7 +102,7 @@ func join(teams: [TeamSeed], panes: [Pane], claude: [ClaudeRecord], codex: [Code
     }
 
     return Board(at: at, teams: teams.map { team in
-        Team(name: team.name, sessionName: team.sessionName, startedAt: team.startedAt, attached: team.attached,
+        var t = Team(name: team.name, sessionName: team.sessionName, startedAt: team.startedAt, attached: team.attached,
              workers: team.workers.map { w in
                  let m = matched[workerKey(team.sessionName, w.paneId)]
                  let pane = paneById[w.paneId]
@@ -117,6 +117,8 @@ func join(teams: [TeamSeed], panes: [Pane], claude: [ClaudeRecord], codex: [Code
                                paneId: w.paneId, alive: w.alive, spool: w.spool, inbox: w.inbox,
                                sentPending: w.sentPending, oldestPendingAt: w.oldestPendingAt, stateFile: w.stateFile)
              })
+        t.hasTaskBoard = team.hasTaskBoard
+        return t
     }, loose: loose)
 }
 

@@ -11,8 +11,8 @@
  *
  * The hook reads the command string. What a script, an alias or a Makefile runs is not seen: this guards
  * against mistakes, not intent. A form it cannot read is refused. A heredoc body is judged as commands
- * unless its command only stores or reads it (`cat > f <<EOF`); an unquoted one's substitutions still run
- * and are read.
+ * unless the whole line is `cat > file <<EOF` (or `>>`); an unquoted one's substitutions still run and are
+ * read.
  */
 
 import { execFileSync } from 'child_process';
@@ -180,18 +180,17 @@ function lex(src) {
 }
 
 /**
- * Commands that take a heredoc body as data, never running it as shell commands (R3a M1): they store, read or
- * show it. A language interpreter (node, python) runs it as a program of its own, which the guard does not
- * read, as with any script. Everything else, or a body piped on, is judged as commands: `source /dev/stdin`,
- * `eval "$(cat)"`, `cat <<EOF | sh`, a while loop, an unknown program.
+ * Whether a whole command line is the one shape whose heredoc body is data (T63g, pm note after R3b): `cat`,
+ * one `>` or `>>` to a plain file path, one heredoc, nothing else. A pipe, a list, any substitution, another
+ * redirect, or a command after the body: the body is judged as commands.
  */
-const HEREDOC_DATA = new Set(['cat', 'tee', 'node', 'python', 'python3', 'ruby', 'perl', 'jq', 'git', 'wc', 'head', 'tail',
-    'grep', 'sort', 'uniq', 'base64']);
-
-function heredocIsData(h) {
-    if (h.words.sep === '|') return false;
-    const cmds = commandsOf(h.words);
-    return cmds.length > 0 && cmds.every((c) => c.name !== undefined && HEREDOC_DATA.has(c.name));
+function heredocToFile(cmds) {
+    // a substitution or a second heredoc command shows up as a word that is not plain, or as a second command
+    if (cmds.length !== 1) return false;
+    const [name, ...rest] = cmds[0];
+    const plain = (p) => /^[\w./~+@%,:-]+$/.test(p);
+    return name === 'cat' && ((rest.length === 2 && (rest[0] === '>' || rest[0] === '>>') && plain(rest[1]))
+        || (rest.length === 1 && /^>>?[^>]/.test(rest[0]) && plain(rest[0].replace(/^>>?/, ''))));
 }
 
 /** A word whose value is known only when the line runs: a variable, a substitution, or nothing. */
@@ -355,19 +354,21 @@ function touchesProtected(targets, protectedRepo) {
 }
 
 /**
- * Whether `path` is part of the push gate (T63g, R3 R1, R3a M2): a git config file the protected repository
- * reads (its own and its worktrees', the user's and the system's), where my-team.* and core.hooksPath live;
- * or its hooks folder or anything in it, where the pre-push hook and its copies live. Without a protected
+ * Whether `path` is part of the push gate (T63g, R3 R1, R3a M2, R3b L1): a git config file the protected
+ * repository reads (its own and its worktrees', the user's and the system's), where my-team.* and
+ * core.hooksPath live; its hooks folder or anything in it, where the pre-push hook and its copies live; or
+ * its git folder itself. Without a protected
  * repository, any repository's counts.
  */
 function gateFile(path, protectedRepo) {
     const key = pathKey(path);
     const home = homedir();
     if ([join(home, '.gitconfig'), join(home, '.config', 'git', 'config'), '/etc/gitconfig'].map(pathKey).includes(key)) return true;
-    if (!protectedRepo) return /[/\\]\.git[/\\](config(\.worktree)?|hooks([/\\].*)?)$/s.test(key);
+    if (!protectedRepo) return /[/\\]\.git([/\\](config(\.worktree)?|hooks([/\\].*)?))?$/s.test(key);
     const common = protectedRepo.common ?? pathKey(join(protectedRepo.root, '.git'));
     const hooks = common + sep + 'hooks';
-    return key === common + sep + 'config' || (key.startsWith(common + sep) && key.endsWith('config.worktree'))
+    // the git folder itself too: moving or removing it takes the hook along (R3b L1)
+    return key === common || key === common + sep + 'config' || (key.startsWith(common + sep) && key.endsWith('config.worktree'))
         || key === hooks || key.startsWith(hooks + sep);
 }
 
@@ -445,8 +446,9 @@ function configDenial(git, dir, rules, protectedRepo) {
     } else reaches = touchesProtected(git.targets, protectedRepo) ? 'repository' : null;
     if (!reaches) return null;
     if (rules.includes('repo-write') && reaches === 'repository') return { rule: 'repo-write', reason: 'git config writes the protected repository\'s config' };
-    // my-team.* sets the gate up; core.hooksPath (or removing its section) moves the pre-push hook away (R3a M2)
-    const gateKey = c.key === null || /^(my-team(\..*)?|core(\.hookspath)?)$/is.test(c.key);
+    // my-team.* sets the gate up; core.hooksPath (or removing its section) moves the pre-push hook away (R3a M2);
+    // an included file can set either (R3b R1)
+    const gateKey = c.key === null || /^(my-team(\..*)?|core(\.hookspath)?|include(\.path)?|includeif(\..*)?)$/is.test(c.key);
     if (gateKey) return { rule: rules.includes('push') ? 'push' : 'repo-write', reason: `git config ${c.key ?? '<unknown key>'} reaches the push gate's settings or its hook` };
     return null;
 }
@@ -528,10 +530,11 @@ function denial(command, rules, start, protectedRepo) {
         const found = denial(sub, rules, moved ? null : start, protectedRepo);
         if (found) return found;
     }
-    // a heredoc body is judged as commands unless its command surely only stores or reads it (T63g, R3a M1);
-    // as data, an unquoted delimiter still runs the body's substitutions (bash(1), Here Documents)
+    // a heredoc body is judged as commands unless the line is `cat > file <<EOF` alone (T63g); as data, an
+    // unquoted delimiter still runs the body's substitutions (bash(1), Here Documents)
+    const toFile = heredocToFile(cmds);
     for (const h of heredocs) {
-        if (!heredocIsData(h)) {
+        if (!toFile) {
             const found = denial(h.body, rules, moved ? null : start, protectedRepo);
             if (found) return found;
             continue;

@@ -372,17 +372,25 @@ test('T63g R3 R1: git config files are not edited directly, by a tool or a shell
     assert.equal(plain.status, 0, 'push alone keeps edits inside the repository allowed');
 });
 
-test('T63g R3a M1: a heredoc body is judged unless its command surely only stores or reads it', () => {
+test('T63g R3a M1, R3b M1: a heredoc body is data only when the whole line is cat to one plain file', () => {
     const push = (cmd) => bashDenial(cmd, ['push'])?.rule ?? null;
     const body = 'git push https://example.com/x.git HEAD';
     for (const cmd of [
         `source /dev/stdin <<'EOF'\n${body}\nEOF`, `. /dev/stdin <<'EOF'\n${body}\nEOF`, `eval "$(cat)" <<'EOF'\n${body}\nEOF`,
         `cat <<'EOF' | sh\n${body}\nEOF`, `cat <<EOF | bash -s\n${body}\nEOF`, `xargs -I{} sh -c {} <<'EOF'\n${body}\nEOF`,
         `awk 1 <<'EOF'\n${body}\nEOF`, `./run.sh <<'EOF'\n${body}\nEOF`, `while read l; do $l; done <<'EOF'\n${body}\nEOF`,
+        `tee >(sh) <<'EOF'\n${body}\nEOF`, `cat > >(sh) <<'EOF'\n${body}\nEOF`, `cat <<'EOF' > >(bash)\n${body}\nEOF`,
+        // anything but the one shape: another command, redirect, list, variable, prefix, or no file at all
+        `tee /tmp/f <<'EOF'\n${body}\nEOF`, `python3 - <<'PY'\n${body}\nPY`, `git commit -q -F - <<'EOF'\n${body}\nEOF`,
+        `cat <<'EOF'\n${body}\nEOF`, `cat > "$F" <<'EOF'\n${body}\nEOF`, `cat > /tmp/f 2>&1 <<'EOF'\n${body}\nEOF`,
+        `X=1 cat > /tmp/f <<'EOF'\n${body}\nEOF`, `cat > /tmp/f <<'EOF' && sh /tmp/f\n${body}\nEOF`,
+        `sh > /tmp/out <<'EOF'\n${body}\nEOF`, `bash >> /tmp/log <<EOF\n${body}\nEOF`,
+        `cat > /tmp/f <<'EOF'\nx\nEOF\n${body}`, `cat > /tmp/f <<'A'; cat > /tmp/g <<'B'\nx\nA\n${body}\nB`,
     ]) assert.equal(push(cmd), 'push', cmd);
     for (const cmd of [
-        `cat > /tmp/f <<'EOF'\n${body}\nEOF`, `tee /tmp/f >/dev/null <<EOF\n${body}\nEOF`, `python3 - <<'PY'\nprint("${body}")\nPY`,
-        `node --input-type=module <<'EOF'\nconsole.log("${body}")\nEOF`, `git commit -q -F - <<'EOF'\n${body}\nEOF`,
+        `cat > /tmp/f <<'EOF'\n${body}\nEOF`, `cat >> /tmp/f <<EOF\n${body}\nEOF`, `cat >/tmp/f <<'EOF'\n${body}\nEOF`,
+        `cat <<'EOF' > ~/notes/a.md\n${body}\nEOF`, `cat > /tmp/f <<-EOF\n\t${body}\n\tEOF`,
+        `cat > /tmp/f <<'EOF'\nprint("don't")\n$(${body})\nEOF`,
     ]) assert.equal(push(cmd), null, cmd);
 });
 
@@ -397,6 +405,9 @@ test('T63g R3a M2: a worker does not turn the pre-push hook off: core.hooksPath,
             'git config --global --remove-section core', `printf 'exit 0' > ${hooks}/pre-push`, `rm ${hooks}/push-gate.sh`,
             `rm -rf ${hooks}`, `mv ${hooks} /tmp/h`, `chmod -x ${hooks}/pre-push`, `cp /tmp/x ${hooks}/public-scan.sh`,
             `cd ${r.root} && rm .git/hooks/pre-push`,
+            // R3b R1: an included file can set core.hooksPath; R3b L1: moving the git folder takes the hook along
+            'git config --global include.path /tmp/inc', 'git config --global includeIf.gitdir:/tmp/.path /tmp/inc',
+            `git -C ${r.root} config include.path /tmp/inc`, `mv ${r.root}/.git ${r.root}/.git.off`,
         ]) assert.notEqual(deny(cmd), null, `${rules}: ${cmd}`);
         for (const cmd of [`git -C ${r.root} config --get core.hooksPath`, `cat ${hooks}/pre-push`, `ls ${hooks}`, 'git config --global core.editor vim'])
             assert.equal(deny(cmd), null, `${rules}: ${cmd}`);
@@ -406,18 +417,16 @@ test('T63g R3a M2: a worker does not turn the pre-push hook off: core.hooksPath,
     }
 });
 
-test('T63g: a heredoc body is data unless a shell reads it; an unquoted one still runs its substitutions', () => {
+test('T63g: a heredoc cat writes to a file is data; an unquoted one still runs its substitutions', () => {
     const push = (cmd) => bashDenial(cmd, ['push'])?.rule ?? null;
     for (const cmd of [
         'cat > /tmp/f <<EOF\ngit push origin main\nEOF',
-        "python3 - <<'PY'\nprint(\"git push\")\nopen('x').write(\"don't\")\nPY",
-        'node --input-type=module -e x <<EOF\ncommitsToPush("git push")\nEOF\necho done',
-        'cat <<-EOF\n\tgit push\n\tEOF',
-        "cat <<'EOF'\n$(git push)\nEOF",
+        "cat > /tmp/f.py <<'PY'\nprint(\"git push\")\nopen('x').write(\"don't\")\nPY",
+        "cat > /tmp/f <<'EOF'\n$(git push)\nEOF",
     ]) assert.equal(push(cmd), null, cmd);
     for (const cmd of [
         'sh <<EOF\ngit push\nEOF', 'bash <<-EOF\n\tgit push\n\tEOF', "zsh <<'X'\ngit push\nX", 'env -i bash <<EOF\ngit push\nEOF',
-        'cat <<EOF\n$(git push)\nEOF', 'cat <<EOF\n`git push`\nEOF',
+        'cat > /tmp/f <<EOF\n$(git push)\nEOF', 'cat > /tmp/f <<EOF\n`git push`\nEOF',
         'cat <<EOF\nx\nEOF\ngit push', 'cat <<EOF >/tmp/f\nx\nEOF\ngit push',
         'cat <<EOF\ngit push', '(( x = 1 << 2 ))\ngit push',
     ]) assert.equal(push(cmd), 'push', cmd);

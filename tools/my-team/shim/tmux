@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+import('../src/tmux-shim.js').catch((err) => {
+    console.error('[my-team tmux shim] fatal:', err?.stack || err);
+    process.exit(1);
+});

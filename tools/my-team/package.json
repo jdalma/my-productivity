@@ -1,0 +1,30 @@
+{
+  "name": "my-team",
+  "version": "0.1.0",
+  "description": "Multi-project tmux worker orchestration with per-worker cwd. Adapted from oh-my-claude-sisyphus.",
+  "type": "module",
+  "bin": {
+    "my-team": "./bin/my-team"
+  },
+  "main": "./src/cli.js",
+  "scripts": {
+    "test": "sh test/run-isolated.sh \"test/**/*.test.js\"",
+    "test:r2": "node test/r2-verify.mjs"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "files": [
+    "bin",
+    "shim",
+    "src",
+    "skills",
+    "plugin.json",
+    "README.md",
+    "LICENSE"
+  ]
+}

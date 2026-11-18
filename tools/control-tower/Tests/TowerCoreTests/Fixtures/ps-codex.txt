@@ -1,0 +1,10 @@
+    1     0 ??       Sat Oct 24 09:26:36 2026     /sbin/launchd    /sbin/launchd
+  900     1 ttys001  Thu Oct 29 21:15:00 2026     -zsh             -zsh
+ 1000   900 ttys001  Thu Oct 29 21:15:20 2026     node             node /opt/homebrew/bin/codex --dangerously-bypass-approvals-and-sandbox
+ 1001  1000 ttys001  Thu Oct 29 21:15:20 2026     /opt/homebrew/li /opt/homebrew/lib/node_modules/@openai/codex/vendor/bin/codex --dangerously-bypass-approvals-and-sandbox
+ 1002  1001 ttys001  Thu Oct 29 21:16:44 2026     /opt/homebrew/li /opt/homebrew/lib/node_modules/@openai/codex/vendor/bin/codex-code-mode-host
+ 2000     1 ??       Fri Oct  2 08:00:00 2026     /opt/homebrew/li /opt/homebrew/lib/node_modules/@openai/codex/vendor/bin/codex app-server --listen stdio
+ 3000     1 ttys002  Thu Oct 29 22:00:00 2026     codex            codex exec --ephemeral -s read-only summarize
+ 4000     1 ??       Thu Oct 29 22:00:00 2026     node             node /tools/control-tower/bin/control-tower
+ 4001  4000 ??       Thu Oct 29 22:00:01 2026     codex            codex -m some-model
+ 5000   900 ttys003  Thu Oct 29 23:00:00 2026     codex            codex resume

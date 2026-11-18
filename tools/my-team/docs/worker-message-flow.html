@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>my-team · 워커 간 메시지 흐름</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #181b24;
+    --panel-2: #1f2330;
+    --border: #2c3140;
+    --text: #e6e8ee;
+    --muted: #9aa1b1;
+    --accent: #6ea8fe;
+    --a-color: #f0883e;   /* A 워커 */
+    --b-color: #6cc7a8;   /* B 워커 */
+    --file: #d2a8ff;      /* 파일 */
+    --bell: #ffd866;      /* 알림 */
+    --danger: #ff6b6b;
+    --code-bg: #11141c;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  header.hero { margin-bottom: 40px; }
+  header.hero h1 { font-size: 2rem; margin: 0 0 8px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tagline { margin-top: 18px; padding: 14px 18px; background: var(--panel);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: var(--radius); font-size: 0.98rem; }
+  .tagline strong { color: var(--accent); }
+
+  h2 { font-size: 1.4rem; margin: 56px 0 18px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border); letter-spacing: -0.3px; }
+  h3 { font-size: 1.1rem; margin: 32px 0 12px; color: var(--text); }
+
+  code, .mono { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  p code, li code, td code { background: var(--code-bg); padding: 2px 6px;
+    border-radius: 5px; font-size: 0.86em; color: #cdd3e0; border: 1px solid var(--border); }
+
+  /* 범례 */
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0 8px; }
+  .legend .chip { display: inline-flex; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 999px; font-size: 0.84rem; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+
+  /* 핵심 3줄 요약 카드 */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr));
+    gap: 16px; margin: 24px 0; }
+  .card { background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px; }
+  .card .big { font-size: 1.6rem; margin-bottom: 6px; }
+  .card h4 { margin: 0 0 6px; font-size: 1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  /* 다이어그램 */
+  .diagram { background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px 24px; margin: 24px 0;
+    overflow-x: auto; }
+  .lane-head { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 8px; }
+  .actor { text-align: center; font-weight: 700; padding: 10px;
+    border-radius: 8px; border: 1px solid var(--border); }
+  .actor.a { color: var(--a-color); border-color: #5a3c25; background: #221913; }
+  .actor.b { color: var(--b-color); border-color: #234035; background: #122019; }
+
+  .flow { display: flex; flex-direction: column; gap: 0; margin-top: 16px; }
+  .step { display: grid; grid-template-columns: 44px 1fr; gap: 14px;
+    align-items: start; padding: 14px 0; border-top: 1px dashed var(--border); }
+  .step:first-child { border-top: none; }
+  .step .num { width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.9rem; flex: none;
+    background: var(--panel-2); border: 1px solid var(--border); }
+  .step.a .num { color: var(--a-color); border-color: #5a3c25; }
+  .step.b .num { color: var(--b-color); border-color: #234035; }
+  .step .body h4 { margin: 0 0 4px; font-size: 1rem; }
+  .step .body .who { font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-right: 8px; }
+  .who.a { color: var(--a-color); } .who.b { color: var(--b-color); }
+  .step .body p { margin: 4px 0 0; color: var(--muted); font-size: 0.92rem; }
+  .writes { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .writes .w { display: flex; align-items: baseline; gap: 8px; font-size: 0.86rem;
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 10px; }
+  .writes .w .tag { font-size: 0.68rem; font-weight: 700; padding: 2px 7px;
+    border-radius: 4px; flex: none; text-transform: uppercase; letter-spacing: 0.3px; }
+  .tag.file { background: #2a2140; color: var(--file); }
+  .tag.bell { background: #3a3015; color: var(--bell); }
+  .tag.del  { background: #3a1f1f; color: var(--danger); }
+  .writes .w .path { color: var(--file); font-family: "SF Mono", Menlo, monospace; font-size: 0.82rem; }
+  .writes .w .note { color: var(--muted); }
+
+  /* 화살표 표시 */
+  .arrow-down { text-align: center; color: var(--border); font-size: 1.2rem; line-height: 1; }
+
+  /* 파일 구조 */
+  .tree { background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 22px; margin: 18px 0;
+    font-family: "SF Mono", Menlo, monospace; font-size: 0.86rem; line-height: 1.9;
+    overflow-x: auto; }
+  .tree .c { color: var(--muted); } /* comment */
+  .tree .f { color: var(--file); }  /* file */
+  .tree .d { color: var(--accent); } /* dir */
+
+  /* 테이블 */
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.4px; }
+  tbody tr:hover { background: var(--panel); }
+  td .path { color: var(--file); font-family: "SF Mono", Menlo, monospace; font-size: 0.82rem; }
+
+  /* 콜아웃 */
+  .callout { border-radius: var(--radius); padding: 16px 20px; margin: 20px 0;
+    border: 1px solid var(--border); background: var(--panel); }
+  .callout.key { border-left: 3px solid var(--accent); }
+  .callout.warn { border-left: 3px solid var(--bell); }
+  .callout h4 { margin: 0 0 8px; font-size: 0.98rem; }
+  .callout h4 .ico { margin-right: 8px; }
+  .callout p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  .callout p + p { margin-top: 8px; }
+
+  pre.code { background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px; overflow-x: auto; font-size: 0.84rem;
+    line-height: 1.6; margin: 14px 0; }
+  pre.code .k { color: var(--accent); } /* key */
+  pre.code .s { color: #a5d6a7; }       /* string */
+  pre.code .cm { color: var(--muted); } /* comment */
+
+  /* FAQ — 설계 근거 */
+  .faq { display: flex; flex-direction: column; gap: 16px; margin: 22px 0; }
+  .qa { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; }
+  .qa .q { padding: 16px 20px; font-weight: 700; font-size: 1.02rem;
+    background: var(--panel-2); border-bottom: 1px solid var(--border);
+    display: flex; gap: 10px; align-items: baseline; }
+  .qa .q .qmark { color: var(--accent); font-weight: 800; flex: none; }
+  .qa .a { padding: 16px 20px; }
+  .qa .a p { margin: 0 0 10px; font-size: 0.94rem; }
+  .qa .a p:last-child { margin-bottom: 0; }
+  .qa .a .tldr { color: var(--accent); font-weight: 700; }
+  .analogy { margin-top: 12px; padding: 12px 16px; border-radius: 8px;
+    background: #14110a; border: 1px solid #4a3f1e; font-size: 0.9rem; color: #e8dcc0; }
+  .analogy b { color: var(--bell); }
+  .lostupdate { margin: 12px 0; background: var(--code-bg); border: 1px solid #4a2330;
+    border-radius: 8px; padding: 12px 14px; font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.8rem; line-height: 1.7; color: #cdd3e0; white-space: pre; overflow-x: auto; }
+  .lostupdate .bad { color: var(--danger); font-weight: 700; }
+  .lostupdate .a1 { color: var(--a-color); }
+  .lostupdate .c1 { color: #e06cc7; }
+  .resp-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.88rem; }
+  .resp-table th, .resp-table td { padding: 9px 12px; border: 1px solid var(--border); text-align: left; }
+  .resp-table th { background: var(--panel-2); color: var(--muted); font-size: 0.8rem; }
+  .resp-table .who-a { color: var(--a-color); font-weight: 700; }
+  .resp-table .who-b { color: var(--b-color); font-weight: 700; }
+
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 0.82rem; }
+  footer code { font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>my-team · 워커 간 메시지 흐름</h1>
+    <p>A 워커가 B 워커에게 작업을 요청할 때, 무엇이 어떤 파일에 적히는가</p>
+    <div class="tagline">
+      한 줄 요약 — <strong>지시 본문은 파일로 흐르고, 워커 pane에는 "수신함 확인하라"는 알림만 들어간다.</strong>
+      알림은 유실될 수 있어, 받는 워커가 스스로 수신함을 폴링하는 것이 진짜 전달 보장이다.
+    </div>
+  </header>
+
+  <!-- 핵심 개념 카드 -->
+  <section>
+    <h2>먼저 알아야 할 3가지</h2>
+    <div class="summary">
+      <div class="card">
+        <div class="big">📄</div>
+        <h4>본문은 파일로</h4>
+        <p>지시 내용은 tmux를 타지 않는다. <code>incoming-spool → mailbox → archive</code> 파일을 거친다.</p>
+      </div>
+      <div class="card">
+        <div class="big">🔔</div>
+        <h4>pane엔 알림만</h4>
+        <p>받는 워커 pane엔 <code>new-message:A</code> 한 줄(본문 없음)만 입력된다. best-effort라 유실 가능.</p>
+      </div>
+      <div class="card">
+        <div class="big">🔄</div>
+        <h4>완전 비동기</h4>
+        <p>A는 답을 기다리며 멈추지 않는다. B는 자기 사이클마다 수신함을 직접 폴링한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 범례 -->
+  <section>
+    <h2>범례</h2>
+    <div class="legend">
+      <span class="chip"><span class="dot" style="background:var(--a-color)"></span> A 워커 (요청자)</span>
+      <span class="chip"><span class="dot" style="background:var(--b-color)"></span> B 워커 (수신자)</span>
+      <span class="chip"><span class="dot" style="background:var(--file)"></span> 파일 쓰기/읽기</span>
+      <span class="chip"><span class="dot" style="background:var(--bell)"></span> tmux 알림 (벨)</span>
+      <span class="chip"><span class="dot" style="background:var(--danger)"></span> 파일 삭제</span>
+    </div>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      경로는 모두 팀 상태 루트 <code>~/.my-team/sessions/&lt;team&gt;/</code> 기준이다.
+      아래 예시는 팀 <code>demo</code>, message_id <code>1717…a1b2c3</code> 가정.
+    </p>
+  </section>
+
+  <!-- 메인 타임라인 다이어그램 -->
+  <section>
+    <h2>한 장으로 보는 데이터 흐름</h2>
+    <p style="color:var(--muted); font-size:0.92rem;">
+      본문은 <strong style="color:var(--file)">파일 더미(spool)</strong>로 떨어졌다가 수신자가 흡수하면서
+      <strong style="color:var(--b-color)">map(inbox)</strong>으로 바뀐다. id로 바로 찾는 건 map 쪽이고, spool은 통째로 훑어 흡수한다.
+      <strong style="color:var(--bell)">벨</strong>은 본문과 무관한 별도(점선) 알림 경로다.
+    </p>
+    <div class="diagram" style="padding-bottom:12px;">
+      <svg viewBox="0 0 1000 880" width="100%" style="max-width:1000px; display:block; margin:0 auto;" font-family="-apple-system, 'Segoe UI', sans-serif">
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#6ea8fe"/>
+          </marker>
+          <marker id="arrowG" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#6cc7a8"/>
+          </marker>
+          <marker id="arrowBell" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#ffd866"/>
+          </marker>
+        </defs>
+
+        <!-- ===== 3개 레인 배경 ===== -->
+        <rect x="20"  y="50" width="270" height="720" rx="14" fill="#221913" opacity="0.45"/>
+        <rect x="365" y="50" width="270" height="720" rx="14" fill="#1a1f2b" opacity="0.55"/>
+        <rect x="710" y="50" width="270" height="720" rx="14" fill="#122019" opacity="0.45"/>
+        <text x="155" y="38" text-anchor="middle" fill="#f0883e" font-weight="700" font-size="15">A 워커 (요청자)</text>
+        <text x="500" y="38" text-anchor="middle" fill="#9aa1b1" font-weight="700" font-size="15">공유 상태 (파일시스템)</text>
+        <text x="845" y="38" text-anchor="middle" fill="#6cc7a8" font-weight="700" font-size="15">B 워커 (수신자)</text>
+
+        <!-- ============ A 레인 박스들 ============ -->
+        <!-- A.LLM -->
+        <rect x="45" y="70" width="220" height="52" rx="9" fill="#1f2330" stroke="#5a3c25"/>
+        <text x="155" y="91" text-anchor="middle" fill="#e6e8ee" font-size="13" font-weight="600">A.LLM</text>
+        <text x="155" y="109" text-anchor="middle" fill="#9aa1b1" font-size="11" font-family="monospace">api send-message</text>
+
+        <!-- A sent_pending -->
+        <rect x="45" y="190" width="220" height="70" rx="9" fill="#11141c" stroke="#2c3140"/>
+        <text x="58" y="210" fill="#d2a8ff" font-size="11" font-family="monospace">mailbox/A.json</text>
+        <text x="58" y="228" fill="#9aa1b1" font-size="10.5">sent_pending <tspan fill="#6ea8fe">{ map }</tspan></text>
+        <text x="58" y="246" fill="#6b7280" font-size="9.5">"답 기다리는 질문" 장부</text>
+
+        <!-- A archive -->
+        <rect x="45" y="330" width="220" height="46" rx="9" fill="#11141c" stroke="#2c3140"/>
+        <text x="58" y="350" fill="#d2a8ff" font-size="11" font-family="monospace">archive/A.jsonl</text>
+        <text x="58" y="367" fill="#6b7280" font-size="9.5">direction:"out" append</text>
+
+        <!-- ============ 중앙 레인 박스들 ============ -->
+        <!-- incoming-spool 파일 더미 -->
+        <rect x="385" y="150" width="230" height="120" rx="10" fill="#160f24" stroke="#3a2d54"/>
+        <text x="500" y="172" text-anchor="middle" fill="#d2a8ff" font-size="12" font-weight="700">incoming-spool/B/</text>
+        <text x="500" y="188" text-anchor="middle" fill="#6b7280" font-size="9.5">📁 파일 더미 · map 아님</text>
+        <rect x="402" y="200" width="196" height="26" rx="5" fill="#1f1633" stroke="#4a3a6e"/>
+        <text x="412" y="217" fill="#c9b3f0" font-size="10" font-family="monospace">1717…a1b2c3.json ◀ 본문</text>
+        <rect x="402" y="232" width="196" height="26" rx="5" fill="#1a1228" stroke="#3a2d54" opacity="0.7"/>
+        <text x="412" y="249" fill="#8a7bb0" font-size="10" font-family="monospace">…다른 송신자 파일</text>
+
+        <!-- events.jsonl -->
+        <rect x="385" y="330" width="230" height="46" rx="9" fill="#11141c" stroke="#2c3140"/>
+        <text x="398" y="350" fill="#d2a8ff" font-size="11" font-family="monospace">events.jsonl</text>
+        <text x="398" y="367" fill="#6b7280" font-size="9.5">팀 타임라인 (monitor tail)</text>
+
+        <!-- ============ B 레인 박스들 ============ -->
+        <!-- B.LLM -->
+        <rect x="735" y="70" width="220" height="52" rx="9" fill="#1f2330" stroke="#234035"/>
+        <text x="845" y="91" text-anchor="middle" fill="#e6e8ee" font-size="13" font-weight="600">B.LLM</text>
+        <text x="845" y="109" text-anchor="middle" fill="#9aa1b1" font-size="11" font-family="monospace">api mailbox-list (폴링)</text>
+
+        <!-- B inbox -->
+        <rect x="735" y="190" width="220" height="70" rx="9" fill="#11141c" stroke="#234035"/>
+        <text x="748" y="210" fill="#d2a8ff" font-size="11" font-family="monospace">mailbox/B.json</text>
+        <text x="748" y="228" fill="#9aa1b1" font-size="10.5">inbox <tspan fill="#6cc7a8">{ map: id→msg }</tspan></text>
+        <text x="748" y="246" fill="#6cc7a8" font-size="9.5">★ id로 O(1) 조회 ★</text>
+
+        <!-- B archive -->
+        <rect x="735" y="330" width="220" height="46" rx="9" fill="#11141c" stroke="#234035"/>
+        <text x="748" y="350" fill="#d2a8ff" font-size="11" font-family="monospace">archive/B.jsonl</text>
+        <text x="748" y="367" fill="#6b7280" font-size="9.5">consumed + direction:"in"</text>
+
+        <!-- ================= 화살표 + 번호 배지 ================= -->
+        <!-- 배지 헬퍼: 원 + 숫자 -->
+
+        <!-- ① A.LLM → A.sent_pending (세로) -->
+        <line x1="155" y1="122" x2="155" y2="188" stroke="#6ea8fe" stroke-width="2" marker-end="url(#arrow)"/>
+        <circle cx="155" cy="155" r="12" fill="#0f1117" stroke="#6ea8fe" stroke-width="1.5"/>
+        <text x="155" y="159" text-anchor="middle" fill="#6ea8fe" font-size="12" font-weight="700">1</text>
+
+        <!-- ② A.sent_pending → A.archive (세로) -->
+        <line x1="155" y1="260" x2="155" y2="328" stroke="#6ea8fe" stroke-width="2" marker-end="url(#arrow)"/>
+        <circle cx="155" cy="294" r="12" fill="#0f1117" stroke="#6ea8fe" stroke-width="1.5"/>
+        <text x="155" y="298" text-anchor="middle" fill="#6ea8fe" font-size="12" font-weight="700">2</text>
+
+        <!-- ③ A.LLM → spool (가로, 핵심 굵게) -->
+        <line x1="265" y1="96" x2="500" y2="96" stroke="#6ea8fe" stroke-width="3"/>
+        <line x1="500" y1="96" x2="500" y2="148" stroke="#6ea8fe" stroke-width="3" marker-end="url(#arrow)"/>
+        <circle cx="383" cy="96" r="13" fill="#0f1117" stroke="#6ea8fe" stroke-width="2"/>
+        <text x="383" y="100" text-anchor="middle" fill="#6ea8fe" font-size="13" font-weight="700">3</text>
+        <text x="512" y="138" text-anchor="start" fill="#6ea8fe" font-size="10.5" font-weight="700">본문 파일 투하 (전달 commit)</text>
+
+        <!-- ④ A.archive → events (가로) -->
+        <line x1="265" y1="353" x2="383" y2="353" stroke="#6ea8fe" stroke-width="1.6" marker-end="url(#arrow)" opacity="0.85"/>
+        <circle cx="324" cy="353" r="11" fill="#0f1117" stroke="#6ea8fe" stroke-width="1.5"/>
+        <text x="324" y="357" text-anchor="middle" fill="#6ea8fe" font-size="11" font-weight="700">4</text>
+
+        <!-- ⑤ spool → B.inbox (가로, 흡수 = 구조 전환) -->
+        <line x1="615" y1="213" x2="733" y2="213" stroke="#6cc7a8" stroke-width="3" marker-end="url(#arrowG)"/>
+        <circle cx="674" cy="213" r="13" fill="#0f1117" stroke="#6cc7a8" stroke-width="2"/>
+        <text x="674" y="217" text-anchor="middle" fill="#6cc7a8" font-size="13" font-weight="700">5</text>
+        <text x="674" y="200" text-anchor="middle" fill="#6cc7a8" font-size="10.5" font-weight="700">흡수: 더미 → map</text>
+
+        <!-- B.LLM → B.inbox (폴링이 흡수를 유발, 세로 점) -->
+        <line x1="845" y1="122" x2="845" y2="188" stroke="#6cc7a8" stroke-width="1.6" marker-end="url(#arrowG)" opacity="0.6" stroke-dasharray="4 4"/>
+        <text x="858" y="160" fill="#6cc7a8" font-size="9.5" opacity="0.8">폴링이</text>
+        <text x="858" y="172" fill="#6cc7a8" font-size="9.5" opacity="0.8">흡수 유발</text>
+
+        <!-- ⑥ B.inbox → B.archive (세로, 처리완료) -->
+        <line x1="845" y1="260" x2="845" y2="328" stroke="#6cc7a8" stroke-width="2" marker-end="url(#arrowG)"/>
+        <circle cx="845" cy="294" r="12" fill="#0f1117" stroke="#6cc7a8" stroke-width="1.5"/>
+        <text x="845" y="298" text-anchor="middle" fill="#6cc7a8" font-size="12" font-weight="700">6</text>
+        <text x="858" y="290" fill="#6cc7a8" font-size="9.5">처리완료</text>
+
+        <!-- spool 삭제 메모 (박스 아래, 안 겹침) -->
+        <text x="500" y="288" text-anchor="middle" fill="#ff6b6b" font-size="9.5">흡수 후 spool 파일 삭제 ✕</text>
+
+        <!-- ================= ⑦ 벨: 별도 점선 우회 경로 (상단 빈 띠로 우회) ================= -->
+        <!-- A.LLM 좌측면(y=96) → 레인 밖 왼쪽(x=33) → 상단 빈 띠(y=56) → 가로질러 →
+             레인 밖 오른쪽(x=967) → B.LLM 우측면(y=96) 으로 진입.
+             본문 박스/화살표는 모두 y>=70 이고 ③ 파란선은 y=96 안쪽이라 교차하지 않는다. -->
+        <line x1="45"  y1="96" x2="33"  y2="96" stroke="#ffd866" stroke-width="1.8" stroke-dasharray="6 5" opacity="0.9"/>
+        <line x1="33"  y1="96" x2="33"  y2="56" stroke="#ffd866" stroke-width="1.8" stroke-dasharray="6 5" opacity="0.9"/>
+        <line x1="33"  y1="56" x2="967" y2="56" stroke="#ffd866" stroke-width="1.8" stroke-dasharray="6 5" opacity="0.9"/>
+        <line x1="967" y1="56" x2="967" y2="96" stroke="#ffd866" stroke-width="1.8" stroke-dasharray="6 5" opacity="0.9"/>
+        <line x1="967" y1="96" x2="957" y2="96" stroke="#ffd866" stroke-width="1.8" stroke-dasharray="6 5" opacity="0.9" marker-end="url(#arrowBell)"/>
+        <circle cx="500" cy="56" r="13" fill="#0f1117" stroke="#ffd866" stroke-width="2"/>
+        <text x="500" y="60" text-anchor="middle" fill="#ffd866" font-size="13" font-weight="700">7</text>
+        <text x="500" y="78" text-anchor="middle" fill="#ffd866" font-size="10.5" font-weight="700">🔔 벨 "new-message:A" — 본문 없음 · best-effort · 유실 가능</text>
+
+        <!-- ================= 하단 설명 영역 ================= -->
+        <!-- 단계 요약 띠 -->
+        <rect x="45" y="510" width="910" height="58" rx="10" fill="#11141c" stroke="#2c3140"/>
+        <text x="60" y="532" fill="#e6e8ee" font-size="11.5" font-weight="700">단계 요약</text>
+        <text x="60" y="552" fill="#9aa1b1" font-size="11">
+          <tspan fill="#6ea8fe" font-weight="700">①②③④</tspan> A가 송신 (sent_pending → archive out → spool 투하 → events) ·
+          <tspan fill="#ffd866" font-weight="700">⑦</tspan> 벨 알림(본문X) ·
+          <tspan fill="#6cc7a8" font-weight="700">⑤⑥</tspan> B가 폴링→흡수→처리완료
+        </text>
+
+        <!-- 비동기 강조 2칸 -->
+        <rect x="45" y="588" width="445" height="50" rx="9" fill="#1a130a" stroke="#5a4a1f"/>
+        <text x="267" y="609" text-anchor="middle" fill="#ffd866" font-size="11.5" font-weight="700">A는 멈추지 않는다</text>
+        <text x="267" y="627" text-anchor="middle" fill="#9aa1b1" font-size="10">③④ 후 바로 자기 일 계속 (응답 대기 안 함)</text>
+
+        <rect x="510" y="588" width="445" height="50" rx="9" fill="#0a1a14" stroke="#1f5a40"/>
+        <text x="732" y="609" text-anchor="middle" fill="#6cc7a8" font-size="11.5" font-weight="700">B는 스스로 폴링한다</text>
+        <text x="732" y="627" text-anchor="middle" fill="#9aa1b1" font-size="10">벨 ⑦이 유실돼도 사이클마다 ⑤로 흡수</text>
+
+        <!-- 두 구조 차이 -->
+        <rect x="45" y="658" width="910" height="96" rx="10" fill="#11141c" stroke="#2c3140"/>
+        <text x="500" y="682" text-anchor="middle" fill="#e6e8ee" font-size="12.5" font-weight="700">왜 spool과 mailbox가 따로 있나 — 두 구조의 차이</text>
+        <text x="70" y="708" fill="#d2a8ff" font-size="11.5" font-weight="700">📁 spool (③에서 씀)</text>
+        <text x="70" y="726" fill="#9aa1b1" font-size="10.5">파일 1건=파일 1개 · readdir로 통째 흡수 · 송신자가 쓰는 유일한 곳</text>
+        <text x="70" y="744" fill="#6b7280" font-size="10">→ 파일명이 고유 id라 동시 송신해도 충돌 없음</text>
+        <text x="540" y="708" fill="#6cc7a8" font-size="11.5" font-weight="700">🗂 inbox (⑤에서 채움)</text>
+        <text x="540" y="726" fill="#9aa1b1" font-size="10.5">map(id→msg) · id로 O(1) 조회 · 수신자만 씀</text>
+        <text x="540" y="744" fill="#6b7280" font-size="10">→ "mailbox는 소유자만 쓴다" 불변식 유지</text>
+      </svg>
+    </div>
+
+    <h2>단계별 타임라인 (텍스트)</h2>
+    <div class="diagram">
+      <div class="lane-head">
+        <div class="actor a">A 워커 (요청자)</div>
+        <div class="actor b">B 워커 (수신자)</div>
+      </div>
+
+      <div class="flow">
+
+        <!-- STEP 1 -->
+        <div class="step a">
+          <div class="num">1</div>
+          <div class="body">
+            <h4><span class="who a">A 송신</span>내 "미해결 질문" 장부에 먼저 기록</h4>
+            <p><code>my-team api send-message</code> 호출. <code>expects_reply:true</code>일 때만, 답을 받기 전에 먼저 내 장부에 적는다 → 이후 무슨 실패가 나도 "내가 보냈다"는 사실은 남는다.</p>
+            <div class="writes">
+              <div class="w"><span class="tag file">쓰기</span><span class="path">mailbox/A.json</span><span class="note">→ <code>sent_pending</code> 맵에 이 질문 추가</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 2 -->
+        <div class="step a">
+          <div class="num">2</div>
+          <div class="body">
+            <h4><span class="who a">A 송신</span>내 송신 로그에 영구 기록</h4>
+            <p>보낸 메시지를 내 archive에 <code>direction:"out"</code>으로 남긴다. 나중에 B의 답장이 이 id를 가리킬 때 근거가 된다.</p>
+            <div class="writes">
+              <div class="w"><span class="tag file">append</span><span class="path">archive/A.jsonl</span><span class="note">원본 + <code>"direction":"out"</code> 한 줄</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 3 -->
+        <div class="step a">
+          <div class="num">3</div>
+          <div class="body">
+            <h4><span class="who a">A 송신</span>★ B의 spool에 본문 파일 투하 — 진짜 "전달" 순간 ★</h4>
+            <p>B의 incoming-spool 디렉토리에 <strong>메시지 1건당 파일 1개</strong>(<code>&lt;message_id&gt;.json</code>)를 떨군다. 여긴 id로 조회하는 map이 아니라 <strong>흡수 대기 중인 파일 더미(spool)</strong>다. 파일명이 고유 message_id라 여러 워커가 동시에 B에게 보내도 충돌하지 않는다. <strong>이 파일이 떨어진 순간 전달은 완료</strong>다.</p>
+            <div class="writes">
+              <div class="w"><span class="tag file">쓰기</span><span class="path">incoming-spool/B/&lt;id&gt;.json</span><span class="note">지시 본문 전체가 담긴 파일</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 4 -->
+        <div class="step a">
+          <div class="num">4</div>
+          <div class="body">
+            <h4><span class="who a">A 송신</span>B에게 벨 + 팀 로그 기록</h4>
+            <p>B의 pane에 짧은 알림을 타이핑한다. <strong>본문은 없다.</strong> "수신함 확인해"라는 신호일 뿐이며 pane이 바쁘면 유실될 수 있다. 동시에 팀 전체 타임라인에 audit 한 줄을 남긴다.</p>
+            <div class="writes">
+              <div class="w"><span class="tag bell">벨</span><span class="path" style="color:var(--bell)">B.pane ⌨ "new-message:A"</span><span class="note">tmux send-keys · best-effort · 유실 가능</span></div>
+              <div class="w"><span class="tag file">append</span><span class="path">events.jsonl</span><span class="note">monitor가 tail하는 팀 통합 로그 (본문 포함)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-down">⋮ &nbsp; A는 여기서 <strong style="color:var(--a-color)">멈추지 않고 자기 일을 계속한다</strong> &nbsp; ⋮</div>
+
+        <!-- STEP 5 -->
+        <div class="step b">
+          <div class="num">5</div>
+          <div class="body">
+            <h4><span class="who b">B 수신</span>수신함 폴링 → 본문 흡수</h4>
+            <p>B는 <em>벨을 봤을 때</em> 또는 <em>자기 작업 사이클이 끝날 때마다</em> <code>my-team api mailbox-list</code>를 호출한다. spool의 파일을 읽어 내 mailbox로 옮기고 spool 파일은 삭제한다. <strong>여기서 비로소 B가 A의 지시 본문을 읽는다.</strong></p>
+            <div class="writes">
+              <div class="w"><span class="tag file">쓰기</span><span class="path">mailbox/B.json</span><span class="note">→ <code>inbox</code> 맵에 흡수된 본문 추가</span></div>
+              <div class="w"><span class="tag del">삭제</span><span class="path">incoming-spool/B/&lt;id&gt;.json</span><span class="note">흡수 후 unlink</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 6 -->
+        <div class="step b">
+          <div class="num">6</div>
+          <div class="body">
+            <h4><span class="who b">B 수신</span>처리 완료 표시</h4>
+            <p>메시지를 처리한 뒤 <code>my-team api mailbox-mark-delivered</code>로 소비 처리한다. archive에 영구 기록하고 inbox에서 제거 → 다음 폴링 때 다시 안 뜬다.</p>
+            <div class="writes">
+              <div class="w"><span class="tag file">append</span><span class="path">archive/B.jsonl</span><span class="note">원본 + <code>"consumed_at"</code> + <code>"direction":"in"</code></span></div>
+              <div class="w"><span class="tag del">삭제</span><span class="path">mailbox/B.json → inbox[&lt;id&gt;]</span><span class="note">해당 항목 제거</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 7 -->
+        <div class="step b">
+          <div class="num">7</div>
+          <div class="body">
+            <h4><span class="who b">B 응답</span>(답이 필요했다면) 답장 송신</h4>
+            <p>B가 <code>reply_to:&lt;원본 id&gt;</code>를 달아 A에게 답장한다. 이건 1~6단계를 <strong>방향만 B→A로 바꿔</strong> 반복하는 것. 답장은 보통 <code>expects_reply:false</code>.</p>
+            <div class="writes">
+              <div class="w"><span class="tag file">append</span><span class="path">archive/B.jsonl</span><span class="note"><code>direction:"out"</code> (B의 송신)</span></div>
+              <div class="w"><span class="tag file">쓰기</span><span class="path">incoming-spool/A/&lt;id2&gt;.json</span><span class="note">답장 본문</span></div>
+              <div class="w"><span class="tag bell">벨</span><span class="path" style="color:var(--bell)">A.pane ⌨ "new-message:B"</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 8 -->
+        <div class="step a">
+          <div class="num">8</div>
+          <div class="body">
+            <h4><span class="who a">A 수신</span>답 흡수 → 미해결 질문 자동 정리</h4>
+            <p>A가 다음 <code>mailbox-list</code>로 답을 흡수할 때, 답의 <code>reply_to</code>가 1단계에서 적어둔 <code>sent_pending</code> 항목과 일치하면 <strong>자동으로 삭제</strong>된다. A의 "답 기다리는 질문" 장부에서 이 건이 닫힌다.</p>
+            <div class="writes">
+              <div class="w"><span class="tag file">쓰기</span><span class="path">mailbox/A.json → inbox</span><span class="note">답장 본문 흡수</span></div>
+              <div class="w"><span class="tag del">삭제</span><span class="path">mailbox/A.json → sent_pending[&lt;id&gt;]</span><span class="note">질문 해결됨 → 자동 제거</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="callout key">
+      <h4><span class="ico">🔑</span>왜 spool과 mailbox를 분리하나?</h4>
+      <p><strong>mailbox 파일은 소유자(수신자)만 쓴다</strong>는 불변식을 지키기 위해서다. 보내는 워커는 절대 받는 워커의 mailbox를 직접 건드리지 않고, 자기 몫의 spool 파일만 떨군다. 받는 워커가 그것을 자기 mailbox로 흡수한다. 그래서 여러 워커가 동시에 같은 수신자에게 보내도 (파일명이 고유 id라) 서로 덮어쓰지 않는다.</p>
+    </div>
+  </section>
+
+  <!-- 파일 구조 -->
+  <section>
+    <h2>파일이 사는 곳</h2>
+    <div class="tree">
+<span class="d">~/.my-team/sessions/demo/</span>
+├── <span class="f">manifest.json</span>              <span class="c"># 팀 메타 (status/shutdown이 읽음)</span>
+├── <span class="f">events.jsonl</span>               <span class="c"># 팀 전체 메시지 타임라인 (monitor가 tail)</span>
+├── <span class="d">mailbox/</span>
+│   ├── <span class="f">A.json</span>                 <span class="c"># A 소유: A의 inbox + A의 sent_pending</span>
+│   └── <span class="f">B.json</span>                 <span class="c"># B 소유: B의 inbox + B의 sent_pending</span>
+├── <span class="d">incoming-spool/</span>
+│   ├── <span class="d">A/</span>&lt;id&gt;.json            <span class="c"># A에게 온 메시지 (수신 대기, 흡수 후 삭제)</span>
+│   └── <span class="d">B/</span>&lt;id&gt;.json            <span class="c"># B에게 온 메시지 (수신 대기, 흡수 후 삭제)</span>
+└── <span class="d">archive/</span>
+    ├── <span class="f">A.jsonl</span>                <span class="c"># A의 송수신 영구 기록 (out/in)</span>
+    └── <span class="f">B.jsonl</span>                <span class="c"># B의 송수신 영구 기록 (out/in)</span>
+    </div>
+  </section>
+
+  <!-- 파일별 책임 표 -->
+  <section>
+    <h2>파일별 역할 한눈에</h2>
+    <table>
+      <thead>
+        <tr><th>파일</th><th>역할</th><th>누가 쓰나</th><th>본문 포함?</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="path">incoming-spool/&lt;to&gt;/&lt;id&gt;.json</span></td>
+          <td>전달 대기 파일 더미(spool). 메시지 1건=파일 1개. <strong>전달 commit 지점</strong> (map 아님)</td>
+          <td>송신자가 쓰고, 수신자가 흡수 후 삭제</td>
+          <td>✅ 본문</td>
+        </tr>
+        <tr>
+          <td><span class="path">mailbox/&lt;worker&gt;.json</span></td>
+          <td><code>inbox</code>(받은 메시지) + <code>sent_pending</code>(답 기다리는 내 질문)</td>
+          <td>소유 워커만 (atomic write)</td>
+          <td>✅ 본문</td>
+        </tr>
+        <tr>
+          <td><span class="path">archive/&lt;worker&gt;.jsonl</span></td>
+          <td>송수신 영구 로그. <code>reply_to</code> 추적의 근거</td>
+          <td>소유 워커 (append-only)</td>
+          <td>✅ 본문</td>
+        </tr>
+        <tr>
+          <td><span class="path">events.jsonl</span></td>
+          <td>팀 전체 타임라인 SSOT. <code>monitor</code>가 실시간 tail</td>
+          <td>송신 API (append-only)</td>
+          <td>✅ 본문</td>
+        </tr>
+        <tr>
+          <td><span class="path">&lt;수신자 pane&gt;</span> 벨</td>
+          <td>"수신함 확인하라" 알림. 파일 아님</td>
+          <td>tmux send-keys (best-effort)</td>
+          <td>❌ 알림만</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 메시지 객체 샘플 -->
+  <section>
+    <h2>실제 데이터 모양</h2>
+
+    <h3>spool / inbox 에 담기는 메시지 (본문)</h3>
+    <pre class="code"><span class="cm">// incoming-spool/B/1717000000000-a1b2c3.json</span>
+{
+  <span class="k">"message_id"</span>: <span class="s">"1717000000000-a1b2c3"</span>,
+  <span class="k">"from_worker"</span>: <span class="s">"A"</span>,
+  <span class="k">"to_worker"</span>: <span class="s">"B"</span>,
+  <span class="k">"body"</span>: <span class="s">"order 도메인의 캐시 키 설계 좀 검토해줘. PR #42 참고."</span>,
+  <span class="k">"reply_to"</span>: null,            <span class="cm">// 답장이면 원본 message_id</span>
+  <span class="k">"expects_reply"</span>: true,
+  <span class="k">"created_at"</span>: <span class="s">"2026-05-29T10:00:00.000Z"</span>
+}</pre>
+
+    <h3>A의 mailbox — sent_pending (답 기다리는 질문 장부)</h3>
+    <pre class="code"><span class="cm">// mailbox/A.json</span>
+{
+  <span class="k">"schema_version"</span>: 2,
+  <span class="k">"worker"</span>: <span class="s">"A"</span>,
+  <span class="k">"inbox"</span>: { <span class="cm">/* A가 받은 메시지들 */</span> },
+  <span class="k">"sent_pending"</span>: {
+    <span class="k">"1717000000000-a1b2c3"</span>: {       <span class="cm">// 8단계에서 답 오면 자동 삭제</span>
+      <span class="k">"message_id"</span>: <span class="s">"1717000000000-a1b2c3"</span>,
+      <span class="k">"to_worker"</span>: <span class="s">"B"</span>,
+      <span class="k">"body"</span>: <span class="s">"order 도메인의 캐시 키 설계 좀 검토해줘. PR #42 참고."</span>,
+      <span class="k">"expects_reply"</span>: true,
+      <span class="k">"sent_at"</span>: <span class="s">"2026-05-29T10:00:00.000Z"</span>
+    }
+  }
+}</pre>
+
+    <h3>archive 한 줄 (방향 표시)</h3>
+    <pre class="code"><span class="cm">// archive/A.jsonl — A가 보낼 때</span>
+{ ...원본, <span class="k">"direction"</span>: <span class="s">"out"</span> }
+
+<span class="cm">// archive/B.jsonl — B가 처리 완료할 때</span>
+{ ...원본, <span class="k">"consumed_at"</span>: <span class="s">"2026-05-29T10:05:00.000Z"</span>, <span class="k">"direction"</span>: <span class="s">"in"</span> }</pre>
+  </section>
+
+  <!-- 설계 근거 FAQ -->
+  <section>
+    <h2>설계 근거 — 자주 나오는 질문</h2>
+    <div class="faq">
+
+      <!-- Q1: incoming-spool 왜 필요? -->
+      <div class="qa">
+        <div class="q"><span class="qmark">Q.</span><span>incoming-spool이 왜 필요한가? 그냥 B의 mailbox에 바로 쓰면 안 되나?</span></div>
+        <div class="a">
+          <p><span class="tldr">동시에 여러 워커가 한 수신자에게 보낼 때 메시지가 사라지는 것(lost update)을 막기 위해서다.</span></p>
+          <p>mailbox에 메시지를 추가하는 건 append가 아니라 <strong>read → modify → write 전체</strong>다. JSON 객체(map)는 부분 추가가 불가능해서, 키 하나를 넣으려면 파일 전체를 읽고 통째로 다시 써야 한다(<code>atomicWriteJson</code> = 전체 덮어쓰기). 그래서 A와 C가 동시에 B에게 보내면:</p>
+          <div class="lostupdate"><span class="a1">A</span>: B.json 읽음 (inbox = {})        <span class="c1">C</span>: B.json 읽음 (inbox = {})
+<span class="a1">A</span>: inbox에 msgA 추가 → {msgA}      <span class="c1">C</span>: inbox에 msgC 추가 → {msgC}
+<span class="a1">A</span>: B.json 통째로 씀 → {msgA}
+                                  <span class="c1">C</span>: B.json 통째로 씀 → {msgC}  <span class="bad">← msgA 덮어씀!</span>
+최종: B.json = {msgC}              <span class="bad">← msgA 영구 소실</span></div>
+          <p><code>atomicWriteJson</code>은 "쓰는 도중 깨진 파일이 보이는 것(torn write)"은 막지만, 위 lost update는 못 막는다 — 각 쓰기는 완결됐고 더 늦은 쓰기가 앞 결과를 덮은 것뿐이다.</p>
+          <p>spool은 <strong>메시지 1건 = 파일 1개</strong>(파일명 = 고유 message_id)다. 송신자는 자기 id로 된 새 파일 하나만 만들 뿐 read-modify-write를 안 하므로 충돌이 원천 불가능하다. 덕분에 <strong>"mailbox는 소유자만 쓴다"</strong>는 불변식이 지켜진다 — 송신자는 spool에만 쓰고, mailbox는 수신자 한 명만 쓰는 단일 writer가 된다.</p>
+          <div class="analogy">💡 <b>비유</b> — JSON map은 "공책 한 페이지를 통째로 베껴 다시 쓰는 것". 두 사람이 같은 페이지를 동시에 베끼면 늦게 끝낸 쪽이 상대 글을 지운다. spool은 "각자 포스트잇 한 장씩 붙이기" — 서로 겹칠 일이 없다.</div>
+          <p style="margin-top:12px; color:var(--muted); font-size:0.88rem;">※ 현재 운영 모델(사람 1명이 명령을 직렬 실행)에선 동시 송신이 실제로 안 일어나 이 race가 아직 실현되진 않는다. 워커끼리 서로를 오케스트레이션하는 단계를 대비한 <strong>선제적 안전장치</strong>다.</p>
+        </div>
+      </div>
+
+      <!-- Q2: B는 어떻게 자기 메시지를 구분? -->
+      <div class="qa">
+        <div class="q"><span class="qmark">Q.</span><span>B는 어떤 게 자기에게 온 메시지인지 어떻게 구분하나?</span></div>
+        <div class="a">
+          <p><span class="tldr">구분하지 않는다. 디렉토리 경로가 이미 수신자별로 나뉘어 있다.</span></p>
+          <p>spool 경로는 <code>incoming-spool/&lt;to_worker&gt;/&lt;message_id&gt;.json</code> 구조다. 수신자 이름이 <strong>디렉토리명에 박혀 있다</strong>. A가 B에게 보낸 메시지는 처음부터 <code>incoming-spool/B/</code> 안에만 들어가고, C가 D에게 보낸 건 <code>incoming-spool/D/</code>로 — 물리적으로 다른 폴더다.</p>
+          <p>B가 <code>mailbox-list</code>를 호출하면 <code>worker:"B"</code> 인자로 <strong><code>incoming-spool/B/</code>만</strong> <code>readdir</code>로 훑는다. 다른 워커의 폴더는 쳐다보지도 않는다. 그래서 B 입장에선 "이게 내 거 맞나?"를 판단할 필요가 없다 — <strong>자기 폴더 안에 있으면 전부 자기 것</strong>이다.</p>
+          <p>분류는 <strong>받는 쪽이 아니라 보내는 쪽</strong>에서 끝난다. 송신 시점에 <code>to_worker:"B"</code> → <code>incoming-spool/B/</code>로 라우팅되기 때문이다.</p>
+          <div class="analogy">💡 <b>비유</b> — 이름표별로 나뉜 아파트 우편함. 집배원(A)이 "B호" 칸에 편지를 넣고 초인종(벨)을 누르면, B는 자기 칸만 열어보면 된다. "내 거 맞나" 확인할 필요 없이 B 칸에 든 건 다 B 것이다. 벨 문자열 <code>new-message:A</code>도 "어떤 메시지"가 아니라 "A가 뭔가 보냈으니 확인해"라는 신호일 뿐이다.</div>
+        </div>
+      </div>
+
+      <!-- Q3: 흡수는 누가? -->
+      <div class="qa">
+        <div class="q"><span class="qmark">Q.</span><span>spool 안의 메시지를 mailbox로 옮기는 건 누가 담당하나?</span></div>
+        <div class="a">
+          <p><span class="tldr">전적으로 수신 워커가 담당한다. 그리고 이게 동시성 안전의 핵심이다.</span></p>
+          <table class="resp-table">
+            <thead><tr><th>작업</th><th>담당</th><th>함수</th></tr></thead>
+            <tbody>
+              <tr><td>spool에 파일 떨구기</td><td class="who-a">송신 워커 (A)</td><td><code>dropSpoolMessage</code></td></tr>
+              <tr><td>spool → mailbox 흡수</td><td class="who-b">수신 워커 (B)</td><td><code>absorbIncomingSpool</code></td></tr>
+            </tbody>
+          </table>
+          <p>송신자는 <code>incoming-spool/B/</code>에 파일을 <strong>넣기만</strong> 한다. 그것을 mailbox로 옮기는 건 B가 <code>mailbox-list</code>를 호출할 때 일어난다:</p>
+          <pre class="code"><span class="cm">absorbIncomingSpool(team, B, ...):</span>
+  1. incoming-spool/B/ 의 모든 *.json 을 readdir
+  2. mailbox/B.json 을 읽어서
+  3. 각 spool 파일 내용을 inbox 맵에 추가
+  4. mailbox/B.json 을 통째로 다시 씀   <span class="cm">// ★ B만 하는 쓰기</span>
+  5. 흡수한 spool 파일은 unlink (삭제)</pre>
+          <p>4번(mailbox 쓰기)을 <strong>오직 B만</strong> 수행하기 때문에 "mailbox는 소유자만 쓴다"는 불변식이 지켜진다. <strong>흡수를 수신자에게 맡긴 것 자체가 설계</strong>다 — 송신자들은 충돌 없는 spool 파일만 만들고, 그걸 mailbox로 합치는 단 하나의 직렬 지점을 수신자 한 명에게 몰아줘서 동시 쓰기 충돌을 원천 차단한다.</p>
+          <p><code>incoming-spool/B/</code>의 <code>.json</code> 파일은 A가 보낸 것·C가 보낸 것 구분 없이 <strong>전부 한 번에</strong> 흡수되고, 흡수 후 각 파일은 <code>unlink</code>되어 다음 폴링 때 중복 흡수되지 않는다.</p>
+          <p style="color:var(--muted); font-size:0.88rem;">※ 벨 자체는 흡수를 하지 않는다. 벨은 "확인해" 신호일 뿐이고 실제 흡수는 B가 <code>mailbox-list</code>를 호출해야 일어난다. 그래서 벨을 놓쳐도 다음 사이클 폴링이 빠짐없이 흡수한다.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 비동기 강조 -->
+  <section>
+    <h2>"요청"이지만 강제 실행이 아니다</h2>
+    <div class="callout warn">
+      <h4><span class="ico">⏳</span>A는 B를 실행시키지 않는다 — 수신함에 넣을 뿐</h4>
+      <p>A가 보낸다고 B가 즉시 멈추고 처리하는 게 아니다. A는 메시지 파일을 spool에 떨구고 <strong>자기 일을 계속한다</strong>. B가 그것을 언제 흡수·처리할지는 B의 작업 사이클에 달려 있다. 시스템에는 deadline도 timeout도 없다.</p>
+      <p>그래서 받는 워커의 <strong>self-poll(자가 폴링)이 진짜 전달 보장</strong>이다. pane 벨은 "빨리 보라"는 힌트일 뿐, 놓쳐도 다음 사이클의 <code>mailbox-list</code>가 spool을 흡수하므로 메시지 자체는 잃지 않는다. (잃는 건 즉시성뿐)</p>
+    </div>
+  </section>
+
+  <footer>
+    <p>출처: <code>tools/my-team/src/lib/tmux-comm.js</code> · <code>src/commands/api/{send-message,mailbox-list,mailbox-mark-delivered,archive-lookup}.js</code> · <code>src/lib/events.js</code></p>
+    <p>관련 문서: <code>docs/architecture.md</code> (통신 메커니즘) · <code>docs/worker-bootstrap.md</code> (워커 부팅 프롬프트) · <code>README.md</code> (사용자 가이드)</p>
+  </footer>
+
+</div>
+</body>
+</html>

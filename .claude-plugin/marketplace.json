@@ -1,0 +1,14 @@
+{
+  "name": "my-claude-plugin",
+  "owner": {
+    "name": "jdalma"
+  },
+  "description": "개인 Claude Code 워크플로우 하네스 - 다중 PC 동기화용 스킬/커맨드 모음",
+  "plugins": [
+    {
+      "name": "workflow",
+      "description": "개인 워크플로우 스킬/커맨드 (도메인 정보 미포함)",
+      "source": "./plugins/workflow"
+    }
+  ]
+}

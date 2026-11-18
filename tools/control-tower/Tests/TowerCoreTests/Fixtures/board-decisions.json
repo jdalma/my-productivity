@@ -1,0 +1,196 @@
+{
+  "ok": true,
+  "store": {
+    "adapter": "sqlite",
+    "schema_version": 5,
+    "location": "/tmp/example/board.db",
+    "board_id": "b"
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "parent_id": null,
+      "title": "결정 목록 화면",
+      "ticket_path": null,
+      "state": "waiting",
+      "assignee": "dev",
+      "reviewer": "rv",
+      "priority": 100,
+      "base_commit": null,
+      "constraints": null,
+      "assigned_at": null,
+      "created_at": "2026-11-16T07:01:11.000Z",
+      "created_by": "pm",
+      "updated_at": "2026-11-16T07:01:15.000Z",
+      "updated_by": "dev",
+      "version": 3,
+      "waiting": {
+        "question": "결정 목록은 어느 창에 둡니까?",
+        "context": "T1을 진행하려면 위치가 정해져야 한다",
+        "options": [
+          {
+            "label": "A",
+            "detail": "한 목록으로 합친다",
+            "pros": [
+              "한눈에 본다"
+            ],
+            "cons": [
+              "목록이 길다"
+            ]
+          },
+          {
+            "label": "B",
+            "detail": "지금처럼 둔다",
+            "pros": [
+              "바뀌는 것이 없다"
+            ],
+            "cons": [
+              "두 곳을 본다"
+            ]
+          }
+        ],
+        "recommendation": {
+          "option": "A",
+          "reason": "작업판 창이 결정을 볼 곳이다"
+        },
+        "impact": "T1이 멈춘다",
+        "refs": [],
+        "asked_by": "dev",
+        "asked_at": "2026-11-16T07:24:50.184Z",
+        "resume_state": "ready"
+      }
+    }
+  ],
+  "workers": [],
+  "open_findings": [],
+  "recent": [],
+  "announcements": [],
+  "decisions": [
+    {
+      "id": "D#1",
+      "task_id": null,
+      "tasks": [
+        "T1"
+      ],
+      "state": "open",
+      "question": "결정 목록을 작업 목록과 합칩니까?",
+      "context": "작업판 창에 결정 목록을 넣는다",
+      "options": [
+        {
+          "label": "A",
+          "detail": "한 목록으로 합친다",
+          "pros": [
+            "한눈에 본다"
+          ],
+          "cons": [
+            "목록이 길다"
+          ]
+        },
+        {
+          "label": "B",
+          "detail": "지금처럼 둔다",
+          "pros": [
+            "바뀌는 것이 없다"
+          ],
+          "cons": [
+            "두 곳을 본다"
+          ]
+        }
+      ],
+      "recommendation": {
+        "option": "B",
+        "reason": "작업 목록이 이미 길다"
+      },
+      "impact": "T1의 화면 구성",
+      "refs": [
+        "docs/board.md"
+      ],
+      "asked_by": "dev",
+      "asked_at": "2026-11-16T07:24:48.492Z"
+    },
+    {
+      "id": "D#2",
+      "task_id": null,
+      "tasks": [
+        "T1"
+      ],
+      "state": "answered",
+      "question": "지난 결정은 몇 개까지 보입니까?",
+      "context": "목록이 길어질 수 있다",
+      "options": [
+        {
+          "label": "A",
+          "detail": "한 목록으로 합친다",
+          "pros": [
+            "한눈에 본다"
+          ],
+          "cons": [
+            "목록이 길다"
+          ]
+        },
+        {
+          "label": "B",
+          "detail": "지금처럼 둔다",
+          "pros": [
+            "바뀌는 것이 없다"
+          ],
+          "cons": [
+            "두 곳을 본다"
+          ]
+        }
+      ],
+      "recommendation": {
+        "option": "A",
+        "reason": "다 보여야 놓치지 않는다"
+      },
+      "impact": "화면 길이",
+      "refs": [],
+      "asked_by": "dev",
+      "asked_at": "2026-11-16T07:24:49.059Z",
+      "chosen": "A",
+      "answer": "사용자: 전부 보여 준다",
+      "answered_by": "pm",
+      "answered_at": "2026-11-16T07:24:49.462Z"
+    },
+    {
+      "id": "T1:1",
+      "task_id": "T1",
+      "tasks": [
+        "T1"
+      ],
+      "state": "open",
+      "question": "결정 목록은 어느 창에 둡니까?",
+      "context": "T1을 진행하려면 위치가 정해져야 한다",
+      "options": [
+        {
+          "label": "A",
+          "detail": "한 목록으로 합친다",
+          "pros": [
+            "한눈에 본다"
+          ],
+          "cons": [
+            "목록이 길다"
+          ]
+        },
+        {
+          "label": "B",
+          "detail": "지금처럼 둔다",
+          "pros": [
+            "바뀌는 것이 없다"
+          ],
+          "cons": [
+            "두 곳을 본다"
+          ]
+        }
+      ],
+      "recommendation": {
+        "option": "A",
+        "reason": "작업판 창이 결정을 볼 곳이다"
+      },
+      "impact": "T1이 멈춘다",
+      "refs": [],
+      "asked_by": "dev",
+      "asked_at": "2026-11-16T07:24:50.184Z"
+    }
+  ]
+}

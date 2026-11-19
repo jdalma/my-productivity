@@ -370,7 +370,11 @@ struct TaskBoardView: View {
     var navigation: WindowNavigation?
     /// ⌘F: a new value puts the keyboard in the search field.
     var searchFocus = 0
+    /// The team's goal order (T214); nil before the first read.
+    var goalOrder: GoalOrderRead?
     @State private var query = ""
+    /// A new value scrolls the 순서 view to the picked task's card.
+    @State private var orderScroll = 0
     @State private var doneOpen = false
     /// 지난 결정 shown under the waiting ones (T147).
     @State private var pastOpen = false
@@ -417,6 +421,26 @@ struct TaskBoardView: View {
         }
     }
 
+    /// The view shown: 순서 only where my-team answers goal-order (design §3); before the first read, as stored.
+    private var mode: TaskBoardMode {
+        TaskBoardMode.shown(stored: prefs.wrappedValue.view, supported: goalOrder != .unsupported)
+    }
+
+    /// The 상태별 | 순서 control shows once my-team is known to answer goal-order.
+    private var modeSupported: Bool { if case .unsupported = goalOrder { false } else { goalOrder != nil } }
+
+    /// Choosing a view closes the team overview, as the overview toggle clears the pick (design §1).
+    private func setMode(_ m: TaskBoardMode) {
+        overviewShown = false
+        prefs.wrappedValue.view = m.rawValue
+    }
+
+    private var modeControl: BoardModeControl {
+        BoardModeControl(mode: mode, supported: modeSupported, set: setMode)
+    }
+
+    private var goals: [GoalOrder] { if case .ok(let g)? = goalOrder { g } else { [] } }
+
     var body: some View {
         let open = state?.status.map { openDecisions($0).count } ?? 0
         TimelineView(.periodic(from: .now, by: 15)) { context in
@@ -424,7 +448,8 @@ struct TaskBoardView: View {
         }
         .navigationSubtitle(taskBoardSubtitle(state))
         .focusedSceneValue(\.windowNavigation, shownNavigation)
-        .focusedSceneValue(\.panelArrange, arrangement)
+        .focusedSceneValue(\.panelArrange, mode == .order ? nil : arrangement)
+        .focusedSceneValue(\.boardMode, modeControl)
         .toolbar {
             if narrow && detailOpen {
                 ToolbarItem(placement: .navigation) {
@@ -432,6 +457,17 @@ struct TaskBoardView: View {
                 }
             }
             ToolbarItemGroup {
+                // design §1: first in the toolbar, icons only; not while the detail takes the list's place
+                if modeSupported && !(narrow && detailOpen) {
+                    Picker("보기", selection: Binding { mode } set: { setMode($0) }) {
+                        ForEach(TaskBoardMode.allCases, id: \.self) { m in
+                            Image(systemName: m.symbol).accessibilityLabel(m.menuTitle).tag(m)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .help(mode == .panels ? "순서로 보기 (⌘2)" : "상태별로 보기 (⌘1)")
+                }
                 if open > 0 {
                     Button { showDecisions() } label: {
                         Label("결정 \(open)", systemImage: "person.fill.questionmark").labelStyle(.titleAndIcon)
@@ -567,7 +603,8 @@ struct TaskBoardView: View {
                                        stored: storedListWidth > 0 ? storedListWidth : nil,
                                        save: { storedListWidth = $0 },
                                        navigation: shownNavigation,
-                                       arrangement: arrangement,
+                                       arrangement: mode == .order ? nil : arrangement,
+                                       boardMode: modeControl,
                                        detailShown: detailShown,
                                        list: list(status, now: now).scaledFont(.body).environment(\.boardFontScale, scale),
                                        detail: Group {
@@ -601,11 +638,16 @@ struct TaskBoardView: View {
 
     private func list(_ s: TaskBoardStatus, now: Date) -> some View {
         VStack(spacing: 0) {
-            TaskPanelList(team: team, status: s, query: query, now: now, selected: selectedTask, pick: pick,
-                          prefs: prefs, doneOpen: $doneOpen, pastOpen: $pastOpen, headTarget: $headTarget, arrange: arrange,
-                          moveRequest: moveRequest,
-                          todoTotals: ticketItems,
-                          workerRow: workerRow, select: select, decisionsRequest: decisionsRequest, columnRoom: $columnRoom)
+            if mode == .order {
+                GoalOrderList(read: goalOrder, query: query, selected: selectedTask, pick: pick, prefs: prefs,
+                              openGoalFile: openGoalFile, reload: reload, scrollRequest: orderScroll)
+            } else {
+                TaskPanelList(team: team, status: s, query: query, now: now, selected: selectedTask, pick: pick,
+                              prefs: prefs, doneOpen: $doneOpen, pastOpen: $pastOpen, headTarget: $headTarget, arrange: arrange,
+                              moveRequest: moveRequest,
+                              todoTotals: ticketItems,
+                              workerRow: workerRow, select: select, decisionsRequest: decisionsRequest, columnRoom: $columnRoom)
+            }
             Divider()
             DocumentsArea(documents: documents, fileOpens: documentFileOpens, storedEditor: storedEditor, notice: documentNotice,
                           shownPagePath: shownPage?.path, maxHeight: listHeight * DocumentsArea.listShare) { row in
@@ -630,10 +672,21 @@ struct TaskBoardView: View {
         } else if let line {
             TaskDetailView(team: team, line: line, family: family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil,
                            decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
-                           now: now, workerRow: workerRow, pick: pick, select: select, reload: reload)
+                           now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
+                           goalLinks: goalLinks(of: line.task.id, in: goals),
+                           boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                           showInOrder: { setMode(.order); orderScroll += 1 })
         } else {
             overview(s, now: now)
         }
+    }
+
+    /// A goal's file in the detail's place, as a document of the team's folder opens (design §2 목표 파일 열기).
+    private func openGoalFile(_ g: GoalOrder) {
+        pick(nil)
+        overviewShown = false
+        shownPage = DocumentPage(title: [g.id, g.title].compactMap { $0 }.joined(separator: " "), path: g.path,
+                                 folder: documents?.folder ?? (g.path as NSString).deletingLastPathComponent)
     }
 
     /// The tickets whose to-do count the lines show: every unfinished task's (v4 §7.2).
@@ -890,6 +943,8 @@ struct TaskBoardSplit<List: View, Detail: View>: NSViewRepresentable {
     var navigation: WindowNavigation?
     /// The 보기 › 묶음 menu's target, published again inside each side as the navigation is.
     var arrangement: PanelArrange?
+    /// The View menu's 상태별 / 순서 items (T214), published again as the navigation is.
+    var boardMode: BoardModeControl?
     /// Without a detail, the list takes the whole width and the divider goes.
     var detailShown = true
     let list: List
@@ -899,14 +954,16 @@ struct TaskBoardSplit<List: View, Detail: View>: NSViewRepresentable {
         let content: Content
         let navigation: WindowNavigation?
         var arrangement: PanelArrange?
+        var boardMode: BoardModeControl?
         var body: some View {
             content.focusedSceneValue(\.windowNavigation, navigation).focusedSceneValue(\.panelArrange, arrangement)
+                .focusedSceneValue(\.boardMode, boardMode)
         }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(list: NSHostingView(rootView: Side(content: list, navigation: navigation, arrangement: arrangement)),
-                    detail: NSHostingView(rootView: Side(content: detail, navigation: navigation, arrangement: arrangement)))
+        Coordinator(list: NSHostingView(rootView: Side(content: list, navigation: navigation, arrangement: arrangement, boardMode: boardMode)),
+                    detail: NSHostingView(rootView: Side(content: detail, navigation: navigation, arrangement: arrangement, boardMode: boardMode)))
     }
 
     func makeNSView(context: Context) -> Split {
@@ -933,8 +990,8 @@ struct TaskBoardSplit<List: View, Detail: View>: NSViewRepresentable {
 
     func updateNSView(_ split: Split, context: Context) {
         let c = context.coordinator
-        c.list.rootView = Side(content: list, navigation: navigation, arrangement: arrangement)
-        c.detail.rootView = Side(content: detail, navigation: navigation, arrangement: arrangement)
+        c.list.rootView = Side(content: list, navigation: navigation, arrangement: arrangement, boardMode: boardMode)
+        c.detail.rootView = Side(content: detail, navigation: navigation, arrangement: arrangement, boardMode: boardMode)
         c.minList.constant = limits.minList
         c.minDetail.constant = limits.minDetail
         split.dragged = save

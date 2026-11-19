@@ -168,6 +168,7 @@ struct TowerCommands: Commands {
     let tower: Tower
     @FocusedValue(\.windowNavigation) private var nav
     @FocusedValue(\.panelArrange) private var arrange
+    @FocusedValue(\.boardMode) private var boardMode
     @AppStorage(FontScale.storageKey) private var storedScale = FontScale.standard.value
     @AppStorage(DiffLayout.storageKey) private var diffLayout = DiffLayout.unified.rawValue
 
@@ -190,6 +191,16 @@ struct TowerCommands: Commands {
             Button("변경 보기") { nav?.openDiff?() }.keyboardShortcut("d").disabled(nav?.openDiff == nil)
             Button("작업판 보기") { nav?.openTaskBoard?() }.keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(nav?.openTaskBoard == nil)
+            // T214 (goal-order-view §1): the task board window in front's view; off for other windows, gone for an
+            // older my-team that has no goal-order
+            if boardMode?.supported != false {
+                Divider()
+                ForEach(TaskBoardMode.allCases, id: \.self) { m in
+                    Toggle(m.menuTitle, isOn: Binding { boardMode?.mode == m } set: { if $0 { boardMode?.set(m) } })
+                        .keyboardShortcut(m == .panels ? "1" : "2")
+                        .disabled(boardMode == nil)
+                }
+            }
             // a task board's layout (T153; hig §7.4, §8.4): the item names what moves
             Menu("묶음") {
                 Button(arrange?.subject.map { "\($0) 위로" } ?? "위로") { arrange?.up?() }

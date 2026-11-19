@@ -58,7 +58,8 @@ struct TaskBoardWindow: View {
                               },
                               reload: { tower.reloadTaskBoards() },
                               navigation: navigation,
-                              searchFocus: searchFocus)
+                              searchFocus: searchFocus,
+                              goalOrder: tower.goalOrders[target.team])
             } else {
                 ProgressView("수집 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }

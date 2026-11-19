@@ -18,6 +18,8 @@ final class Tower {
     private(set) var launches = TeamLaunches()
     /// Task boards of the running teams that keep one (T70), read only while the board or a task board window is open.
     private(set) var taskBoards: [String: TaskBoardState] = [:]
+    /// Each open task board window's goal order (T214), read with the boards; nil before the first read.
+    private(set) var goalOrders: [String: GoalOrderRead] = [:]
     /// A failure the board window shows attached to itself, until it is dismissed.
     var failure: Failure?
     /// The task picked in each team's task board window (T70a, T86); their families are read with the boards.
@@ -130,6 +132,9 @@ final class Tower {
             for w in decisionsToNotify(seen: &seenDecisions, next: next.compactMapValues(\.status)) { notifier?.post(w) }
             taskBoards = next
             forgetLeftPins(next.compactMapValues(\.status))
+            // every open task board window's, whichever view it shows: a task's detail lists its 선행·후행 in both (D#13)
+            let open = windows.taskBoards
+            goalOrders = await Task.detached { readGoalOrders(openViews: open) }.value
             taskBoardReading = false
             // picked or opened while this read ran: read those families now
             if taskPicks.reads(open: windows.taskBoards) != picked { reloadTaskBoards() }

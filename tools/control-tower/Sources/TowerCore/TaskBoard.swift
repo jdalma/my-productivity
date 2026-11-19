@@ -456,6 +456,10 @@ public struct TaskPanelPrefs: Codable, Hashable, Sendable {
     private var heights: [String: Double] = [:]
     /// The tasks the user put on top of each panel, in the user's order (v4 §7.9.1).
     private var pinned: [String: [String]] = [:]
+    /// The board's last view, `panels` or `order` (T214, goal-order-view §1); nil for the panels.
+    public var view: String?
+    /// Each goal the user folded (true) or opened (false) in the 순서 view, by its file's path (goal-order-view §2).
+    public var goalFolds: [String: Bool] = [:]
 
     public init(folded: Set<TaskPanel> = []) { fold(folded) }
 
@@ -470,7 +474,7 @@ public struct TaskPanelPrefs: Codable, Hashable, Sendable {
 
     private mutating func fold(_ ps: Set<TaskPanel>) { for p in TaskPanel.allCases where ps.contains(p) { setFolded(p, true) } }
 
-    enum CodingKeys: String, CodingKey { case foldedNames = "folded", columns, heights, pinned }
+    enum CodingKeys: String, CodingKey { case foldedNames = "folded", columns, heights, pinned, view, goalFolds = "goal_folds" }
 
     /// Never throws: one team's value, or one of its fields, that does not read is nothing for that team or field,
     /// not for every team (R9 L3).
@@ -480,6 +484,8 @@ public struct TaskPanelPrefs: Codable, Hashable, Sendable {
         columns = (try? c?.decodeIfPresent([[String]].self, forKey: .columns)) ?? []
         heights = (try? c?.decodeIfPresent([String: Double].self, forKey: .heights)) ?? [:]
         pinned = (try? c?.decodeIfPresent([String: [String]].self, forKey: .pinned)) ?? [:]
+        view = try? c?.decodeIfPresent(String.self, forKey: .view)
+        goalFolds = (try? c?.decodeIfPresent([String: Bool].self, forKey: .goalFolds)) ?? [:]
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -488,6 +494,8 @@ public struct TaskPanelPrefs: Codable, Hashable, Sendable {
         if !columns.isEmpty { try c.encode(columns, forKey: .columns) }
         if !heights.isEmpty { try c.encode(heights, forKey: .heights) }
         if !pinned.isEmpty { try c.encode(pinned, forKey: .pinned) }
+        if let view { try c.encode(view, forKey: .view) }
+        if !goalFolds.isEmpty { try c.encode(goalFolds, forKey: .goalFolds) }
     }
 
     // MARK: The panels' places
@@ -600,10 +608,13 @@ public struct TaskPanelPrefs: Codable, Hashable, Sendable {
         return next.layout == layout ? nil : next
     }
 
-    /// The default layout (v4 §7.9.6): the panels' order, every pin and every height back; the folds stay.
+    /// The default layout (v4 §7.9.6): the panels' order, every pin and every height back; the folds, the view and
+    /// the goals' folds stay.
     public var resetLayout: TaskPanelPrefs {
         var out = TaskPanelPrefs()
         out.foldedNames = foldedNames
+        out.view = view
+        out.goalFolds = goalFolds
         return out
     }
 

@@ -110,6 +110,20 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   its lines then scroll inside it with `↓ n개 더` at the bottom, and its head says 높이 고정. Double-click the edge or
   the tag to fit the lines again. ⌘Z takes back each move; 기본 배치로 되돌리기 (View › 묶음, the head's menu, or
   ↺ 배치 되돌리기 at the top) resets order, tops and heights but keeps the folds.
+  The toolbar's first control switches the list between 상태별 (the panels) and 순서 (View › 상태별로 보기 ⌘1,
+  순서로 보기 ⌘2; kept per team). 순서 shows each goal of the team (`my-team api goal-order`: the `## 순서` of its
+  goal files) as a section, the goals with a task to start first and the ones all done last and folded. A goal's
+  waves stand side by side, a column each (at least 200 pt × the text scale), or, when they do not all fit, all
+  stacked; never some of each. A card has the task's state icon and id (and its items for a range node, `할 일 4–7`),
+  its title on two lines at most and one status line: `지금 시작 가능` (its predecessors are done and it has not
+  started; accent border), the task's state when it is under way, `대기: T177, T181 할 일 1` (what it waits for, in
+  words), `대기: T179 (취소됨)` in orange when a predecessor was cancelled, `완료`, `취소됨`, or `작업판에 없음` (dashed,
+  cannot be picked). A click picks the task as a line does; ↑ ↓ move within a wave, ← → to the next wave's card at
+  the same height. A goal with a cycle shows its path and that pm has to fix the order; a line of `## 순서` that does
+  not read is a warning above the waves; 목표 파일 열기 (a goal head's menu) shows the file in the detail's place. With
+  an older my-team that has no goal-order, the switch and the two menu items are not there and the board shows the
+  panels. A task in a goal's order has 목표, 선행 and 후행 lines under 관련 작업 in its detail, each a link; 목표 goes to
+  its card in the 순서 view.
   With nothing picked the list takes the whole window. A picked task or decision opens its detail beside the list, or
   in its place when the window is narrow. Esc closes it. The latest announcement is a line at the top. 팀 개요 in the
   toolbar shows every announcement, each worker's tasks and the recent activity.
@@ -219,7 +233,8 @@ Prints `my turn N` while N > 0. Prints nothing and exits 0 when N is 0 or `.buil
 The my-team CLI runs only for a team whose manifest names a task board (its `board` key):
 `my-team api board-status --input '{"team_name":"<team>"}' --json`, every 5 s while the board or a task board window
 is open and every 15 s while none is, so a decision waiting for the user reaches the menu bar and a notification
-with every window closed. It runs without
+with every window closed. While a task board window is open, `my-team api goal-order --input '{"team_name":"<team>"}' --json` runs
+with each read of the boards for that window's team (T214). It runs without
 `MY_TEAM_WORKER`, `MY_TEAM_STATE_ROOT` and `OMC_TEAM_WORKER` in its environment. That call only reads, and the app
 never opens `board.db` itself. With no such team, neither my-team nor `node` needs to be installed.
 

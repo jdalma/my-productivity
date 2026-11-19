@@ -164,6 +164,12 @@ struct GoalOrderList: View {
                             column(g, w, WaveHead(w, number: i + 1))
                         }
                     }
+                    // behind the cards: an arrow shows in the gaps between them, and never covers a card's words
+                    .backgroundPreferenceValue(CardBounds.self) { cards in
+                        GeometryReader { geo in
+                            GoalArrows(edges: goalEdges(g), cards: cards.mapValues { geo[$0] })
+                        }
+                    }
                 }
             }
         }
@@ -190,6 +196,7 @@ struct GoalOrderList: View {
             ForEach(waveCards(w), id: \.ref) { n in
                 GoalCard(node: n, selected: n.task == selected, found: goalCardMatches(n, query: query)) { pick(n.task) }
                     .id(cardID(g, n))
+                    .anchorPreference(key: CardBounds.self, value: .bounds) { [n.ref: $0] }
             }
         }
     }
@@ -238,7 +245,13 @@ private struct GoalCard: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 6))
+        // opaque under the selection's tint: an arrow behind the card never shows through it
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor))
+                if selected { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.18)) }
+            }
+        }
         .overlay { border(line) }
         .opacity(found ? (muted ? 0.6 : 1) : 0.35)
         .contentShape(.rect)
@@ -275,5 +288,44 @@ private struct GoalCard: View {
         case .unregistered: shape.strokeBorder(Color.secondary, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
         default: shape.strokeBorder(Color.secondary.opacity(selected ? 0 : 0.25), lineWidth: 1)
         }
+    }
+}
+
+/// Each card's bounds by its ref, for the arrows of its goal's waves.
+private struct CardBounds: PreferenceKey {
+    static let defaultValue: [String: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue()) { a, _ in a }
+    }
+}
+
+/// The order as arrows (user's request, 11-19): from the right of each predecessor's card to the left of the card that
+/// waits for it, a curve and a head. Drawn only with the waves side by side; stacked, the cards' 대기 lines say it.
+/// Hidden from VoiceOver, which reads the same in each card's status line.
+private struct GoalArrows: View {
+    let edges: [GoalEdge]
+    let cards: [String: CGRect]
+
+    var body: some View {
+        Canvas { context, _ in
+            for e in edges {
+                guard let a = cards[e.from], let b = cards[e.to] else { continue }
+                let start = CGPoint(x: a.maxX, y: a.midY), end = CGPoint(x: b.minX - 1, y: b.midY)
+                guard end.x - start.x > 4 else { continue }
+                let bend = max(12, (end.x - start.x) / 2)
+                var line = Path()
+                line.move(to: start)
+                line.addCurve(to: end, control1: CGPoint(x: start.x + bend, y: start.y), control2: CGPoint(x: end.x - bend, y: end.y))
+                context.stroke(line, with: .color(.secondary.opacity(0.7)), lineWidth: 1.2)
+                var head = Path()
+                head.move(to: end)
+                head.addLine(to: CGPoint(x: end.x - 7, y: end.y - 4))
+                head.addLine(to: CGPoint(x: end.x - 7, y: end.y + 4))
+                head.closeSubpath()
+                context.fill(head, with: .color(.secondary.opacity(0.9)))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

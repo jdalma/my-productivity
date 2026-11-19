@@ -331,3 +331,26 @@ private func unique(_ rs: [GoalRelation]) -> [GoalRelation] {
     var seen = Set<GoalRelation>()
     return rs.filter { seen.insert($0).inserted }
 }
+
+// MARK: - Arrows (user's request, 11-19: the order drawn from each predecessor's card to the card that waits for it)
+
+/// One arrow: from the predecessor's card to its successor's, by the cards' refs.
+struct GoalEdge: Hashable {
+    var from: String
+    var to: String
+}
+
+/// The arrows of a goal's waves. A predecessor that names items (`T181:1`) and has no node of its own starts from its
+/// task's whole card, else its first card; one with no card at all (not in the order) draws nothing.
+func goalEdges(_ g: GoalOrder) -> [GoalEdge] {
+    let nodes = g.waves.flatMap { $0 }
+    let refs = Set(nodes.map(\.ref))
+    var seen = Set<GoalEdge>()
+    return nodes.flatMap { n in
+        n.after.compactMap { p -> GoalEdge? in
+            let from = refs.contains(p.ref) ? p.ref
+                : nodes.first { $0.task == p.task && $0.items == nil }?.ref ?? nodes.first { $0.task == p.task }?.ref
+            return from.map { GoalEdge(from: $0, to: n.ref) }
+        }
+    }.filter { seen.insert($0).inserted }
+}

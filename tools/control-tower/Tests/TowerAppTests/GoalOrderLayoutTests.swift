@@ -152,3 +152,16 @@ private func goal(_ id: String, _ waves: [[GoalNode]], cycle: [String]? = nil, e
     #expect(t177[0].before.filter { $0.task == "T179" }.map(\.caption) == [nil, "할 일 4–7"])
     #expect(goalLinks(of: "T999", in: all).isEmpty)  // in no order: no 목표·선행·후행 lines
 }
+
+@Test func arrowsGoFromEachPredecessorsCardToItsSuccessor() throws {
+    let g3 = try fixtureGoals()[1]
+    #expect(goalEdges(g3) == [
+        GoalEdge(from: "T178", to: "T179"), GoalEdge(from: "T178", to: "T180"),
+        GoalEdge(from: "T179", to: "T181"), GoalEdge(from: "T180", to: "T181"),
+        GoalEdge(from: "T179", to: "T177"), GoalEdge(from: "T180", to: "T177"),
+        GoalEdge(from: "T179", to: "T177:4-7"), GoalEdge(from: "T180", to: "T177:4-7"),
+        GoalEdge(from: "T181", to: "T177:4-7"),  // T181:1 has no card of its own: from T181's
+        GoalEdge(from: "T177", to: "T192"), GoalEdge(from: "T181", to: "T192"),
+    ])
+    #expect(goalEdges(goal("G9", [[node("T2", state: "ready", status: "waiting", after: ["T1"])]])).isEmpty)  // T1 has no card
+}

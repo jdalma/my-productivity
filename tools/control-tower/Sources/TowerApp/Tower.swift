@@ -22,6 +22,8 @@ final class Tower {
     private(set) var shutdowns = TeamShutdowns()
     /// The team configs in `~/teams` the 팀 실행 menu offers, read with each collection.
     private(set) var teamConfigList = TeamConfigList()
+    /// What each 팀 실행 line would start, by team (`launchWorkerCounts`).
+    private(set) var launchWorkers: [String: Int] = [:]
     /// Task boards of the running teams that keep one (T70), read only while the board or a task board window is open.
     private(set) var taskBoards: [String: TaskBoardState] = [:]
     /// A failure the board window shows attached to itself, until it is dismissed.
@@ -98,7 +100,10 @@ final class Tower {
         board = next
         launches.settle(running: runningTeams(next), now: Date())
         shutdowns.settle(running: runningTeams(next))
-        teamConfigList = await Task.detached { teamConfigs(in: teamsDir) }.value
+        let list = await Task.detached { teamConfigs(in: teamsDir) }.value
+        let read = history
+        launchWorkers = await Task.detached { launchWorkerCounts(list.configs, history: read) }.value
+        teamConfigList = list
     }
 
     var myTurn: Int { board.map { myTurnShown($0, taskBoards: taskBoardStatuses) } ?? 0 }
@@ -211,10 +216,8 @@ final class Tower {
     /// Opens a terminal that starts one run of a stopped team again, each claude worker resuming its last session.
     func resumeTeam(_ teamRun: TeamRun) {
         guard launches.begin(teamRun.team, at: Date()) else { return }
-        let runs = teamRuns(history)
-        let sessions = history.filter { runs[$0.transcriptPath] == teamRun }
-        guard let base = teamBase(teamRun.team),
-              let data = try? JSONSerialization.data(withJSONObject: resumeConfig(base, run: sessions),
+        guard let config = resumeConfig(for: teamRun, history: history),
+              let data = try? JSONSerialization.data(withJSONObject: config,
                                                      options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else {
             launches.cancel(teamRun.team)

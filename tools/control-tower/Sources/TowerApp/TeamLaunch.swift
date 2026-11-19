@@ -145,8 +145,8 @@ enum TeamLaunchError: LocalizedError {
 struct TeamConfig: Equatable {
     let team: String
     let path: String
-    /// The workers its last run had (the manifest keeps those add-worker added, and resume starts them all), else
-    /// the config's (T209 R3 L1).
+    /// The config's workers: what `start --continue` starts. A team with a run in the history shows what its
+    /// resume starts instead (`launchWorkerCounts`).
     let workers: Int
     let modified: Date
     /// The other files in `~/teams` that name the team; the newest, `path`, is the one started (T209 R3 S1).
@@ -169,11 +169,10 @@ struct TeamConfigList: Equatable {
 
 /// The team configs right in `dir`, one a team: the newest file that names it (`teamConfigPath` reads the same),
 /// with the others named. The board's `.resume.json` and any file with `.bak` in its name are left out; any other
-/// `.json` file that is not a team config is listed in `unreadable` with its reason. A team's worker count is its
-/// manifest's under `stateBase` (or the config's `state_root`) when it has run.
-func teamConfigs(in dir: String, stateBase: String = homeDirectory() + "/.my-team/sessions") -> TeamConfigList {
+/// `.json` file that is not a team config is listed in `unreadable` with its reason.
+func teamConfigs(in dir: String) -> TeamConfigList {
     let fm = FileManager.default
-    var found: [String: [(config: TeamConfig, json: [String: Any])]] = [:]
+    var found: [String: [TeamConfig]] = [:]
     var unreadable: [UnreadableConfig] = []
     for name in ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).sorted()
     where name.hasSuffix(".json") && !name.hasSuffix(".resume.json") && !name.contains(".bak") {
@@ -192,20 +191,16 @@ func teamConfigs(in dir: String, stateBase: String = homeDirectory() + "/.my-tea
         guard let workers = json["workers"] as? [Any], !workers.isEmpty else {
             unreadable.append(UnreadableConfig(file: name, reason: .noWorkers)); continue
         }
-        found[team, default: []].append((TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path)), json))
+        found[team, default: []].append(TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path)))
     }
-    let configs = found.map { team, files -> TeamConfig in
+    let configs = found.values.map { files -> TeamConfig in
         // newest first; on the same time, the first by name
         let sorted = files.enumerated().sorted { a, b in
-            a.element.config.modified != b.element.config.modified ? a.element.config.modified > b.element.config.modified : a.offset < b.offset
+            a.element.modified != b.element.modified ? a.element.modified > b.element.modified : a.offset < b.offset
         }.map(\.element)
-        let (newest, json) = sorted[0]
-        let root = json["state_root"] as? String ?? "\(stateBase)/\(team)"
-        let manifest = fm.contents(atPath: "\(root)/manifest.json")
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
-        let ran = (manifest?["workers"] as? [Any])?.count
-        return TeamConfig(team: team, path: newest.path, workers: ran ?? newest.workers, modified: newest.modified,
-                          others: sorted.dropFirst().map(\.config.file).sorted())
+        var newest = sorted[0]
+        newest.others = sorted.dropFirst().map(\.file).sorted()
+        return newest
     }
     return TeamConfigList(configs: configs.sorted { $0.team < $1.team }, unreadable: unreadable)
 }
@@ -341,9 +336,32 @@ func lastRunTime(_ iso: String, now: Date, calendar: Calendar = .current) -> Str
 }
 
 /// A 팀 실행 menu line's second line: when the team last ran, or that it runs or is being started, then its size.
-func launchItemSubtitle(_ config: TeamConfig, last: TeamLastRun?, running: Bool, launching: Bool, now: Date) -> String {
+func launchItemSubtitle(workers: Int, last: TeamLastRun?, running: Bool, launching: Bool, now: Date) -> String {
     let when = running ? "실행 중" : launching ? "띄우는 중" : last.flatMap { lastRunTime($0.updatedAt, now: now) } ?? "기록 없음"
-    return "\(when) · 워커 \(config.workers)"
+    return "\(when) · 워커 \(workers)"
+}
+
+/// The sessions of one run in the history.
+func runSessions(_ run: TeamRun, in history: [HistorySession]) -> [HistorySession] {
+    let runs = teamRuns(history)
+    return history.filter { runs[$0.transcriptPath] == run }
+}
+
+/// The config the resume of `run` starts (`Tower.resumeTeam` writes it): the team's base with each worker of the run.
+func resumeConfig(for run: TeamRun, history: [HistorySession], teams: String = teamsDir,
+                  stateBase: String = homeDirectory() + "/.my-team/sessions") -> [String: Any]? {
+    teamBase(run.team, teams: teams, stateBase: stateBase).map { resumeConfig($0, run: runSessions(run, in: history)) }
+}
+
+/// The worker count each 팀 실행 line shows: what picking it starts (T208 R5 S1). A team with a run in the history
+/// resumes that run's workers; one without starts its config's.
+func launchWorkerCounts(_ configs: [TeamConfig], history: [HistorySession], teams: String = teamsDir,
+                        stateBase: String = homeDirectory() + "/.my-team/sessions") -> [String: Int] {
+    let last = lastRuns(history)
+    return Dictionary(uniqueKeysWithValues: configs.map { c in
+        let resumed = last[c.team].flatMap { resumeConfig(for: $0.run, history: history, teams: teams, stateBase: stateBase) }
+        return (c.team, (resumed?["workers"] as? [Any])?.count ?? c.workers)
+    })
 }
 
 /// A 팀 실행 menu line's tooltip: its file, when it last ran, and what picking it does; the team's other files.

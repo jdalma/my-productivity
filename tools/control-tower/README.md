@@ -81,8 +81,8 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   file; the resume of a stopped run reads the same one), leaving out the board's `*.resume.json` and any file with
   `.bak` in its name; the team's other files are named in the tooltip. Each line's second line reads
   `<when> · 워커 N`: when the team's newest session in the history last changed (`오늘 14:30`, `어제 09:05`,
-  `11-17 22:40` this year, else `2025-12-03`), or `기록 없음`; N is the workers of its last run (its manifest), else
-  the config's. The team run last is first, the teams never run follow by name. A team that runs or is being
+  `11-17 22:40` this year, else `2025-12-03`), or `기록 없음`; N is the workers picking it starts: the workers of its
+  last run that the resume brings back, else the config's. The team run last is first, the teams never run follow by name. A team that runs or is being
   started is dimmed (`실행 중 · 워커 N`, `띄우는 중 · 워커 N`), and every team is (`기록 읽는 중`) until the history
   has been read once after launch, so a stopped team is never started without its conversations. The tooltip has the file, the time relative to now
   and what picking it does. Other `.json` files

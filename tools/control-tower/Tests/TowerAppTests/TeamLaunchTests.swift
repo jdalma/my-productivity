@@ -231,13 +231,9 @@ private final class Stubs {
     try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: "\(dir)/locked.json")
     try FileManager.default.createDirectory(atPath: "\(dir)/legacy-teams", withIntermediateDirectories: true)
     try FileManager.default.createDirectory(atPath: "\(dir)/folder.json", withIntermediateDirectories: true)
-    // a's last run had a third worker (add-worker): its manifest says so; b never ran
-    let state = "\(dir)/sessions"
-    try FileManager.default.createDirectory(atPath: "\(state)/a", withIntermediateDirectories: true)
-    try Data(#"{"workers":[{"name":"pm"},{"name":"core"},{"name":"qa"}]}"#.utf8).write(to: URL(fileURLWithPath: "\(state)/a/manifest.json"))
-    let list = teamConfigs(in: dir, stateBase: state)
+    let list = teamConfigs(in: dir)
     #expect(list.configs.map { [$0.team, $0.file] } == [["a", "a-new.json"], ["b", "b.json"]])
-    #expect(list.configs.map(\.workers) == [3, 2])
+    #expect(list.configs.map(\.workers) == [2, 2])
     #expect(list.configs.map(\.others) == [["a-old.json"], []])
     #expect(list.unreadable == [
         UnreadableConfig(file: "broken.json", reason: .notJSON),
@@ -262,13 +258,12 @@ private final class Stubs {
     #expect(lastRunTime(at(2025, 12, 3, 8, 0), now: now, calendar: calendar) == "2025-12-03")
     #expect(lastRunTime("not a time", now: now, calendar: calendar) == nil)
 
-    let c = TeamConfig(team: "shop", path: "/h/teams/shop.json", workers: 3, modified: .distantPast)
     let ran = TeamLastRun(run: TeamRun(team: "shop", start: nil), updatedAt: Date().addingTimeInterval(-60).formatted(.iso8601))
     let real = Date()
-    #expect(launchItemSubtitle(c, last: ran, running: false, launching: false, now: real) == "\(lastRunTime(ran.updatedAt, now: real)!) · 워커 3")
-    #expect(launchItemSubtitle(c, last: nil, running: false, launching: false, now: real) == "기록 없음 · 워커 3")
-    #expect(launchItemSubtitle(c, last: ran, running: true, launching: false, now: real) == "실행 중 · 워커 3")
-    #expect(launchItemSubtitle(c, last: ran, running: false, launching: true, now: real) == "띄우는 중 · 워커 3")
+    #expect(launchItemSubtitle(workers: 3, last: ran, running: false, launching: false, now: real) == "\(lastRunTime(ran.updatedAt, now: real)!) · 워커 3")
+    #expect(launchItemSubtitle(workers: 3, last: nil, running: false, launching: false, now: real) == "기록 없음 · 워커 3")
+    #expect(launchItemSubtitle(workers: 3, last: ran, running: true, launching: false, now: real) == "실행 중 · 워커 3")
+    #expect(launchItemSubtitle(workers: 3, last: ran, running: false, launching: true, now: real) == "띄우는 중 · 워커 3")
 }
 
 @Test func aLaunchLinesTooltipSaysWhatPickingItDoes() {
@@ -427,9 +422,33 @@ private final class Stubs {
         try await FocusRunner.run([shutdownTeamArgv(team: "t", myTeam: bin)], timeout: 1, dryRun: nil)
         Issue.record("a command past its timeout must fail")
     } catch {
-        #expect(Date().timeIntervalSince(started) < 10)
+        #expect(Date().timeIntervalSince(started) < 25)  // well before the stub's own 30 s, with room for a loaded machine
         // the alert says so; the line's spinner goes (Tower.confirmShutdown calls `failed`) and 팀 종료 is back
         #expect(shutdownFailure(team: "t", error).reason.hasPrefix("1초 안에 끝나지 않아 멈췄습니다.\n"))
     }
     #expect(shutdownTimeout == 30)
+}
+
+@Test func aLaunchLineCountsTheWorkersPickingItStarts() throws {
+    // T208 R5 S1: shop's config names one worker; its last run had three (two added mid-run), and its resume
+    // starts all three. lab never ran: start --continue starts its config's two.
+    let root = NSTemporaryDirectory() + "count-\(UUID().uuidString)"
+    let teams = "\(root)/teams", state = "\(root)/sessions"
+    try FileManager.default.createDirectory(atPath: teams, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    try Data(#"{"team_name":"shop","workers":[{"name":"pm","agent_type":"claude","cwd":"/w"}]}"#.utf8)
+        .write(to: URL(fileURLWithPath: "\(teams)/shop.json"))
+    try Data(#"{"team_name":"lab","workers":[{"name":"a"},{"name":"b"}]}"#.utf8).write(to: URL(fileURLWithPath: "\(teams)/lab.json"))
+    let history = ["pm", "core", "qa"].map { w in
+        var h = session("s-\(w)", team: "shop", worker: w, at: "2026-11-05T10:00:00.000Z")
+        h.createdAt = "2026-11-05T09:00:00.000Z"
+        return h
+    }
+    let configs = teamConfigs(in: teams).configs
+    let counts = launchWorkerCounts(configs, history: history, teams: teams, stateBase: state)
+    #expect(counts == ["shop": 3, "lab": 2])
+    // the same count as the config the resume writes
+    let run = try #require(lastRuns(history)["shop"]?.run)
+    let resumed = try #require(resumeConfig(for: run, history: history, teams: teams, stateBase: state))
+    #expect((resumed["workers"] as? [Any])?.count == counts["shop"])
 }

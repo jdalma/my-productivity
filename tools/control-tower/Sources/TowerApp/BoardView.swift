@@ -336,7 +336,7 @@ struct BoardView: View {
                 let launching = tower.launches.pending(c.team)
                 Button { tower.launchTeam(c) } label: {
                     Text(c.team)
-                    Text(tower.historyRead ? launchItemSubtitle(c, last: last[c.team], running: running.contains(c.team),
+                    Text(tower.historyRead ? launchItemSubtitle(workers: tower.launchWorkers[c.team] ?? c.workers, last: last[c.team], running: running.contains(c.team),
                                                                 launching: launching, now: now)
                                            : "기록 읽는 중 · 워커 \(c.workers)")
                 }

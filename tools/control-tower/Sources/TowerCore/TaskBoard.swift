@@ -293,16 +293,21 @@ func parseTaskBoard(_ r: CommandResult) -> TaskBoardRead {
     }
 }
 
+/// `my-team api <command>` with `input`, as it came back, or why it could not be started.
+func runMyTeamApi(_ command: String, input: [String: String], bin: String, run: TaskBoardRunner) -> Result<CommandResult, TaskBoardFailure> {
+    let json = String(decoding: try! JSONSerialization.data(withJSONObject: input, options: .sortedKeys), as: UTF8.self)
+    do {
+        return .success(try run([bin, "api", command, "--input", json, "--json"], taskBoardTimeout, Set(taskBoardUnset)))
+    } catch {
+        return .failure(.launch("\(error)"))
+    }
+}
+
 /// `board-status` for `team`, with `task` for one task's family.
 func runBoardStatus<T: Decodable>(team: String, task: String? = nil, bin: String, run: TaskBoardRunner, as: T.Type) -> Result<T, TaskBoardFailure> {
     var input = ["team_name": team]
     input["task"] = task
-    let json = String(decoding: try! JSONSerialization.data(withJSONObject: input, options: .sortedKeys), as: UTF8.self)
-    do {
-        return parseBoardAnswer(try run([bin, "api", "board-status", "--input", json, "--json"], taskBoardTimeout, Set(taskBoardUnset)), as: T.self)
-    } catch {
-        return .failure(.launch("\(error)"))
-    }
+    return runMyTeamApi("board-status", input: input, bin: bin, run: run).flatMap { parseBoardAnswer($0, as: T.self) }
 }
 
 func readTaskBoard(team: String, bin: String, run: TaskBoardRunner) -> TaskBoardRead {

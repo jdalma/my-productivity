@@ -119,3 +119,20 @@ test('an item of a cancelled task does not count as complete', () => {
 test('one item written as a range is the same node', () => {
     assert.deepEqual(refsOf(order('A -> B:4', 'C -> B:4-4')), [['A', 'B', 'C'], ['B:4']]);
 });
+
+test('item refs leave from the range nodes that cover them, so an item-level deadlock is a cycle (D#9)', () => {
+    const cycleOf = (...lines) => waves(parseOrder(order(...lines)).edges).cycle;
+    assert.deepEqual(cycleOf('T1:1 -> T2:3', 'T2:3 -> T1:1'), ['T2:3', 'T1:1', 'T2:3']);
+    assert.deepEqual(cycleOf('T1:1 -> T1:1'), ['T1:1', 'T1:1']);
+    // an item no range covers still leaves from the body: not a deadlock
+    assert.equal(cycleOf('T1:1 -> T2:3', 'T2:3 -> T1:2'), null);
+    // what follows a range node comes after it
+    assert.deepEqual(refsOf(order('A -> T1:4-7', 'T1:5 -> B')), [['A', 'T1'], ['T1:4-7'], ['B']]);
+    assert.deepEqual(refsOf(order('A -> T1:4-7', 'T1:3-4 -> B')), [['A', 'T1'], ['T1:4-7'], ['B']]);
+});
+
+test('an item number above the limit is a bad range, not an allocation', () => {
+    const r = parseOrder('## 순서\n- A -> T1:1-300000000\n- A -> T1:1001\n- A -> T1:1000\n');
+    assert.deepEqual(r.invalid.map((e) => e.line), [2, 3]);
+    assert.equal(r.edges.length, 1);
+});

@@ -6,6 +6,7 @@
 
 const HEADING = '## 순서';
 const REF = /^([A-Za-z]\w*)(?::(\d+)(?:-(\d+))?)?$/;
+const MAX_ITEM = 1000; // a ticket's What list; a bigger range would only allocate (R6 L1)
 
 /** `T177`, `T181:1` or `T177:4-7` -> { ref, task, items } (items null for the whole task), or a reason string. */
 function parseRef(text) {
@@ -14,7 +15,7 @@ function parseRef(text) {
     const [, task, lo, hi] = m;
     if (lo === undefined) return { ref: task, task, items: null };
     const a = Number(lo), b = hi === undefined ? a : Number(hi);
-    if (a < 1 || b < a) return `bad item range "${text}"`;
+    if (a < 1 || b < a || b > MAX_ITEM) return `bad item range "${text}"`;
     return { ref: a === b ? `${task}:${a}` : `${task}:${a}-${b}`, task, items: Array.from({ length: b - a + 1 }, (_, i) => a + i) };
 }
 
@@ -53,7 +54,8 @@ export function parseOrder(markdown) {
 /**
  * Start units and their waves (plan 2.2): one body node per task, one node per item range on the after side.
  * A range node also gets what its body gets. A whole task on the before side leaves from its body and every
- * range node; an item ref there leaves from its body (it only changes when it counts as complete, in annotate).
+ * range node; an item ref there leaves from the range nodes covering its items, and from its body for items no
+ * range covers (D#9, so an item-level deadlock is a cycle). When a ref counts as complete is annotate's.
  * Kahn's algorithm: wave 1 is every node with nothing before it. A cycle gives cycle: [refs…, first ref] and no waves.
  * @returns {{ waves: { ref: string, task: string, items: number[]|null, after: object[] }[][], cycle: string[]|null }}
  */
@@ -70,8 +72,14 @@ export function waves(edges) {
     }
     const all = [...nodes.values()];
     const rangesOf = (task) => all.filter((n) => n.task === task && n.items);
+    // an item ref before leaves from the range nodes that cover its items, its body for items none covers (D#9)
+    const itemSources = (r) => {
+        const covering = rangesOf(r.task).filter((n) => n.items.some((i) => r.items.includes(i)));
+        const uncovered = r.items.some((i) => !covering.some((n) => n.items.includes(i)));
+        return uncovered ? [nodes.get(r.task), ...covering] : covering;
+    };
     for (const { from, to } of edges) {
-        const sources = from.items ? [nodes.get(from.task)] : [nodes.get(from.task), ...rangesOf(from.task)];
+        const sources = from.items ? itemSources(from) : [nodes.get(from.task), ...rangesOf(from.task)];
         const targets = to.items ? [nodes.get(to.ref)] : [nodes.get(to.task), ...rangesOf(to.task)];
         for (const t of targets) {
             t.after.set(from.ref, from);

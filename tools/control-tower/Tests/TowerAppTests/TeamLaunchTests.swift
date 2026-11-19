@@ -290,24 +290,49 @@ private final class Stubs {
 
 @Test func noTeamIsShutDownWithoutItsConfirmation() {
     var s = TeamShutdowns()
-    let unasked = s.confirm()                         // no dialog: nothing to shut down
-    #expect(unasked == nil)
+    let unasked = s.confirm("shop")                   // no dialog: nothing to shut down
+    #expect(!unasked)
     let asked = s.ask("shop")
+    let other = s.confirm("lab")                      // not the team the dialog asks about
     s.dismiss()                                      // 취소
-    let cancelled = s.confirm()
-    #expect(asked && cancelled == nil && s.running.isEmpty)
+    let cancelled = s.confirm("shop")
+    #expect(asked && !other && !cancelled && s.running.isEmpty)
     _ = s.ask("shop")
-    let confirmed = s.confirm()                       // 팀 종료
-    let again = s.confirm()                           // once per confirmation
+    let confirmed = s.confirm("shop")                 // 팀 종료
+    let again = s.confirm("shop")                     // once per confirmation
     let second = s.ask("shop")                        // no second dialog while it shuts down
-    #expect(confirmed == "shop" && again == nil && !second && s.asking == nil)
+    #expect(confirmed && !again && !second && s.asking == nil)
     s.settle(running: ["shop"])                       // still seen running: still shutting down
     #expect(s.running == ["shop"])
     s.settle(running: [])                            // gone from the board: the menu item is back
     let back = s.ask("shop")
     #expect(back)
-    _ = s.confirm()
+    _ = s.confirm("shop")
     s.failed("shop")                                 // the command failed: it can be tried again
     let retry = s.ask("shop")
     #expect(retry)
+}
+
+@Test func myTeamRunsWithHomebrewOnPathAndNoWorkersVariables() {
+    // what launchd gives an app opened from Finder: no Homebrew, where `env node` finds node (T207 review M1, S1)
+    let launchd = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/h",
+                   "MY_TEAM_WORKER": "pm", "MY_TEAM_STATE_ROOT": "/s", "OMC_TEAM_WORKER": "t/pm"]
+    let env = myTeamEnvironment(launchd)
+    #expect(env["PATH"]?.split(separator: ":").contains("/opt/homebrew/bin") == true)
+    #expect(env["HOME"] == "/h")
+    #expect(env["MY_TEAM_WORKER"] == nil && env["MY_TEAM_STATE_ROOT"] == nil && env["OMC_TEAM_WORKER"] == nil)
+}
+
+@Test func theShutdownRunsInTheEnvironmentItIsGiven() async throws {
+    // a stand-in my-team that logs the PATH and worker it sees; the app's own environment is not what it gets
+    let dir = NSTemporaryDirectory() + "env-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let bin = "\(dir)/my-team"
+    try "#!/bin/sh\necho \"$PATH|${MY_TEAM_WORKER-unset}|$*\" > \"$(dirname \"$0\")/log\"\n".write(toFile: bin, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin)
+    let env = myTeamEnvironment(["PATH": "/usr/bin:/bin", "MY_TEAM_WORKER": "pm"])
+    try await FocusRunner.run([shutdownTeamArgv(team: "a b", myTeam: bin)], env: env, dryRun: nil)
+    let log = try String(contentsOfFile: "\(dir)/log", encoding: .utf8)
+    #expect(log.hasPrefix(env["PATH"]! + "|unset|shutdown --team a b"))
 }

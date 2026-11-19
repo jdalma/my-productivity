@@ -1045,13 +1045,16 @@ private struct ShutdownConfirmation: ViewModifier {
     let tower: Tower
 
     func body(content: Content) -> some View {
+        // each button ends the dialog itself: the binding's set, which SwiftUI may call before or after a button's
+        // action, does nothing, so it can never clear the team 팀 종료 is about to confirm
         content.alert("“\(tower.shutdowns.asking ?? "")” 팀을 종료할까요?",
-                      isPresented: Binding { tower.shutdowns.asking != nil } set: { if !$0 { tower.dismissShutdown() } }) {
-            Button("취소", role: .cancel) {}
+                      isPresented: Binding { tower.shutdowns.asking != nil } set: { _ in },
+                      presenting: tower.shutdowns.asking) { team in
+            Button("취소", role: .cancel) { tower.dismissShutdown() }
                 .keyboardShortcut(.defaultAction)
-            Button("팀 종료", role: .destructive) { tower.confirmShutdown() }
-        } message: {
-            Text(shutdownMessage(workers: tower.board?.teams.first { $0.name == tower.shutdowns.asking }?.workers.count ?? 0))
+            Button("팀 종료", role: .destructive) { tower.confirmShutdown(team) }
+        } message: { team in
+            Text(shutdownMessage(workers: tower.board?.teams.first { $0.name == team }?.workers.count ?? 0))
         }
     }
 }

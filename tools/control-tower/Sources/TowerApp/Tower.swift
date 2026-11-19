@@ -239,10 +239,10 @@ final class Tower {
     func dismissShutdown() { shutdowns.dismiss() }
 
     /// The confirmed team's `my-team shutdown`, in the background with no terminal; stderr shows on failure.
-    func confirmShutdown() {
-        guard let team = shutdowns.confirm() else { return }
+    func confirmShutdown(_ team: String) {
+        guard shutdowns.confirm(team) else { return }
         Task {
-            do { try await FocusRunner.run([shutdownTeamArgv(team: team, myTeam: myTeamBin)]) } catch {
+            do { try await FocusRunner.run([shutdownTeamArgv(team: team, myTeam: myTeamBin)], env: myTeamEnvironment()) } catch {
                 shutdowns.failed(team)
                 show(shutdownFailure(team: team, error))
             }

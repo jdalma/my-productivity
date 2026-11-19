@@ -237,12 +237,12 @@ struct TeamShutdowns {
 
     mutating func dismiss() { asking = nil }
 
-    /// The team the user confirmed, now being shut down; nil when no dialog was open.
-    mutating func confirm() -> String? {
-        guard let team = asking else { return nil }
+    /// Whether `team`'s dialog was open and it is now being shut down.
+    mutating func confirm(_ team: String) -> Bool {
+        guard asking == team else { return false }
         asking = nil
         running.insert(team)
-        return team
+        return true
     }
 
     mutating func failed(_ team: String) { running.remove(team) }

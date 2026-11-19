@@ -91,6 +91,13 @@ func childEnvironment(base: [String: String], extra: [String: String]) -> [Strin
     return env.merging(extra) { $1 }
 }
 
+/// The environment the app runs `my-team` with outside `runCommand` (T207 팀 종료): the search dirs on PATH, since
+/// my-team is a `#!/usr/bin/env node` script and launchd gives a GUI app no Homebrew on PATH, and none of a worker's
+/// variables, which would point my-team at that worker's team.
+public func myTeamEnvironment(_ base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    childEnvironment(base: base, extra: [:]).filter { !taskBoardUnset.contains($0.key) }
+}
+
 /// Runs `argv` directly, never through a shell. A non-zero exit is a result, not a
 /// throw; the caller decides what to do with the output. Throws only when
 /// the program cannot be found or started.

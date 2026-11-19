@@ -12,13 +12,14 @@ struct CommandError: LocalizedError {
 /// first failing command. Focus is the only thing the app ever does to a pane.
 enum FocusRunner {
     /// Under `TOWER_DRY_RUN` each command is written to that file instead of run, and counts as done (T96).
-    static func run(_ commands: [[String]], dryRun: String? = towerDryRun) async throws {
+    /// `env` replaces the app's environment for the commands (my-team's, `myTeamEnvironment`); nil keeps it.
+    static func run(_ commands: [[String]], env: [String: String]? = nil, dryRun: String? = towerDryRun) async throws {
         for argv in commands {
             let argv = resolved(argv)
             if let dryRun {
                 recordDryRun(shellCommandLine(argv), to: dryRun)
             } else {
-                try await exec(argv)
+                try await exec(argv, env: env)
             }
         }
     }
@@ -30,8 +31,9 @@ enum FocusRunner {
         return argv[0] == "tmux" ? tmux + argv.dropFirst() : ["/usr/bin/\(argv[0])"] + argv.dropFirst()
     }
 
-    private static func exec(_ argv: [String]) async throws {
+    private static func exec(_ argv: [String], env: [String: String]?) async throws {
         let p = Process()
+        if let env { p.environment = env }
         p.executableURL = URL(fileURLWithPath: argv[0])
         p.arguments = Array(argv.dropFirst())
         let err = Pipe()

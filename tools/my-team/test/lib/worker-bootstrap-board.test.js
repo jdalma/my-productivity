@@ -172,3 +172,12 @@ test('T159: every worker is told not to run another my-team version on a running
         assert.match(text, /changes my-team itself is verified on a copy[^\n]*sub-agent/);
     }
 });
+
+test('pm of a board team: goal files with an order section, ready_now from goal-order with the team filled in', () => {
+    const text = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
+    assert.match(text, /goal file `~\/\.my-team\/docs\/demo\/goals\/G<n>-<slug>\.md`[^\n]*## 순서[^\n]*- <before> -> <after>/);
+    assert.match(text, /read `ready_now`[^\n]*team api goal-order --input "\{\\"team_name\\":\\"demo\\"\}" --json/);
+    assert.match(text, /`cycle` or `errors`[^\n]*`cancelled`[^\n]*rewrite its `## 순서` section/);
+    assert.doesNotMatch(text, /<team>/, 'the team name is filled in, not left as a placeholder');
+    assert.doesNotMatch(overlay('dev', 'worker', { board: { store: 'sqlite' } }), /goal-order/, 'pm guidance only');
+});

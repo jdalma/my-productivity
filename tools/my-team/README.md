@@ -281,6 +281,7 @@ will actually do. High user attention required.
 | `api mailbox-mark-delivered` | **[mutating]** Mark consumed — moves the entry to the archive jsonl, removes it from the inbox |
 | `api archive-lookup` | **[pure]** Look up an archived message by id — read-only |
 | `api roster` | **[pure]** Current workers of a team by team name (`{"team_name":"<team>"}`) — name, agent_type, role, description. The manifest is the registry; this is how an orchestrator reads another team's roster before addressing it |
+| `api goal-order` | **[pure]** Each goal's task order (`{"team_name":"<team>"}`; `goal` for one): waves from the `## 순서` section of `~/.my-team/docs/<team>/goals/G<n>-*.md` with each task's board state, `ready_now`, `cycle`. See "Goal order" in `docs/board.md` |
 | `api board-*` | The team board, for a team whose config has `board` (see "Team board" below): **[mutating]** `board-add`, `-assign`, `-take`, `-land`, `-verdict`, `-finding`, `-cancel`, `-note`, `-announce`, `-wait`, `-answer`, `-ask`, `-progress`, `-edit`; **[pure]** `board-inbox`, `board-review-queue`, `board-status`. Full table in `docs/board.md` |
 
 > Internal peer-messaging API called by worker LLMs (do not call manually). The

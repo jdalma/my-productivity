@@ -16,8 +16,8 @@ with `board-unavailable` before any file is made.
   tests only.
 - The board file is `<state_root>/board.db`. A new team starts with an empty board (the old one moves to
   `.bak` with the rest of the state). `--continue` keeps it.
-- Reading a board never changes its file. `board-status`, `board-inbox`, `board-review-queue` and
-  `board-pushable` on a board file of an older schema read it as the migration would leave it, and leave it as
+- Reading a board never changes its file. `board-status`, `board-inbox`, `board-review-queue`,
+  `board-pushable` and `goal-order` on a board file of an older schema read it as the migration would leave it, and leave it as
   it is; on a team that has no board file yet they read an empty board and make none. Only a write command
   migrates the file, and first leaves a copy of it beside it: `board.db.v<n>.bak`, n the schema before. A copy
   already there is kept.
@@ -254,6 +254,51 @@ also printed on stdout as `{"ok": false, "code", "message"}`.
 | `schema-too-new` | a newer my-team wrote this board: install a newer my-team, or put back the copy its migration left (`board.db.v<n>.bak`) |
 | `invalid-row`, `invalid-query`, `store` | a bug in my-team; report it |
 | `error` | any other failure (a Node error, an unreadable manifest); the message says what |
+
+## Goal order
+
+A request that splits into several tasks gets a goal file, and `my-team api goal-order` turns its order into
+waves against the board. It reads only: the goal files and the board, like `board-status`.
+
+**The goal file.** `~/.my-team/docs/<team>/goals/G<n>-<slug>.md` (the `docs` folder sits beside the sessions
+folder, so `MY_TEAM_STATE_ROOT_BASE` moves it too). Its first `# ` heading is the title, the goal id in front
+of it left out. The rest of the file is free text for people; the command reads only the `## 순서` section:
+
+```markdown
+## 순서
+- T178 -> T179, T180
+- T179, T180 -> T181, T177
+- T181:1 -> T177:4-7
+- T177, T181 -> T192
+```
+
+- Every non-blank line of the section is `- <before> -> <after>`, each side a comma list. Any other line is an
+  error with its line number. The section ends at the next `#` or `##` heading; a `## 순서` inside a code fence
+  does not count.
+- A reference is a whole task (`T177`) or numbered items of its ticket (`T181:1`, `T177:4-7`, items 1 to 1000).
+- A goal file without the section is listed with no waves.
+
+**What starts when.** Every task is one start unit; an item range on the after side is a unit of its own,
+waiting on what its task waits on as well. A whole task before waits for the task and all its ranges. Items
+before wait where the ranges covering them are, or the task where no range covers them; so items waiting on
+each other are a cycle. A whole task before is complete when it is `done` (approved). Items before are complete
+when they are all in the task's `progress_summary.done_items` (`board-progress` with `done`), or the task is
+`done`. A `cancelled` task completes nothing.
+
+| Command | Who | Input (required **bold**) | Output |
+|---|---|---|---|
+| `goal-order` | anyone | **`team_name`**; `goal` (`G3`: that goal only, `not-found` if there is none) | `goals`, by number: `{id, title, path, waves, ready_now, unregistered, cycle, errors}` |
+
+- `waves` is a list of waves, each a list of units: `{ref, task, items, after, title, state, status,
+  blocked_by}`. `items` is null for a whole task; `after` the references it waits on; `title` and `state` the
+  task's on the board (null when it is not there).
+- `status` is `done`, `ready_now` (everything before is complete), `waiting`, `cancelled` (its own task) or
+  `unregistered` (not on the board, which is not an error: a planned task may not be added yet).
+- `blocked_by` lists what before is not complete, each `{ref, state}`: the task's state, or `unregistered`.
+- `ready_now` lists the units that can start now; `unregistered` the tasks the board does not have.
+- A cycle gives `cycle` (`["A","B","A"]`) and no waves. Errors in the section give `errors` (`{line, text,
+  reason}`) and no waves, since a half-read order could show a task as ready that is not.
+- A team whose config has no board gets every unit `unregistered`.
 
 ## States
 

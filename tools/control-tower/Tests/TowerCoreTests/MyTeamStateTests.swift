@@ -122,6 +122,22 @@ private func pane(_ session: String, _ id: String, _ worker: String?) -> Pane {
     #expect(w[2].reason == "waiting on pm")
 }
 
+@Test func aTeamIsAliveWhileOneOfItsWorkersIsLikeMyTeam() throws {
+    // my-team src/lib/team-liveness.js: a split-pane team's session is someone else's and outlives the team (T216)
+    let base = try myTeamBase()
+    defer { try? FileManager.default.removeItem(atPath: base) }
+    try writeTeam(base, "guest", session: "my-team-host-abc:0", workers: ["a", "b"])
+    try writeTeam(base, "own", session: "my-team-own-abc:0", workers: ["a", "b"])
+    func alive(_ panes: [Pane]) throws -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: try loadTeams(base: base, panes: panes).map { ($0.teamName, $0.teamAlive) })
+    }
+    let host = [pane("my-team-host-abc", "%50", "pm"), pane("my-team-host-abc", "%51", nil)]
+    #expect(try alive(host) == ["guest": false, "own": false], "the host session lives on, the guest's workers are gone")
+    #expect(try alive(host + [pane("my-team-host-abc", "%2", "b")]) == ["guest": true, "own": false], "one guest worker left")
+    #expect(try alive([pane("my-team-own-abc", "%1", "a"), pane("my-team-own-abc", "%2", "b")]) == ["guest": false, "own": true])
+    #expect(try alive([pane("my-team-own-abc", "%7", nil)]) == ["guest": false, "own": false], "own session with no worker pane")
+}
+
 @Test func aNullMailboxIsEmptyLikeMyTeamReadsIt() throws {
     #expect(try mailCounts(Data("null".utf8), path: "p") == (0, 0, nil))
     #expect { try mailCounts(Data("[]".utf8), path: "p") } throws: { "\($0)".contains("schema_version=missing") }

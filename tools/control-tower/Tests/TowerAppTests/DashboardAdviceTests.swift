@@ -186,11 +186,12 @@ private final class Gate: Sendable {
     }
 }
 
-/// Lets the main run loop turn until `done`. The deadline only ends a wait whose answer is wrong: a right answer
-/// never depends on it.
-@MainActor private func until(_ done: () -> Bool) async {
-    let end = Date().addingTimeInterval(10)
+/// Lets the main run loop turn until `done`, and says whether it came. The deadline only ends a wait whose answer is
+/// wrong: a right answer never depends on it, however long other tests hold the main actor.
+@MainActor private func until(_ done: () -> Bool) async -> Bool {
+    let end = Date().addingTimeInterval(60)
     while !done(), Date() < end { try? await Task.sleep(for: .milliseconds(5)) }
+    return done()
 }
 
 /// The dashboard on screen through a reading; taken off the screen while the reading runs when `leave`.
@@ -209,15 +210,15 @@ private final class Gate: Sendable {
     window.contentView = NSHostingView(rootView: DashboardView(usage: usage, advisor: bench.advisor(), openProject: { _ in },
                                                                openSession: { _ in nil }, sessionTitle: { _ in nil }))
     window.contentView!.layoutSubtreeIfNeeded()
-    await until { gate.started }
+    #expect(await until { gate.started }, "the dashboard started its reading")
     if leave { window.contentView = nil }
     gate.open()
-    await until { usage.lastRefresh != nil }
+    #expect(await until { usage.lastRefresh != nil }, "the reading ended")
     if leave {
         // a run the dashboard started after the reading would be queued on the main actor before this
         await Task { @MainActor in }.value
     } else {
-        await until { bench.runs.count > 0 }
+        #expect(await until { bench.runs.count > 0 }, "the day's run started")
     }
     return bench.runs.count
 }

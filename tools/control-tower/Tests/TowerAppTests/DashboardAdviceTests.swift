@@ -159,24 +159,67 @@ private final class Runs: @unchecked Sendable {
     #expect(!request.contains("parser 속도 개선"), "no session title")
 }
 
-/// The dashboard on screen through a reading that takes `reading` seconds; taken off the screen after `shown`.
-@MainActor private func runsStarted(reading: Double, shown: Double, bench: Bench) async throws -> Int {
+/// A reading that ends when the test opens the gate: the test waits on what happened, never on the clock (T217).
+private final class Gate: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: (open: false, started: false, held: [CheckedContinuation<Void, Never>]()))
+
+    var started: Bool { state.withLock { $0.started } }
+
+    func wait() async {
+        await withCheckedContinuation { c in
+            let go = state.withLock { s in
+                s.started = true
+                if !s.open { s.held.append(c) }
+                return s.open
+            }
+            if go { c.resume() }
+        }
+    }
+
+    func open() {
+        let held = state.withLock { s in
+            s.open = true
+            defer { s.held = [] }
+            return s.held
+        }
+        held.forEach { $0.resume() }
+    }
+}
+
+/// Lets the main run loop turn until `done`, and says whether it came. The deadline only ends a wait whose answer is
+/// wrong: a right answer never depends on it, however long other tests hold the main actor.
+@MainActor private func until(_ done: () -> Bool) async -> Bool {
+    let end = Date().addingTimeInterval(60)
+    while !done(), Date() < end { try? await Task.sleep(for: .milliseconds(5)) }
+    return done()
+}
+
+/// The dashboard on screen through a reading; taken off the screen while the reading runs when `leave`.
+@MainActor private func runsStarted(leave: Bool, bench: Bench) async -> Int {
+    let gate = Gate()
     let read = OSAllocatedUnfairLock(initialState: false)
     let finished = DashboardSamples.week
     var copy = finished
     copy.computedAt = nil
     let unread = copy
     let usage = UsageDashboard(defaults: bench.defaults, read: {
-        try? await Task.sleep(for: .seconds(reading))
+        await gate.wait()
         read.withLock { $0 = true }
     }, answer: { _ in read.withLock { $0 } ? finished : unread })
     let window = NSWindow(contentRect: .init(x: -20000, y: -20000, width: 840, height: 700), styleMask: .borderless, backing: .buffered, defer: false)
     window.contentView = NSHostingView(rootView: DashboardView(usage: usage, advisor: bench.advisor(), openProject: { _ in },
                                                                openSession: { _ in nil }, sessionTitle: { _ in nil }))
     window.contentView!.layoutSubtreeIfNeeded()
-    try await Task.sleep(for: .seconds(shown))
-    window.contentView = nil
-    try await Task.sleep(for: .seconds(max(0, reading - shown) + 1))
+    #expect(await until { gate.started }, "the dashboard started its reading")
+    if leave { window.contentView = nil }
+    gate.open()
+    #expect(await until { usage.lastRefresh != nil }, "the reading ended")
+    if leave {
+        // a run the dashboard started after the reading would be queued on the main actor before this
+        await Task { @MainActor in }.value
+    } else {
+        #expect(await until { bench.runs.count > 0 }, "the day's run started")
+    }
     return bench.runs.count
 }
 
@@ -185,11 +228,11 @@ private final class Runs: @unchecked Sendable {
 @MainActor @Test func noRunStartsOnceTheDashboardHasLeftTheScreen() async throws {
     let stayed = Bench()
     defer { stayed.close() }
-    #expect(try await runsStarted(reading: 0.3, shown: 1.5, bench: stayed) == 1)
+    #expect(await runsStarted(leave: false, bench: stayed) == 1)
 
     let left = Bench()
     defer { left.close() }
-    #expect(try await runsStarted(reading: 1.0, shown: 0.3, bench: left) == 0)
+    #expect(await runsStarted(leave: true, bench: left) == 0)
     #expect(left.store.load().attemptedAt == nil, "the day's run is still to come")
 }
 

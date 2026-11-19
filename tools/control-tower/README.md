@@ -2,7 +2,7 @@
 
 One view of every my-team worker and every Claude Code / Codex session on this Mac: who is waiting for you, for how long, and a click to jump to that tmux pane.
 
-Read-only except for what the user asks for: moving focus; resuming an ended session they double-click (a new Ghostty window runs `claude --resume <id>` or `codex resume <id>` in that session's directory); starting a team in a new Ghostty window (새 팀…, 이어서 실행, 팀 실행…); and shutting down a running my-team team (팀 종료…), only after the user confirms the dialog. It never types into a pane, never closes a single session, and never reads a my-team mailbox in a way that consumes it.
+Read-only except for what the user asks for: moving focus; resuming an ended session they double-click (a new Ghostty window runs `claude --resume <id>` or `codex resume <id>` in that session's directory); starting a team in a new Ghostty window (팀 실행, 새 팀 만들기…, 이어서 실행); and shutting down a running my-team team (팀 종료…), only after the user confirms the dialog. It never types into a pane, never closes a single session, and never reads a my-team mailbox in a way that consumes it.
 
 A Swift package for macOS 14+. `TowerCore` collects and judges, `TowerApp` is the menu bar app, and `tower-cli` prints the same data for scripts.
 
@@ -72,15 +72,19 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   The button opens the team's task board window and does not fold the team; its tooltip is the decisions waiting
   for the user (not at 0), then 시작 전, 진행 중, 리뷰 중 and 보류 (when it has one), or why the read failed (the
   icon is a triangle then).
-  The line's context menu has 팀 종료…: a dialog asks first (취소 is the default button, Return does not shut down),
-  and 팀 종료 runs `my-team shutdown --team <name>` without a shell or a terminal; it shows 종료 중… and cannot be
-  pressed again until the team leaves the running list (it then shows under 기록) or the command fails (its stderr
-  shows as an alert).
-- 팀 실행… beside 새 팀… lists the team configs in `~/teams/*.json` with a `team_name`, one per team (the newest
-  file), leaving out the board's `*.resume.json` and `.bak` copies. A team that runs is dimmed with 실행 중; files
-  that do not read as JSON are left out and counted under the list. Picking one opens a new Ghostty window that runs
-  `my-team start --continue --config <file>` (a team with no previous state starts new) and attaches to its tmux
-  session; a team that already runs is only attached. The config file is never written.
+  The line's context menu has 작업판 열기 (with a task board) and 팀 종료…, also a VoiceOver action. A dialog asks
+  first (취소 is the default button: Return and Esc do not shut down); 팀 종료 runs `my-team shutdown --team <name>`
+  without a shell or a terminal. The line then shows a spinner in place of its counts until the team leaves the
+  running list (it then shows under 기록); on a failure it comes back at once and an alert shows my-team's last
+  stderr line.
+- 팀 실행 (the running list's head) is a menu: the team configs in `~/teams/*.json`, one per `team_name` (the newest
+  file), each with `워커 N · <file>`, leaving out the board's `*.resume.json` and `.bak` copies; a team that runs or
+  is being started is dimmed (`실행 중`, `띄우는 중`). Other `.json` files are listed disabled under 읽지 못한 파일
+  with the reason (JSON 아님, team_name 없음, workers 없음, 읽기 권한 없음). Then 새 팀 만들기… and ~/teams 폴더
+  열기. Picking a team opens a new Ghostty window that runs `my-team start --continue --config <file>` (a team with
+  no previous state starts new; one with state keeps its task board and mail) and attaches to its tmux session; a
+  team that already runs is only attached. The config file is never written. Until the board sees the team run, a
+  `띄우는 중` line holds its place at the top of the running teams.
 - Worker line: under an unfolded team, each worker's state icon, name, folder (when it is not the name) and time in
   the state. A worker whose folder is a git work tree with changes has `+N −M` before the time: the lines added and
   removed against the base the diff window uses (a base picked there too), its 커밋된 변경 and 미커밋 변경 counts

@@ -4,6 +4,7 @@ import TowerCore
 struct CommandError: LocalizedError {
     let argv: [String]
     let output: String
+    var status: Int32 = 0
     var errorDescription: String? { "\(argv.joined(separator: " ")) failed: \(output)" }
 }
 
@@ -50,7 +51,7 @@ enum FocusRunner {
         }
         let text = String(decoding: await drained.value, as: UTF8.self)
         guard status == 0 else {
-            throw CommandError(argv: argv, output: text.trimmingCharacters(in: .whitespacesAndNewlines))
+            throw CommandError(argv: argv, output: text.trimmingCharacters(in: .whitespacesAndNewlines), status: status)
         }
     }
 }

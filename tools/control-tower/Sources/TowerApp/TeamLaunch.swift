@@ -91,6 +91,9 @@ struct TeamLaunches {
 
     mutating func cancel(_ team: String) { started[team] = nil }
 
+    /// The teams being started, by name.
+    var teams: [String] { started.keys.sorted() }
+
     /// Drops the teams that run now and the ones that never came up in time.
     mutating func settle(running: Set<String>, now: Date) {
         started = started.filter { team, at in !running.contains(team) && now.timeIntervalSince(at) < Self.wait }
@@ -150,25 +153,53 @@ enum TeamLaunchError: LocalizedError {
 struct TeamConfig: Equatable {
     let team: String
     let path: String
+    let workers: Int
+    let modified: Date
+
+    var file: String { (path as NSString).lastPathComponent }
 }
 
-/// The team configs in `dir`, one a team: the newest file that names it, as `teamConfigPath` picks. The board's
-/// `.resume.json` and `.bak` copies are left out, and so is a JSON file without a `team_name`; a `.json` file that
-/// does not read as a JSON object is counted in `unreadable` instead.
-func teamConfigs(in dir: String) -> (configs: [TeamConfig], unreadable: Int) {
+/// A `.json` file in `~/teams` that is not offered, and why (T206 §2).
+struct UnreadableConfig: Equatable {
+    enum Reason: String { case notJSON = "JSON 아님", noTeamName = "team_name 없음", noWorkers = "workers 없음", denied = "읽기 권한 없음" }
+    let file: String
+    let reason: Reason
+}
+
+struct TeamConfigList: Equatable {
+    var configs: [TeamConfig] = []
+    var unreadable: [UnreadableConfig] = []
+}
+
+/// The team configs right in `dir`, one a team: the newest file that names it, as `teamConfigPath` picks. The
+/// board's `.resume.json` and `.bak` copies are left out; any other `.json` file that is not a team config is listed
+/// in `unreadable` with its reason.
+func teamConfigs(in dir: String) -> TeamConfigList {
     let fm = FileManager.default
-    var newest: [String: String] = [:]
-    var unreadable = 0
-    for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? []
+    var newest: [String: TeamConfig] = [:]
+    var unreadable: [UnreadableConfig] = []
+    for name in ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).sorted()
     where name.hasSuffix(".json") && !name.hasSuffix(".resume.json") && !name.contains(".bak") {
         let path = "\(dir)/\(name)"
-        guard let json = fm.contents(atPath: path).flatMap({ try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any]
-        else { unreadable += 1; continue }
-        guard let team = json["team_name"] as? String, !team.isEmpty else { continue }
-        if let seen = newest[team], modified(seen) >= modified(path) { continue }
-        newest[team] = path
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { continue }
+        guard let data = fm.contents(atPath: path) else {
+            unreadable.append(UnreadableConfig(file: name, reason: .denied)); continue
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            unreadable.append(UnreadableConfig(file: name, reason: .notJSON)); continue
+        }
+        guard let team = json["team_name"] as? String, !team.isEmpty else {
+            unreadable.append(UnreadableConfig(file: name, reason: .noTeamName)); continue
+        }
+        guard let workers = json["workers"] as? [Any], !workers.isEmpty else {
+            unreadable.append(UnreadableConfig(file: name, reason: .noWorkers)); continue
+        }
+        let config = TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path))
+        if let seen = newest[team], seen.modified >= config.modified { continue }
+        newest[team] = config
     }
-    return (newest.map { TeamConfig(team: $0.key, path: $0.value) }.sorted { $0.team < $1.team }, unreadable)
+    return TeamConfigList(configs: newest.values.sorted { $0.team < $1.team }, unreadable: unreadable)
 }
 
 /// Starts the team in `path` with `--continue` (a team with no previous state starts new; one with state keeps its
@@ -219,7 +250,25 @@ struct TeamShutdowns {
     mutating func settle(running live: Set<String>) { running.formIntersection(live) }
 }
 
-/// A 팀 실행 menu line: a team that runs is shown, dimmed, with 실행 중.
-func launchItemTitle(_ config: TeamConfig, running: Set<String>) -> String {
-    running.contains(config.team) ? "\(config.team) — 실행 중" : config.team
+/// A 팀 실행 menu line's second line: how big the team is, and its file, or why it cannot be picked now.
+func launchItemSubtitle(_ config: TeamConfig, running: Bool, launching: Bool) -> String {
+    "워커 \(config.workers) · " + (running ? "실행 중" : launching ? "띄우는 중" : config.file)
+}
+
+/// The 팀 종료 failure alert: my-team's last stderr line, or its exit code, then the command to try by hand.
+func shutdownFailure(team: String, _ error: any Error) -> Failure {
+    let said: String
+    if let e = error as? CommandError {
+        said = e.output.split(separator: "\n").last.map(String.init) ?? "my-team이 \(e.status)로 끝났습니다."
+    } else {
+        said = error.localizedDescription
+    }
+    return Failure(title: "“\(team)” 팀을 종료하지 못함",
+                   reason: "\(said)\n터미널에서 my-team shutdown --team \(team) 을 직접 실행해 보세요.")
+}
+
+/// The 팀 종료 dialog's message (T206 §1): what ends at once and what stays.
+func shutdownMessage(workers: Int) -> String {
+    "워커 \(workers)개와 tmux 세션이 바로 끝나고, 응답 중인 워커는 중간에 멈춥니다. "
+        + "작업판·메일·manifest는 남아 있어, 기록의 ‘이어서 실행’으로 다시 띄울 수 있습니다."
 }

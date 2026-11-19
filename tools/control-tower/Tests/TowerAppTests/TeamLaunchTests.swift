@@ -127,6 +127,7 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     #expect(!launches.pending("lab"))
     let retry = launches.begin("lab", at: t0.addingTimeInterval(TeamLaunches.wait + 2))
     #expect(retry)
+    #expect(launches.teams == ["lab"])  // the running list's 띄우는 중 lines
     launches.cancel("lab")  // the terminal did not open
     #expect(!launches.pending("lab"))
 }
@@ -212,26 +213,48 @@ private final class Stubs {
         try Data(text.utf8).write(to: URL(fileURLWithPath: path))
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: path)
     }
-    try write("b.json", #"{"team_name":"b"}"#)
-    try write("a-old.json", #"{"team_name":"a"}"#, age: 100)
-    try write("a-new.json", #"{"team_name":"a"}"#, age: 10)       // same team twice: the newest
-    try write("a.resume.json", #"{"team_name":"a"}"#)            // the board's resume config
-    try write("a.json.bak-2026-11-19", #"{"team_name":"a"}"#)    // a backup
-    try write("c.bak.json", #"{"team_name":"c"}"#)
-    try write("notes.json", #"{"title":"not a team"}"#)          // no team_name: not a team config
+    let w = #""workers":[{"name":"pm"},{"name":"core"}]"#
+    try write("b.json", #"{"team_name":"b",\#(w)}"#)
+    try write("a-old.json", #"{"team_name":"a",\#(w)}"#, age: 100)
+    try write("a-new.json", #"{"team_name":"a",\#(w)}"#, age: 10)       // same team twice: the newest
+    try write("a.resume.json", #"{"team_name":"a",\#(w)}"#)             // the board's resume config
+    try write("a.json.bak-2026-11-19", #"{"team_name":"a",\#(w)}"#)     // a backup
+    try write("c.bak.json", #"{"team_name":"c",\#(w)}"#)
+    try write("notes.json", #"{"title":"not a team"}"#)
+    try write("empty.json", #"{"team_name":"e","workers":[]}"#)
     try write("broken.json", "not json")
     try write("list.json", "[1]")
+    try write("locked.json", #"{"team_name":"l",\#(w)}"#)
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: "\(dir)/locked.json")
     try FileManager.default.createDirectory(atPath: "\(dir)/legacy-teams", withIntermediateDirectories: true)
-    let (configs, unreadable) = teamConfigs(in: dir)
-    #expect(configs == [TeamConfig(team: "a", path: "\(dir)/a-new.json"), TeamConfig(team: "b", path: "\(dir)/b.json")])
-    #expect(unreadable == 2)
-    #expect(teamConfigs(in: "\(dir)/missing").configs.isEmpty)
+    try FileManager.default.createDirectory(atPath: "\(dir)/folder.json", withIntermediateDirectories: true)
+    let list = teamConfigs(in: dir)
+    #expect(list.configs.map { [$0.team, $0.file] } == [["a", "a-new.json"], ["b", "b.json"]])
+    #expect(list.configs.map(\.workers) == [2, 2])
+    #expect(list.unreadable == [
+        UnreadableConfig(file: "broken.json", reason: .notJSON),
+        UnreadableConfig(file: "empty.json", reason: .noWorkers),
+        UnreadableConfig(file: "list.json", reason: .notJSON),
+        UnreadableConfig(file: "locked.json", reason: .denied),
+        UnreadableConfig(file: "notes.json", reason: .noTeamName),
+    ])
+    #expect(teamConfigs(in: "\(dir)/missing") == TeamConfigList())
 }
 
-@Test func aRunningTeamIsMarkedInTheLaunchMenu() {
-    let c = TeamConfig(team: "shop", path: "/t/shop.json")
-    #expect(launchItemTitle(c, running: ["shop"]) == "shop — 실행 중")
-    #expect(launchItemTitle(c, running: ["lab"]) == "shop")
+@Test func aRunningOrStartingTeamIsMarkedInTheLaunchMenu() {
+    let c = TeamConfig(team: "shop", path: "/t/shop.json", workers: 3, modified: .distantPast)
+    #expect(launchItemSubtitle(c, running: false, launching: false) == "워커 3 · shop.json")
+    #expect(launchItemSubtitle(c, running: true, launching: false) == "워커 3 · 실행 중")
+    #expect(launchItemSubtitle(c, running: false, launching: true) == "워커 3 · 띄우는 중")
+}
+
+@Test func aFailedShutdownSaysMyTeamsLastLineOrItsExitCode() {
+    let said = CommandError(argv: ["my-team"], output: "[my-team] Shutting down…\nerror: no such team", status: 1)
+    #expect(shutdownFailure(team: "shop", said) == Failure(
+        title: "“shop” 팀을 종료하지 못함", reason: "error: no such team\n터미널에서 my-team shutdown --team shop 을 직접 실행해 보세요."))
+    let silent = CommandError(argv: ["my-team"], output: "", status: 2)
+    #expect(shutdownFailure(team: "shop", silent).reason.hasPrefix("my-team이 2로 끝났습니다.\n"))
+    #expect(shutdownMessage(workers: 4).hasPrefix("워커 4개와 tmux 세션이 바로 끝나고"))
 }
 
 @Test func launchingATeamStartsItsConfigWithoutAShellParsingTheName() throws {

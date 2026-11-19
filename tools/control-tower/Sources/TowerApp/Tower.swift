@@ -19,7 +19,7 @@ final class Tower {
     /// The 팀 종료 dialog and the teams being shut down.
     private(set) var shutdowns = TeamShutdowns()
     /// The team configs in `~/teams` the 팀 실행 menu offers, read with each collection.
-    private(set) var teamConfigList: (configs: [TeamConfig], unreadable: Int) = ([], 0)
+    private(set) var teamConfigList = TeamConfigList()
     /// Task boards of the running teams that keep one (T70), read only while the board or a task board window is open.
     private(set) var taskBoards: [String: TaskBoardState] = [:]
     /// A failure the board window shows attached to itself, until it is dismissed.
@@ -228,7 +228,7 @@ final class Tower {
     func launchTeam(_ config: TeamConfig) {
         guard launches.begin(config.team, at: Date()) else { return }
         let command = launchTeamCommand(team: config.team, path: config.path, myTeam: myTeamBin, tmux: towerTmuxBin)
-        run("팀을 실행하지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
+        run("“\(config.team)” 팀을 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
             self?.launches.cancel(config.team)
         }
     }
@@ -241,10 +241,16 @@ final class Tower {
     /// The confirmed team's `my-team shutdown`, in the background with no terminal; stderr shows on failure.
     func confirmShutdown() {
         guard let team = shutdowns.confirm() else { return }
-        run("팀을 종료하지 못함", [shutdownTeamArgv(team: team, myTeam: myTeamBin)]) { [weak self] in
-            self?.shutdowns.failed(team)
+        Task {
+            do { try await FocusRunner.run([shutdownTeamArgv(team: team, myTeam: myTeamBin)]) } catch {
+                shutdowns.failed(team)
+                show(shutdownFailure(team: team, error))
+            }
         }
     }
+
+    /// Opens `~/teams` in Finder.
+    func openTeamsFolder() { run("~/teams 폴더를 열지 못함", [["open", teamsDir]]) }
 
     private func run(_ failure: String, _ argvs: [[String]], onFailure: @escaping () -> Void = {}) {
         Task {
@@ -257,7 +263,10 @@ final class Tower {
 
     /// Never brings the app forward: a failed move to a terminal leaves the keyboard where the user is (T75).
     private func showAlert(_ title: String, _ error: any Error) {
-        let failure = Failure(title: title, reason: error.localizedDescription)
+        show(Failure(title: title, reason: error.localizedDescription))
+    }
+
+    private func show(_ failure: Failure) {
         switch failureRoute(windows) {
         case .sheet: self.failure = failure
         case .notification: notifier?.post(failure)

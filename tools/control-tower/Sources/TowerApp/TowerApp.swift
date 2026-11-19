@@ -173,7 +173,7 @@ struct TowerCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("새 팀") { tower.newTeam() }
+            Button("새 팀 만들기…") { tower.newTeam() }
             Divider()
             Button("다시 읽기") { nav?.reload?() }.keyboardShortcut("r").disabled(nav?.reload == nil)
         }

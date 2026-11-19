@@ -7,9 +7,11 @@
  *
  * Input:  { team_name, goal? }           goal "G3" for one goal; left out, every goal
  * Output: { ok, goals: [ { id, title, path,
- *             waves: [ [ { ref, task, items, after, title, state, status, blocked_by: [ { ref, state } ] } ] ],
+ *             waves: [ [ { ref, task, items: [n]|null, after: [ { ref, task, items } ], title, state, status,
+ *                          blocked_by: [ { ref, state } ] } ] ],
  *             ready_now: [ref], unregistered: [task id], cycle: [ref…]|null, errors: [ { line, text, reason } ] } ] }
- * status: done | ready_now | waiting | cancelled | unregistered.
+ * status: done | ready_now | waiting | cancelled | unregistered. ready_now: every predecessor complete and not done
+ * yet, so a task already under way is in it too (its state says doing).
  * A goal without `## 순서`: waves []. A cycle: cycle set, waves []. Syntax errors: errors set, waves [] (a partial
  * order would put a task in ready_now whose predecessor line was mistyped). A team without a board: every node
  * unregistered.

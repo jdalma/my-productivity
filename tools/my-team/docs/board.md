@@ -290,12 +290,14 @@ when they are all in the task's `progress_summary.done_items` (`board-progress` 
 | `goal-order` | anyone | **`team_name`**; `goal` (`G3`: that goal only, `not-found` if there is none) | `goals`, by number: `{id, title, path, waves, ready_now, unregistered, cycle, errors}` |
 
 - `waves` is a list of waves, each a list of units: `{ref, task, items, after, title, state, status,
-  blocked_by}`. `items` is null for a whole task; `after` the references it waits on; `title` and `state` the
-  task's on the board (null when it is not there).
+  blocked_by}`. `items` is null for a whole task, else the item numbers; `after` the references it waits on,
+  each `{ref, task, items}`; `title` and `state` the task's on the board (null when it is not there).
 - `status` is `done`, `ready_now` (everything before is complete), `waiting`, `cancelled` (its own task) or
   `unregistered` (not on the board, which is not an error: a planned task may not be added yet).
 - `blocked_by` lists what before is not complete, each `{ref, state}`: the task's state, or `unregistered`.
-- `ready_now` lists the units that can start now; `unregistered` the tasks the board does not have.
+- `ready_now` lists the refs (strings) of the units whose predecessors are all complete and that are not done
+  yet: those that can start now, and those already under way (read `state` to tell them apart). `unregistered`
+  lists the tasks the board does not have.
 - A cycle gives `cycle` (`["A","B","A"]`) and no waves. Errors in the section give `errors` (`{line, text,
   reason}`) and no waves, since a half-read order could show a task as ready that is not.
 - A team whose config has no board gets every unit `unregistered`.

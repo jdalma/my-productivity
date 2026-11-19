@@ -23,9 +23,10 @@ enum FocusRunner {
     }
 
     /// No shell parses anything. A GUI app's PATH lacks Homebrew, so `tmux` is TowerCore's resolved path with the
-    /// test instance's socket, if any; `open` lives in /usr/bin.
+    /// test instance's socket, if any; `open` lives in /usr/bin; an absolute path (my-team's) is run as it is.
     static func resolved(_ argv: [String], tmux: [String] = towerTmux) -> [String] {
-        argv[0] == "tmux" ? tmux + argv.dropFirst() : ["/usr/bin/\(argv[0])"] + argv.dropFirst()
+        if argv[0].hasPrefix("/") { return argv }
+        return argv[0] == "tmux" ? tmux + argv.dropFirst() : ["/usr/bin/\(argv[0])"] + argv.dropFirst()
     }
 
     private static func exec(_ argv: [String]) async throws {

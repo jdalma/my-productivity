@@ -145,3 +145,81 @@ enum TeamLaunchError: LocalizedError {
         }
     }
 }
+
+/// A team config in `~/teams` the 팀 실행 menu offers.
+struct TeamConfig: Equatable {
+    let team: String
+    let path: String
+}
+
+/// The team configs in `dir`, one a team: the newest file that names it, as `teamConfigPath` picks. The board's
+/// `.resume.json` and `.bak` copies are left out, and so is a JSON file without a `team_name`; a `.json` file that
+/// does not read as a JSON object is counted in `unreadable` instead.
+func teamConfigs(in dir: String) -> (configs: [TeamConfig], unreadable: Int) {
+    let fm = FileManager.default
+    var newest: [String: String] = [:]
+    var unreadable = 0
+    for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? []
+    where name.hasSuffix(".json") && !name.hasSuffix(".resume.json") && !name.contains(".bak") {
+        let path = "\(dir)/\(name)"
+        guard let json = fm.contents(atPath: path).flatMap({ try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any]
+        else { unreadable += 1; continue }
+        guard let team = json["team_name"] as? String, !team.isEmpty else { continue }
+        if let seen = newest[team], modified(seen) >= modified(path) { continue }
+        newest[team] = path
+    }
+    return (newest.map { TeamConfig(team: $0.key, path: $0.value) }.sorted { $0.team < $1.team }, unreadable)
+}
+
+/// Starts the team in `path` with `--continue` (a team with no previous state starts new; one with state keeps its
+/// mail and work files) and attaches this terminal to its tmux session, as `resumeTeamCommand` does, without
+/// writing any file. A team that already runs is only attached.
+func launchTeamCommand(team: String, path: String, myTeam: String, tmux: String) -> [String] {
+    let script = """
+        alive=$("$2" status --team "$4" --json 2>/dev/null | plutil -extract team_alive raw -o - - 2>/dev/null)
+        if [ "$alive" = true ]; then echo '이미 실행 중인 팀입니다. 그 세션에 붙습니다.'
+        else "$2" start --continue --config "$1" || { echo; echo '팀을 띄우지 못했습니다. Enter로 닫기'; read -r _; exit 1; }
+        fi
+        s=$("$2" status --team "$4" --json 2>/dev/null | plutil -extract session raw -o - - 2>/dev/null)
+        [ -n "$s" ] || { echo; echo '팀의 tmux 세션을 찾지 못해 붙지 않습니다. Enter로 닫기'; read -r _; exit 1; }
+        exec "$3" attach -t "$s"
+        """
+    return ["/bin/sh", "-c", script, "sh", path, myTeam, tmux, team]
+}
+
+/// `my-team shutdown` of one team, run without a shell.
+func shutdownTeamArgv(team: String, myTeam: String) -> [String] { [myTeam, "shutdown", "--team", team] }
+
+/// The 팀 종료 flow: a team is shut down only after the user confirmed the dialog `ask` opened, and once at a time.
+struct TeamShutdowns {
+    /// The team whose confirmation dialog is open.
+    private(set) var asking: String?
+    /// Teams being shut down: from the confirmation until the board no longer sees them run, or the command failed.
+    private(set) var running: Set<String> = []
+
+    /// false while `team` is being shut down already.
+    mutating func ask(_ team: String) -> Bool {
+        guard !running.contains(team) else { return false }
+        asking = team
+        return true
+    }
+
+    mutating func dismiss() { asking = nil }
+
+    /// The team the user confirmed, now being shut down; nil when no dialog was open.
+    mutating func confirm() -> String? {
+        guard let team = asking else { return nil }
+        asking = nil
+        running.insert(team)
+        return team
+    }
+
+    mutating func failed(_ team: String) { running.remove(team) }
+
+    mutating func settle(running live: Set<String>) { running.formIntersection(live) }
+}
+
+/// A 팀 실행 menu line: a team that runs is shown, dimmed, with 실행 중.
+func launchItemTitle(_ config: TeamConfig, running: Set<String>) -> String {
+    running.contains(config.team) ? "\(config.team) — 실행 중" : config.team
+}

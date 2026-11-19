@@ -87,6 +87,7 @@ struct BoardView: View {
                presenting: tower.failure) { _ in
             Button("확인") {}
         } message: { Text($0.reason) }
+        .modifier(ShutdownConfirmation(tower: tower))
         .onChange(of: activeState, initial: true) { tower.windows.boardKey = activeState == .key }
         .onAppear { tower.windows.board = true }
         .onChange(of: model.map { diffTotalFolders($0.teams) { opened.isExpanded($0, query: query) } } ?? [], initial: true) {
@@ -192,6 +193,10 @@ struct BoardView: View {
                                    board: TaskBoardButtonState(counts: team.taskCounts, problem: tower.taskBoards[team.name]?.shownFailure.map {
                                        let p = taskBoardProblem($0, bin: myTeamBin); return "\(p.title)\n\(p.detail)" }),
                                    openBoard: { openTaskBoard(team.name) }, toggle: { toggleTeam(team.name) })
+                        .contextMenu {
+                            Button(tower.shutdowns.running.contains(team.name) ? "종료 중…" : "팀 종료…") { tower.askShutdown(team.name) }
+                                .disabled(tower.shutdowns.running.contains(team.name))
+                        }
                     }
                 }
             }
@@ -326,8 +331,29 @@ struct BoardView: View {
                 .buttonStyle(.borderless)
                 .scaledFont(.callout)
                 .help("~/teams 에서 Claude와 새 my-team 팀 config를 만들고 띄우는 터미널을 엽니다")
+            launchMenu(running: tower.board.map(runningTeams) ?? [])
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// 팀 실행: the team configs in ~/teams; one that runs is dimmed, files that did not read are counted below.
+    private func launchMenu(running: Set<String>) -> some View {
+        let list = tower.teamConfigList
+        return Menu("팀 실행…", systemImage: "play") {
+            if list.configs.isEmpty { Text("~/teams 에 config 없음") }
+            ForEach(list.configs, id: \.path) { c in
+                Button(launchItemTitle(c, running: running)) { tower.launchTeam(c) }
+                    .disabled(running.contains(c.team) || tower.launches.pending(c.team))
+            }
+            if list.unreadable > 0 {
+                Divider()
+                Text("읽지 못한 파일 \(list.unreadable)개")
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .scaledFont(.callout)
+        .help("~/teams 의 config로 팀을 새 터미널에서 실행합니다")
     }
 
     /// The history entry a row stands for: itself, or the entry reading a live session's transcript.
@@ -979,6 +1005,22 @@ struct SearchField: NSViewRepresentable {
 
         func controlTextDidChange(_ note: Notification) {
             if let field = note.object as? NSSearchField { text.wrappedValue = field.stringValue }
+        }
+    }
+}
+
+/// 팀 종료's confirmation: 취소 is the default button, so Return never shuts a team down; only 팀 종료 does.
+private struct ShutdownConfirmation: ViewModifier {
+    let tower: Tower
+
+    func body(content: Content) -> some View {
+        content.alert("\(tower.shutdowns.asking ?? "") 팀을 종료할까요?",
+                      isPresented: Binding { tower.shutdowns.asking != nil } set: { if !$0 { tower.dismissShutdown() } }) {
+            Button("취소", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+            Button("팀 종료", role: .destructive) { tower.confirmShutdown() }
+        } message: {
+            Text("my-team shutdown 으로 이 팀의 모든 워커와 tmux 세션을 닫습니다. 작업판·메일 기록은 남아 이어서 실행할 수 있습니다.")
         }
     }
 }

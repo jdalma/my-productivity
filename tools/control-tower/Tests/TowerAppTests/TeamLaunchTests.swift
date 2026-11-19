@@ -200,3 +200,91 @@ private final class Stubs {
     #expect(pathWithClaude("", home: "/h") == "/h/.local/bin")  // an empty entry would mean the current folder
     #expect(pathWithClaude("/a:/b", home: "/h") == "/a:/b:/h/.local/bin")
 }
+
+// MARK: - T207: 팀 실행 from ~/teams, 팀 종료 with a confirmation
+
+@Test func theLaunchListIsOneConfigATeamWithoutResumeBackupOrBrokenFiles() throws {
+    let dir = NSTemporaryDirectory() + "teams-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    func write(_ name: String, _ text: String, age: TimeInterval = 0) throws {
+        let path = "\(dir)/\(name)"
+        try Data(text.utf8).write(to: URL(fileURLWithPath: path))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: path)
+    }
+    try write("b.json", #"{"team_name":"b"}"#)
+    try write("a-old.json", #"{"team_name":"a"}"#, age: 100)
+    try write("a-new.json", #"{"team_name":"a"}"#, age: 10)       // same team twice: the newest
+    try write("a.resume.json", #"{"team_name":"a"}"#)            // the board's resume config
+    try write("a.json.bak-2026-11-19", #"{"team_name":"a"}"#)    // a backup
+    try write("c.bak.json", #"{"team_name":"c"}"#)
+    try write("notes.json", #"{"title":"not a team"}"#)          // no team_name: not a team config
+    try write("broken.json", "not json")
+    try write("list.json", "[1]")
+    try FileManager.default.createDirectory(atPath: "\(dir)/legacy-teams", withIntermediateDirectories: true)
+    let (configs, unreadable) = teamConfigs(in: dir)
+    #expect(configs == [TeamConfig(team: "a", path: "\(dir)/a-new.json"), TeamConfig(team: "b", path: "\(dir)/b.json")])
+    #expect(unreadable == 2)
+    #expect(teamConfigs(in: "\(dir)/missing").configs.isEmpty)
+}
+
+@Test func aRunningTeamIsMarkedInTheLaunchMenu() {
+    let c = TeamConfig(team: "shop", path: "/t/shop.json")
+    #expect(launchItemTitle(c, running: ["shop"]) == "shop — 실행 중")
+    #expect(launchItemTitle(c, running: ["lab"]) == "shop")
+}
+
+@Test func launchingATeamStartsItsConfigWithoutAShellParsingTheName() throws {
+    let team = #"a b'"c;$(x)"#
+    let argv = launchTeamCommand(team: team, path: "/h/teams/x y.json", myTeam: "/bin/my-team", tmux: "/bin/tmux")
+    #expect(argv.first == "/bin/sh" && argv[1] == "-c")
+    #expect(!argv[2].contains("x y.json") && !argv[2].contains(team))
+    #expect(Array(argv[3...]) == ["sh", "/h/teams/x y.json", "/bin/my-team", "/bin/tmux", team])
+}
+
+@Test func aLaunchedTeamStartsWithContinueAndAttachesWritingNoFile() throws {
+    let stubs = try Stubs(status: #"{"team_alive":false,"session":"my-team-t-abc:0"}"#)
+    let path = "\(stubs.dir)/t.json"
+    #expect(try stubs.run(launchTeamCommand(team: "t", path: path, myTeam: "\(stubs.dir)/my-team", tmux: "\(stubs.dir)/tmux")) == 0)
+    #expect(stubs.log.contains("my-team start --continue --config \(path)"))
+    #expect(stubs.log.contains("tmux attach -t my-team-t-abc:0"))
+    #expect(!FileManager.default.fileExists(atPath: path))
+}
+
+@Test func aRunningTeamIsOnlyAttached() throws {
+    let stubs = try Stubs(status: #"{"team_alive":true,"session":"my-team-t-abc:0"}"#)
+    #expect(try stubs.run(launchTeamCommand(team: "t", path: "/x.json", myTeam: "\(stubs.dir)/my-team", tmux: "\(stubs.dir)/tmux")) == 0)
+    #expect(!stubs.log.contains("my-team start"))
+    #expect(stubs.log.contains("tmux attach -t my-team-t-abc:0"))
+}
+
+@Test func shutdownIsOneArgvPerArgumentAndRunsAsIs() {
+    let team = #"a b'"c"#
+    let argv = shutdownTeamArgv(team: team, myTeam: "/opt/bin/my-team")
+    #expect(argv == ["/opt/bin/my-team", "shutdown", "--team", team])
+    #expect(FocusRunner.resolved(argv, tmux: ["/bin/tmux"]) == argv)  // an absolute path is not put under /usr/bin
+}
+
+@Test func noTeamIsShutDownWithoutItsConfirmation() {
+    var s = TeamShutdowns()
+    let unasked = s.confirm()                         // no dialog: nothing to shut down
+    #expect(unasked == nil)
+    let asked = s.ask("shop")
+    s.dismiss()                                      // 취소
+    let cancelled = s.confirm()
+    #expect(asked && cancelled == nil && s.running.isEmpty)
+    _ = s.ask("shop")
+    let confirmed = s.confirm()                       // 팀 종료
+    let again = s.confirm()                           // once per confirmation
+    let second = s.ask("shop")                        // no second dialog while it shuts down
+    #expect(confirmed == "shop" && again == nil && !second && s.asking == nil)
+    s.settle(running: ["shop"])                       // still seen running: still shutting down
+    #expect(s.running == ["shop"])
+    s.settle(running: [])                            // gone from the board: the menu item is back
+    let back = s.ask("shop")
+    #expect(back)
+    _ = s.confirm()
+    s.failed("shop")                                 // the command failed: it can be tried again
+    let retry = s.ask("shop")
+    #expect(retry)
+}

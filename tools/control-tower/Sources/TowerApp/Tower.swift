@@ -16,6 +16,10 @@ final class Tower {
     var boardOpenRequested = false
     /// Teams the board asked to start and has not seen running yet: their resume button waits.
     private(set) var launches = TeamLaunches()
+    /// The 팀 종료 dialog and the teams being shut down.
+    private(set) var shutdowns = TeamShutdowns()
+    /// The team configs in `~/teams` the 팀 실행 menu offers, read with each collection.
+    private(set) var teamConfigList: (configs: [TeamConfig], unreadable: Int) = ([], 0)
     /// Task boards of the running teams that keep one (T70), read only while the board or a task board window is open.
     private(set) var taskBoards: [String: TaskBoardState] = [:]
     /// A failure the board window shows attached to itself, until it is dismissed.
@@ -90,6 +94,8 @@ final class Tower {
         }
         board = next
         launches.settle(running: runningTeams(next), now: Date())
+        shutdowns.settle(running: runningTeams(next))
+        teamConfigList = await Task.detached { teamConfigs(in: teamsDir) }.value
     }
 
     var myTurn: Int { board.map { myTurnShown($0, taskBoards: taskBoardStatuses) } ?? 0 }
@@ -215,6 +221,28 @@ final class Tower {
                                         path: "\(teamsDir)/\(teamRun.team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)
         run("팀을 이어서 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
             self?.launches.cancel(teamRun.team)
+        }
+    }
+
+    /// Opens a terminal that starts the team in `config` and attaches to it; a running one is only attached.
+    func launchTeam(_ config: TeamConfig) {
+        guard launches.begin(config.team, at: Date()) else { return }
+        let command = launchTeamCommand(team: config.team, path: config.path, myTeam: myTeamBin, tmux: towerTmuxBin)
+        run("팀을 실행하지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
+            self?.launches.cancel(config.team)
+        }
+    }
+
+    /// Opens the 팀 종료 confirmation for `team`; nothing is shut down until it is confirmed.
+    func askShutdown(_ team: String) { _ = shutdowns.ask(team) }
+
+    func dismissShutdown() { shutdowns.dismiss() }
+
+    /// The confirmed team's `my-team shutdown`, in the background with no terminal; stderr shows on failure.
+    func confirmShutdown() {
+        guard let team = shutdowns.confirm() else { return }
+        run("팀을 종료하지 못함", [shutdownTeamArgv(team: team, myTeam: myTeamBin)]) { [weak self] in
+            self?.shutdowns.failed(team)
         }
     }
 

@@ -127,16 +127,17 @@ func loadTeams(base: String = stateRootBase(), panes: [Pane]) throws -> [RawTeam
 }
 
 /// Liveness by (session, @worker_name, pane id): pane ids are server-global and get reused,
-/// so a dead team's manifest can point at another team's live pane.
+/// so a dead team's manifest can point at another team's live pane. The team is alive while one of its workers is,
+/// as in my-team's team-liveness.js: a split-pane team's session is someone else's and outlives the team.
 func teamStatus(_ m: Manifest, panes: [Pane]) -> RawTeam {
     let session = String(m.sessionName.prefix { $0 != ":" })
     let inSession = panes.filter { $0.session == session }
     let root = m.stateRoot.trimmed
-    return RawTeam(
+    var team = RawTeam(
         teamName: m.teamName,
         session: m.sessionName,
         startedAt: m.startedAt,
-        teamAlive: !inSession.isEmpty,
+        teamAlive: false,
         hasTaskBoard: m.board != nil,
         workers: m.workers.map { w in
             var r = RawWorker(
@@ -163,6 +164,8 @@ func teamStatus(_ m: Manifest, panes: [Pane]) -> RawTeam {
             return r
         }
     )
+    team.teamAlive = team.workers.contains(where: \.alive)
+    return team
 }
 
 private func spoolCount(_ dir: String) -> Int {

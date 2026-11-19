@@ -1,4 +1,5 @@
 import Foundation
+import os
 import TowerCore
 
 struct CommandError: LocalizedError {
@@ -13,13 +14,15 @@ struct CommandError: LocalizedError {
 enum FocusRunner {
     /// Under `TOWER_DRY_RUN` each command is written to that file instead of run, and counts as done (T96).
     /// `env` replaces the app's environment for the commands (my-team's, `myTeamEnvironment`); nil keeps it.
-    static func run(_ commands: [[String]], env: [String: String]? = nil, dryRun: String? = towerDryRun) async throws {
+    /// A command still running after `timeout` seconds is sent SIGTERM and counts as failed.
+    static func run(_ commands: [[String]], env: [String: String]? = nil, timeout: TimeInterval? = nil,
+                    dryRun: String? = towerDryRun) async throws {
         for argv in commands {
             let argv = resolved(argv)
             if let dryRun {
                 recordDryRun(shellCommandLine(argv), to: dryRun)
             } else {
-                try await exec(argv, env: env)
+                try await exec(argv, env: env, timeout: timeout)
             }
         }
     }
@@ -31,7 +34,7 @@ enum FocusRunner {
         return argv[0] == "tmux" ? tmux + argv.dropFirst() : ["/usr/bin/\(argv[0])"] + argv.dropFirst()
     }
 
-    private static func exec(_ argv: [String], env: [String: String]?) async throws {
+    private static func exec(_ argv: [String], env: [String: String]?, timeout: TimeInterval?) async throws {
         let p = Process()
         if let env { p.environment = env }
         p.executableURL = URL(fileURLWithPath: argv[0])
@@ -42,16 +45,33 @@ enum FocusRunner {
         // Drain stderr while the child runs: a full pipe (64 KB) would block it from exiting.
         let drained = Task.detached { err.fileHandleForReading.readDataToEndOfFile() }
         let status: Int32
+        // the pid, not the Process, goes to the timer; `ended` under the lock keeps it from signalling a reused pid
+        let state = OSAllocatedUnfairLock(initialState: (ended: false, timedOut: false))
         do {
             status = try await withCheckedThrowingContinuation { c in
-                p.terminationHandler = { c.resume(returning: $0.terminationStatus) }
-                do { try p.run() } catch { c.resume(throwing: error) }
+                p.terminationHandler = { ended in
+                    state.withLock { $0.ended = true }
+                    c.resume(returning: ended.terminationStatus)
+                }
+                do { try p.run() } catch { c.resume(throwing: error); return }
+                guard let timeout else { return }
+                let pid = p.processIdentifier
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                    state.withLock { s in
+                        guard !s.ended else { return }
+                        s.timedOut = true
+                        kill(pid, SIGTERM)
+                    }
+                }
             }
         } catch {
             try? err.fileHandleForWriting.close()  // never launched: end the drain
             throw error
         }
         let text = String(decoding: await drained.value, as: UTF8.self)
+        if let timeout, state.withLock({ $0.timedOut }) {
+            throw CommandError(argv: argv, output: "\(Int(timeout))초 안에 끝나지 않아 멈췄습니다.", status: status)
+        }
         guard status == 0 else {
             throw CommandError(argv: argv, output: text.trimmingCharacters(in: .whitespacesAndNewlines), status: status)
         }

@@ -36,19 +36,11 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any]
     return config
 }
 
-/// The config in `dir` that names `team`, the newest if several do. The `.resume.json` the board wrote last time
-/// is never the base: it carries old session ids.
+/// The config in `dir` that names `team`: the one 팀 실행 lists for it (`teamConfigs`), so 팀 실행 and the resume of
+/// a stopped team start from the same file (T208). The `.resume.json` the board wrote last time is never the base:
+/// it carries old session ids.
 func teamConfigPath(named team: String, in dir: String) -> String? {
-    let fm = FileManager.default
-    let files = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
-    return files
-        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".resume.json") }
-        .map { "\(dir)/\($0)" }
-        .filter { path in
-            let json = fm.contents(atPath: path).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
-            return json?["team_name"] as? String == team
-        }
-        .max { modified($0) < modified($1) }
+    teamConfigs(in: dir).configs.first { $0.team == team }?.path
 }
 
 private func modified(_ path: String) -> Date {
@@ -221,10 +213,14 @@ func launchTeamCommand(team: String, path: String, myTeam: String, tmux: String)
 /// `my-team shutdown` of one team, run without a shell.
 func shutdownTeamArgv(team: String, myTeam: String) -> [String] { [myTeam, "shutdown", "--team", team] }
 
-/// The 팀 종료 flow: a team is shut down only after the user confirmed the dialog `ask` opened, and once at a time.
+/// The 팀 종료 flow: a team is shut down only after the user pressed 팀 종료 in the dialog `ask` opened for it, and
+/// once at a time. The dialog closing (`close`, which SwiftUI may do before or after a button's action) is apart from
+/// 취소 (`cancel`), so a dialog closed another way does not come back and 팀 종료 still finds its team.
 struct TeamShutdowns {
     /// The team whose confirmation dialog is open.
     private(set) var asking: String?
+    /// The team the last dialog asked about, until 취소, 팀 종료 or the next dialog.
+    private var asked: String?
     /// Teams being shut down: from the confirmation until the board no longer sees them run, or the command failed.
     private(set) var running: Set<String> = []
 
@@ -232,15 +228,22 @@ struct TeamShutdowns {
     mutating func ask(_ team: String) -> Bool {
         guard !running.contains(team) else { return false }
         asking = team
+        asked = team
         return true
     }
 
-    mutating func dismiss() { asking = nil }
+    mutating func close() { asking = nil }
 
-    /// Whether `team`'s dialog was open and it is now being shut down.
-    mutating func confirm(_ team: String) -> Bool {
-        guard asking == team else { return false }
+    mutating func cancel() {
         asking = nil
+        asked = nil
+    }
+
+    /// Whether `team`'s dialog was the last one opened and not cancelled; it is now being shut down.
+    mutating func confirm(_ team: String) -> Bool {
+        guard asked == team else { return false }
+        asking = nil
+        asked = nil
         running.insert(team)
         return true
     }
@@ -250,9 +253,69 @@ struct TeamShutdowns {
     mutating func settle(running live: Set<String>) { running.formIntersection(live) }
 }
 
-/// A 팀 실행 menu line's second line: how big the team is, and its file, or why it cannot be picked now.
-func launchItemSubtitle(_ config: TeamConfig, running: Bool, launching: Bool) -> String {
-    "워커 \(config.workers) · " + (running ? "실행 중" : launching ? "띄우는 중" : config.file)
+/// How long `my-team shutdown` may take before the board gives up on it and the team can be shut down again.
+let shutdownTimeout: TimeInterval = 30
+
+/// The 팀 종료 dialog's message (T206 §1): what ends at once and what stays.
+func shutdownMessage(workers: Int) -> String {
+    "워커 \(workers)개와 tmux 세션이 바로 끝나고, 응답 중인 워커는 중간에 멈춥니다. "
+        + "작업판·메일·manifest는 남아 있어, ‘팀 실행’으로 다시 띄우면 워커마다 마지막 대화를 이어갑니다."
+}
+
+/// A team's newest run in the history: the run its newest session belongs to, and when that session last changed.
+struct TeamLastRun: Equatable {
+    var run: TeamRun
+    var updatedAt: String
+}
+
+/// Each team's newest run, by team name, from the sessions `teamRuns` gives a run.
+func lastRuns(_ history: [HistorySession]) -> [String: TeamLastRun] {
+    let byPath = Dictionary(history.map { ($0.transcriptPath, $0) }, uniquingKeysWith: { a, _ in a })
+    var last: [String: TeamLastRun] = [:]
+    for (path, run) in teamRuns(history) {
+        guard let h = byPath[path] else { continue }
+        if let seen = last[run.team], (parseISO(seen.updatedAt) ?? 0) >= (parseISO(h.updatedAt) ?? 0) { continue }
+        last[run.team] = TeamLastRun(run: run, updatedAt: h.updatedAt)
+    }
+    return last
+}
+
+/// 팀 실행's order: the team run last first, then the teams with no run in the history by name.
+func launchOrder(_ configs: [TeamConfig], last: [String: TeamLastRun]) -> [TeamConfig] {
+    configs.sorted { a, b in
+        switch (last[a.team].flatMap { parseISO($0.updatedAt) }, last[b.team].flatMap { parseISO($0.updatedAt) }) {
+        case let (x?, y?) where x != y: x > y
+        case (_?, nil): true
+        case (nil, _?): false
+        default: a.team < b.team
+        }
+    }
+}
+
+/// How 팀 실행 starts a team: a stopped run in the history comes back with each worker resuming its last
+/// conversation (`Tower.resumeTeam`); a team with none starts from its config with `--continue`.
+enum TeamLaunchPlan: Equatable {
+    case resume(TeamRun)
+    case start
+}
+
+func launchPlan(_ config: TeamConfig, last: [String: TeamLastRun]) -> TeamLaunchPlan {
+    last[config.team].map { .resume($0.run) } ?? .start
+}
+
+/// A 팀 실행 menu line's second line: how big the team is, and when it last ran, or why it cannot be picked now.
+func launchItemSubtitle(_ config: TeamConfig, last: TeamLastRun?, running: Bool, launching: Bool, now: Date) -> String {
+    "워커 \(config.workers) · " + (running ? "실행 중" : launching ? "띄우는 중"
+        : last.map { "마지막 실행 " + relativeTime($0.updatedAt, now: now) } ?? "기록 없음")
+}
+
+/// A 팀 실행 menu line's tooltip: what picking it does, then its file.
+func launchItemTooltip(_ config: TeamConfig, plan: TeamLaunchPlan, home: String) -> String {
+    let how = switch plan {
+    case .resume: "기록의 마지막 실행을 이어서 띄웁니다: 워커마다 마지막 대화를 resume합니다 (my-team start --continue)."
+    case .start: "기록이 없어 config로 띄웁니다 (my-team start --continue)."
+    }
+    return how + "\n" + abbreviate(config.path, home: home)
 }
 
 /// The 팀 종료 failure alert: my-team's last stderr line, or its exit code, then the command to try by hand.
@@ -265,10 +328,4 @@ func shutdownFailure(team: String, _ error: any Error) -> Failure {
     }
     return Failure(title: "“\(team)” 팀을 종료하지 못함",
                    reason: "\(said)\n터미널에서 my-team shutdown --team \(team) 을 직접 실행해 보세요.")
-}
-
-/// The 팀 종료 dialog's message (T206 §1): what ends at once and what stays.
-func shutdownMessage(workers: Int) -> String {
-    "워커 \(workers)개와 tmux 세션이 바로 끝나고, 응답 중인 워커는 중간에 멈춥니다. "
-        + "작업판·메일·manifest는 남아 있어, 기록의 ‘이어서 실행’으로 다시 띄울 수 있습니다."
 }

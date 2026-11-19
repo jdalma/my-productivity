@@ -7,7 +7,7 @@ import TowerCore
 struct BoardView: View {
     let tower: Tower
     @State private var query = ""
-    @State private var filter = HistoryFilter.team
+    @State private var filter = HistoryFilter.claude
     @State private var historyLimit = historyPageSize
     /// Where the board is and has been: the sidebar's selection and the picked task are its current screen.
     @State private var nav = ScreenHistory()
@@ -235,25 +235,8 @@ struct BoardView: View {
 
     private func historyList(_ model: SidebarModel) -> some View {
         List(selection: paneSelection(.history)) {
-            // my-team teams apart from single terminals, as in the running list above
-            if !model.historyTeams.isEmpty {
-                Section {
-                    // one line a team: its workers' sessions stay out of the list, the line resumes them together
-                    ForEach(model.historyTeams, id: \.run) { t in
-                        TeamHistoryHeader(team: t, now: Date(), launching: tower.launches.pending(t.run.team)) {
-                            tower.resumeTeam(t.run)
-                        }
-                    }
-                }
-            }
-            if !model.historySingles.isEmpty {
-                Section {
-                    ForEach(model.historySingles, id: \.transcriptPath) { h in
-                        HistoryRowView(h: h, now: Date(), home: home) { tower.open(h) }.tag(RowID.history(h.transcriptPath))
-                    }
-                } header: {
-                    Text("단일 터미널").scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).textCase(nil)
-                }
+            ForEach(model.history, id: \.transcriptPath) { h in
+                HistoryRowView(h: h, now: Date(), home: home) { tower.open(h) }.tag(RowID.history(h.transcriptPath))
             }
             if model.historyRemaining > 0 {
                 Button("더 보기 (남은 \(model.historyRemaining)개)") { historyLimit += historyPageSize }
@@ -322,7 +305,6 @@ struct BoardView: View {
             Text("기록 · 최근순").scaledFont(.headline, weight: .semibold)
             Spacer()
             Picker("기록 종류", selection: $filter) {
-                Text("my-team").tag(HistoryFilter.team)
                 Text("Claude").tag(HistoryFilter.claude)
                 Text("Codex").tag(HistoryFilter.codex)
             }
@@ -342,20 +324,22 @@ struct BoardView: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
-    /// 팀 실행 (T206 §2): the team configs in ~/teams, then the files that are not one, then 새 팀 만들기… and the
-    /// folder. A team that runs or is being started is dimmed.
+    /// 팀 실행 (T206 §2, T208): the team configs in ~/teams, the team run last first, each with when it last ran; then
+    /// the files that are not one, then 새 팀 만들기… and the folder. A team that runs or is being started is dimmed.
     private func launchMenu(running: Set<String>) -> some View {
         let list = tower.teamConfigList
+        let last = lastRuns(tower.history)
+        let now = Date()
         return Menu {
             if list.configs.isEmpty { Text("~/teams 에 팀 config가 없습니다") }
-            ForEach(list.configs, id: \.path) { c in
+            ForEach(launchOrder(list.configs, last: last), id: \.path) { c in
                 let launching = tower.launches.pending(c.team)
                 Button { tower.launchTeam(c) } label: {
                     Text(c.team)
-                    Text(launchItemSubtitle(c, running: running.contains(c.team), launching: launching))
+                    Text(launchItemSubtitle(c, last: last[c.team], running: running.contains(c.team), launching: launching, now: now))
                 }
                 .disabled(running.contains(c.team) || launching)
-                .help("\(abbreviate(c.path, home: home))\n수정 \(relativeTime(c.modified.formatted(.iso8601), now: Date()))")
+                .help(launchItemTooltip(c, plan: launchPlan(c, last: last), home: home))
             }
             if !list.unreadable.isEmpty {
                 Divider()
@@ -639,44 +623,6 @@ struct LiveRowView: View {
             }
             Text(row.badge.elapsed).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
         }
-    }
-}
-
-/// A stopped my-team team in the history: its name whole on the first line, when it started and its workers on the
-/// second, its size in the tooltip, and a button that starts it again with each worker back in its last session.
-private struct TeamHistoryHeader: View {
-    let team: TeamHistory
-    let now: Date
-    /// The board asked to start this team and has not seen it run yet.
-    let launching: Bool
-    let resume: () -> Void
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(team.run.team).scaledFont(.callout, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
-                Text(teamHistoryDetail(team)).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .layoutPriority(1)
-            Spacer(minLength: 8)
-            if let newest = team.sessions.first {
-                Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
-            }
-            if launching {
-                // the spinner the running list shows for "working"; the words are in its tooltip
-                ProgressView().controlSize(.mini)
-                    .help("팀을 띄우는 중: 보드에 실행 중으로 잡히면 끝납니다")
-                    .accessibilityLabel("팀을 띄우는 중")
-            } else {
-                RunButton(label: "이어서 실행", action: resume)
-                    .disabled(team.running)
-                    .help(team.running ? "이 팀은 지금 실행 중입니다"
-                                       : "이어서 실행: 새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
-            }
-        }
-        .help(transcriptSizeLabel(team.size).map { size in
-            (["크기 \(size)"] + team.workerSizes.map { "\($0.worker) \(transcriptSizeLabel($0.size) ?? "")" }).joined(separator: "\n")
-        } ?? "")
     }
 }
 
@@ -1045,12 +991,12 @@ private struct ShutdownConfirmation: ViewModifier {
     let tower: Tower
 
     func body(content: Content) -> some View {
-        // each button ends the dialog itself: the binding's set, which SwiftUI may call before or after a button's
-        // action, does nothing, so it can never clear the team 팀 종료 is about to confirm
+        // closing the dialog (the binding's set, before or after a button's action, or any other way) only hides it;
+        // 팀 종료 still finds the team it was asked about, and 취소 forgets it (TeamShutdowns)
         content.alert("“\(tower.shutdowns.asking ?? "")” 팀을 종료할까요?",
-                      isPresented: Binding { tower.shutdowns.asking != nil } set: { _ in },
+                      isPresented: Binding { tower.shutdowns.asking != nil } set: { if !$0 { tower.closeShutdown() } },
                       presenting: tower.shutdowns.asking) { team in
-            Button("취소", role: .cancel) { tower.dismissShutdown() }
+            Button("취소", role: .cancel) { tower.cancelShutdown() }
                 .keyboardShortcut(.defaultAction)
             Button("팀 종료", role: .destructive) { tower.confirmShutdown(team) }
         } message: { team in
@@ -1059,7 +1005,7 @@ private struct ShutdownConfirmation: ViewModifier {
     }
 }
 
-/// A team 팀 실행 or 이어서 실행 asked to start, at the top of the running teams until the board sees it run.
+/// A team 팀 실행 asked to start, at the top of the running teams until the board sees it run.
 private struct LaunchingTeamLine: View {
     let team: String
     @Environment(\.boardFontScale) private var scale

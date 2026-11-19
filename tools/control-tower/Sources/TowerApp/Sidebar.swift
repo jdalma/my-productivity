@@ -126,31 +126,15 @@ struct SidebarModel: Equatable {
     var teams: [TeamGroup]
     /// Claude Code, then Codex; an agent with no session has no group.
     var agents: [AgentGroup]
-    /// One page or more of the filtered history as the list shows it, running sessions listed above left out.
-    var historyItems: [HistoryItem]
-    /// Filtered history lines past `historyItems`.
+    /// One page or more of the filtered history, newest first, running sessions listed above left out.
+    var history: [HistorySession]
+    /// Filtered history lines past `history`.
     var historyRemaining: Int
     /// Every live row waiting on me, search ignored: those asking for an answer above finished ones, each longest
     /// wait first, a row without a start time last.
     var queue: [LiveRow]
 
     var liveRows: [LiveRow] { teams.flatMap(\.rows) + agents.flatMap(\.rows) }
-    /// The page's my-team teams and single terminals, apart, each newest first.
-    var historyTeams: [TeamHistory] {
-        historyItems.compactMap { if case .team(let t) = $0 { t } else { nil } }
-    }
-    var historySingles: [HistorySession] {
-        historyItems.compactMap { if case .session(let h) = $0 { h } else { nil } }
-    }
-    /// Every session in `historyItems`, in list order.
-    var history: [HistorySession] {
-        historyItems.flatMap { item -> [HistorySession] in
-            switch item {
-            case .session(let h): [h]
-            case .team(let t): t.sessions
-            }
-        }
-    }
     /// The running list's areas, top to bottom: one my-team area over all its teams, then one per agent.
     var liveAreas: [LineKind] { (teams.isEmpty ? [] : [.team]) + agents.map { .agent($0.agent) } }
 }
@@ -242,19 +226,6 @@ func runningTeams(_ board: Board) -> Set<String> {
     Set(board.teams.filter { $0.workers.contains(where: \.alive) }.map(\.name))
 }
 
-/// One line of the history list: a session alone, or the ended sessions of one my-team team.
-enum HistoryItem: Equatable {
-    case session(HistorySession)
-    case team(TeamHistory)
-
-    var id: String {
-        switch self {
-        case .session(let h): h.transcriptPath
-        case .team(let t): "team:\(t.run.team)@\(t.run.start.map { String(Int($0)) } ?? "?")"
-        }
-    }
-}
-
 /// One `my-team start` of a team: its name and when the workers it launched began (ms since 1970); nil when
 /// none of them is left in the history, only workers added later.
 struct TeamRun: Hashable {
@@ -285,61 +256,18 @@ func teamRuns(_ history: [HistorySession], gap: Double = 10 * 60_000) -> [String
     return runs
 }
 
-/// One run of a my-team team in the history: its ended sessions, found by the prompt my-team typed into each worker first.
-struct TeamHistory: Equatable {
-    var run: TeamRun
-    /// Newest first.
-    var sessions: [HistorySession]
-    /// The team runs now: there is nothing to resume.
-    var running: Bool
-
-    /// The run's transcripts together; nil when none has a size.
-    var size: Int? {
-        let known = sessions.compactMap(\.size)
-        return known.isEmpty ? nil : known.reduce(0, +)
-    }
-
-    /// Each worker's transcripts together, biggest first.
-    var workerSizes: [(worker: String, size: Int)] {
-        var by: [String: Int] = [:]
-        for h in sessions { if let w = h.member?.worker, let n = h.size { by[w, default: 0] += n } }
-        return by.map { (worker: $0.key, size: $0.value) }.sorted { $0.size != $1.size ? $0.size > $1.size : $0.worker < $1.worker }
-    }
-}
-
 /// "1.2 MB", as Finder shows a file's size.
 func transcriptSizeLabel(_ bytes: Int?) -> String? {
     bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
 }
 
-/// `sessions` (newest first) as list lines: a team run's sessions gathered on one line, where its newest one was.
-func historyLines(_ sessions: [HistorySession], runs: [String: TeamRun], running: Set<String>) -> [HistoryItem] {
-    var lines: [HistoryItem] = []
-    var runLine: [TeamRun: Int] = [:]
-    for h in sessions {
-        guard let run = runs[h.transcriptPath] else {
-            lines.append(.session(h))
-            continue
-        }
-        if let i = runLine[run], case .team(var t) = lines[i] {
-            t.sessions.append(h)
-            lines[i] = .team(t)
-        } else {
-            runLine[run] = lines.count
-            lines.append(.team(TeamHistory(run: run, sessions: [h], running: running.contains(run.team))))
-        }
-    }
-    return lines
-}
-
-/// What the history list shows: ended my-team teams, or single terminals of one agent. A team's workers are
-/// never single terminals, whatever agent they ran.
+/// What the history list shows: the single terminals of one agent. A team's workers are never single terminals,
+/// whatever agent they ran: a stopped team is started again from 팀 실행 (T208).
 enum HistoryFilter: Hashable {
-    case team, claude, codex
+    case claude, codex
 
     func shows(_ h: HistorySession) -> Bool {
         switch self {
-        case .team: h.member != nil
         case .claude: h.member == nil && h.agent == .claude
         case .codex: h.member == nil && h.agent == .codex
         }
@@ -404,7 +332,6 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
             && filter.shows(h)
             && hit([h.title, h.workspace, h.branch, h.member?.team])
     }
-    let items = historyLines(past, runs: teamRuns(history), running: runningTeams(board))
     let queue = all.filter(\.session.myTurn).enumerated().sorted { a, b in
         if a.element.badge.isDone != b.element.badge.isDone { return !a.element.badge.isDone }
         return switch (parseISO(a.element.session.since), parseISO(b.element.session.since)) {
@@ -415,7 +342,7 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
         }
     }.map(\.element)
     return SidebarModel(teams: teams, agents: agents,
-                        historyItems: Array(items.prefix(historyLimit)), historyRemaining: max(0, items.count - historyLimit),
+                        history: Array(past.prefix(historyLimit)), historyRemaining: max(0, past.count - historyLimit),
                         queue: queue)
 }
 
@@ -512,7 +439,7 @@ func menuSections(_ m: MenuModel) -> [MenuSection] {
 
 func menuModel(_ board: Board, history: [HistorySession], home: String, taskBoards: [String: TaskBoardStatus] = [:]) -> MenuModel {
     // no history page: the dropdown shows running sessions only
-    let side = sidebarModel(board: board, history: history, query: "", filter: .team, historyLimit: 0, home: home)
+    let side = sidebarModel(board: board, history: history, query: "", filter: .claude, historyLimit: 0, home: home)
     let attached = Set(board.teams.filter(\.attached).map(\.name))
     return MenuModel(
         myTurn: side.queue,
@@ -691,16 +618,6 @@ func historyTooltip(_ h: HistorySession, home: String) -> String {
         .filter { !$0.isEmpty }.joined(separator: "\n")
 }
 
-/// A stopped team's second line: `11/06 15:11 시작 · 워커 4`, the time on a 24-hour clock (T70a D1).
-func teamHistoryDetail(_ team: TeamHistory) -> String {
-    let start = team.run.start.map { ms in
-        let f = DateFormatter()
-        f.dateFormat = "MM/dd HH:mm"
-        return f.string(from: Date(timeIntervalSince1970: ms / 1000)) + " 시작"
-    }
-    return [start, "워커 \(Set(team.sessions.compactMap { $0.member?.worker }).count)"].compactMap { $0 }.joined(separator: " · ")
-}
-
 /// A row's context menu, top to bottom; what does not apply to the row is left out, not dimmed.
 enum RowMenuItem: Hashable {
     case focus, diff, copyPath, copyResume, resume
@@ -794,7 +711,7 @@ enum SidebarPane {
 /// The count on the sidebar's 내 차례 line and on the menu bar icon: the queue's cards, so a stopped worker
 /// that was waiting is in neither.
 func myTurnShown(_ board: Board, taskBoards: [String: TaskBoardStatus] = [:]) -> Int {
-    sidebarModel(board: board, history: [], query: "", filter: .team, historyLimit: 0, home: "").queue.count
+    sidebarModel(board: board, history: [], query: "", filter: .claude, historyLimit: 0, home: "").queue.count
         + waitingDecisions(board, taskBoards: taskBoards).count
 }
 

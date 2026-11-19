@@ -224,8 +224,10 @@ final class Tower {
         }
     }
 
-    /// Opens a terminal that starts the team in `config` and attaches to it; a running one is only attached.
+    /// 팀 실행: a team with a stopped run in the history comes back as that run, each worker resuming its last
+    /// conversation; one with none starts from `config` with `--continue` (T208). Either way a terminal attaches to it.
     func launchTeam(_ config: TeamConfig) {
+        if case .resume(let run) = launchPlan(config, last: lastRuns(history)) { return resumeTeam(run) }
         guard launches.begin(config.team, at: Date()) else { return }
         let command = launchTeamCommand(team: config.team, path: config.path, myTeam: myTeamBin, tmux: towerTmuxBin)
         run("“\(config.team)” 팀을 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
@@ -236,13 +238,17 @@ final class Tower {
     /// Opens the 팀 종료 confirmation for `team`; nothing is shut down until it is confirmed.
     func askShutdown(_ team: String) { _ = shutdowns.ask(team) }
 
-    func dismissShutdown() { shutdowns.dismiss() }
+    /// The dialog closed, by a button or another way.
+    func closeShutdown() { shutdowns.close() }
+
+    func cancelShutdown() { shutdowns.cancel() }
 
     /// The confirmed team's `my-team shutdown`, in the background with no terminal; stderr shows on failure.
     func confirmShutdown(_ team: String) {
         guard shutdowns.confirm(team) else { return }
         Task {
-            do { try await FocusRunner.run([shutdownTeamArgv(team: team, myTeam: myTeamBin)], env: myTeamEnvironment()) } catch {
+            do { try await FocusRunner.run([shutdownTeamArgv(team: team, myTeam: myTeamBin)], env: myTeamEnvironment(),
+                                           timeout: shutdownTimeout) } catch {
                 shutdowns.failed(team)
                 show(shutdownFailure(team: team, error))
             }

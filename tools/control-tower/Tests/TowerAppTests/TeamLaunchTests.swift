@@ -44,15 +44,18 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     defer { try? FileManager.default.removeItem(atPath: dir) }
     func write(_ name: String, _ team: String, _ age: TimeInterval) throws {
         let path = "\(dir)/\(name)"
-        try Data(#"{"team_name":"\#(team)","workers":[]}"#.utf8).write(to: URL(fileURLWithPath: path))
+        try Data(#"{"team_name":"\#(team)","workers":[{"name":"pm"}]}"#.utf8).write(to: URL(fileURLWithPath: path))
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: path)
     }
     try write("old.json", "t", 100)
     try write("new.json", "t", 10)
     try write("t.resume.json", "t", 1)  // what the board wrote last time: never the base
+    try write("t.bak.json", "t", 0)  // a backup, whatever its suffix (T208)
     try write("other.json", "u", 1)
     try Data("not json".utf8).write(to: URL(fileURLWithPath: "\(dir)/broken.json"))
     #expect(teamConfigPath(named: "t", in: dir) == "\(dir)/new.json")
+    // 팀 실행 lists the same file for the team, so it and the resume of a stopped run start from one config
+    #expect(teamConfigs(in: dir).configs.first { $0.team == "t" }?.path == teamConfigPath(named: "t", in: dir))
     #expect(teamConfigPath(named: "none", in: dir) == nil)
 }
 
@@ -241,11 +244,51 @@ private final class Stubs {
     #expect(teamConfigs(in: "\(dir)/missing") == TeamConfigList())
 }
 
-@Test func aRunningOrStartingTeamIsMarkedInTheLaunchMenu() {
+@Test func aLaunchLineSaysWhenTheTeamLastRanOrThatItRunsNow() {
     let c = TeamConfig(team: "shop", path: "/t/shop.json", workers: 3, modified: .distantPast)
-    #expect(launchItemSubtitle(c, running: false, launching: false) == "워커 3 · shop.json")
-    #expect(launchItemSubtitle(c, running: true, launching: false) == "워커 3 · 실행 중")
-    #expect(launchItemSubtitle(c, running: false, launching: true) == "워커 3 · 띄우는 중")
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let ran = TeamLastRun(run: TeamRun(team: "shop", start: nil), updatedAt: Date(timeIntervalSince1970: 1_800_000_000 - 3 * 3600).formatted(.iso8601))
+    #expect(launchItemSubtitle(c, last: ran, running: false, launching: false, now: now)
+        == "워커 3 · 마지막 실행 " + relativeTime(ran.updatedAt, now: now))  // the history list's clock
+    #expect(launchItemSubtitle(c, last: nil, running: false, launching: false, now: now) == "워커 3 · 기록 없음")
+    #expect(launchItemSubtitle(c, last: ran, running: true, launching: false, now: now) == "워커 3 · 실행 중")
+    #expect(launchItemSubtitle(c, last: ran, running: false, launching: true, now: now) == "워커 3 · 띄우는 중")
+}
+
+@Test func eachTeamsLastRunIsItsNewestSessionsRun() {
+    // two runs of shop days apart (workers launched minutes apart are one run), one of lab, a single terminal
+    let history = [
+        session("b-qa", team: "shop", worker: "qa", at: "2026-11-05T11:00:00.000Z"),
+        session("b-pm", team: "shop", worker: "pm", at: "2026-11-05T10:00:00.000Z"),
+        session("a-pm", team: "shop", worker: "pm", at: "2026-11-02T10:00:00.000Z"),
+        session("lab", team: "lab", worker: "pm", at: "2026-11-04T10:00:00.000Z"),
+        session("solo", team: nil, worker: "x", at: "2026-11-06T10:00:00.000Z"),
+    ].map { h in
+        var h = h
+        // when each began: shop's two workers of 11-05 four minutes apart, so one run
+        h.createdAt = ["b-qa": "2026-11-05T09:04:00.000Z", "b-pm": "2026-11-05T09:00:00.000Z"][h.id] ?? h.updatedAt
+        return h
+    }
+    let last = lastRuns(history)
+    #expect(Set(last.keys) == ["shop", "lab"])
+    #expect(last["shop"]?.updatedAt == "2026-11-05T11:00:00.000Z")
+    #expect(last["shop"]?.run == teamRuns(history)["/t/b-pm.jsonl"])  // the newer run, not the one of 11-02
+    #expect(last["shop"]?.run != teamRuns(history)["/t/a-pm.jsonl"])
+    let config = { (team: String) in TeamConfig(team: team, path: "/t/\(team).json", workers: 1, modified: .distantPast) }
+    // the team run last first, then the ones never run by name
+    #expect(launchOrder([config("zeta"), config("lab"), config("alpha"), config("shop")], last: last).map(\.team)
+        == ["shop", "lab", "alpha", "zeta"])
+}
+
+@Test func aTeamWithAStoppedRunResumesItAndOneWithoutStartsFromItsConfig() {
+    let run = TeamRun(team: "shop", start: 1)
+    let last = ["shop": TeamLastRun(run: run, updatedAt: "2026-11-05T11:00:00.000Z")]
+    let shop = TeamConfig(team: "shop", path: "/h/teams/shop.json", workers: 2, modified: .distantPast)
+    let lab = TeamConfig(team: "lab", path: "/h/teams/lab.json", workers: 1, modified: .distantPast)
+    #expect(launchPlan(shop, last: last) == .resume(run))  // Tower.resumeTeam: each worker back in its conversation
+    #expect(launchPlan(lab, last: last) == .start)          // launchTeamCommand: start --continue
+    #expect(launchItemTooltip(shop, plan: .resume(run), home: "/h").contains("마지막 대화를 resume"))
+    #expect(launchItemTooltip(lab, plan: .start, home: "/h") == "기록이 없어 config로 띄웁니다 (my-team start --continue).\n~/teams/lab.json")
 }
 
 @Test func aFailedShutdownSaysMyTeamsLastLineOrItsExitCode() {
@@ -294,10 +337,11 @@ private final class Stubs {
     #expect(!unasked)
     let asked = s.ask("shop")
     let other = s.confirm("lab")                      // not the team the dialog asks about
-    s.dismiss()                                      // 취소
+    s.cancel()                                       // 취소
     let cancelled = s.confirm("shop")
-    #expect(asked && !other && !cancelled && s.running.isEmpty)
+    #expect(asked && !other && !cancelled && s.running.isEmpty && s.asking == nil)
     _ = s.ask("shop")
+    s.close()                                        // the dialog closes before 팀 종료's action runs
     let confirmed = s.confirm("shop")                 // 팀 종료
     let again = s.confirm("shop")                     // once per confirmation
     let second = s.ask("shop")                        // no second dialog while it shuts down
@@ -311,6 +355,13 @@ private final class Stubs {
     s.failed("shop")                                 // the command failed: it can be tried again
     let retry = s.ask("shop")
     #expect(retry)
+}
+
+@Test func aDialogClosedAnotherWayDoesNotComeBack() {
+    var s = TeamShutdowns()
+    _ = s.ask("shop")
+    s.close()                                        // closed without a button (the window went away)
+    #expect(s.asking == nil && s.running.isEmpty)    // the dialog is not shown again, nothing was shut down
 }
 
 @Test func myTeamRunsWithHomebrewOnPathAndNoWorkersVariables() {
@@ -335,4 +386,23 @@ private final class Stubs {
     try await FocusRunner.run([shutdownTeamArgv(team: "a b", myTeam: bin)], env: env, dryRun: nil)
     let log = try String(contentsOfFile: "\(dir)/log", encoding: .utf8)
     #expect(log.hasPrefix(env["PATH"]! + "|unset|shutdown --team a b"))
+}
+
+@Test func aShutdownThatHangsIsStoppedAndCountsAsFailed() async throws {
+    let dir = NSTemporaryDirectory() + "hang-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let bin = "\(dir)/my-team"
+    try "#!/bin/sh\nexec sleep 30\n".write(toFile: bin, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin)
+    let started = Date()
+    do {
+        try await FocusRunner.run([shutdownTeamArgv(team: "t", myTeam: bin)], timeout: 1, dryRun: nil)
+        Issue.record("a command past its timeout must fail")
+    } catch {
+        #expect(Date().timeIntervalSince(started) < 10)
+        // the alert says so; the line's spinner goes (Tower.confirmShutdown calls `failed`) and 팀 종료 is back
+        #expect(shutdownFailure(team: "t", error).reason.hasPrefix("1초 안에 끝나지 않아 멈췄습니다.\n"))
+    }
+    #expect(shutdownTimeout == 30)
 }

@@ -2,7 +2,7 @@
 
 One view of every my-team worker and every Claude Code / Codex session on this Mac: who is waiting for you, for how long, and a click to jump to that tmux pane.
 
-Read-only except for what the user asks for: moving focus; resuming an ended session they double-click (a new Ghostty window runs `claude --resume <id>` or `codex resume <id>` in that session's directory); starting a team in a new Ghostty window (팀 실행, 새 팀 만들기…, 이어서 실행); and shutting down a running my-team team (팀 종료…), only after the user confirms the dialog. It never types into a pane, never closes a single session, and never reads a my-team mailbox in a way that consumes it.
+Read-only except for what the user asks for: moving focus; resuming an ended session they double-click (a new Ghostty window runs `claude --resume <id>` or `codex resume <id>` in that session's directory); starting a team in a new Ghostty window (팀 실행, 새 팀 만들기…); and shutting down a running my-team team (팀 종료…), only after the user confirms the dialog. It never types into a pane, never closes a single session, and never reads a my-team mailbox in a way that consumes it.
 
 A Swift package for macOS 14+. `TowerCore` collects and judges, `TowerApp` is the menu bar app, and `tower-cli` prints the same data for scripts.
 
@@ -75,16 +75,22 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   The line's context menu has 작업판 열기 (with a task board) and 팀 종료…, also a VoiceOver action. A dialog asks
   first (취소 is the default button: Return and Esc do not shut down); 팀 종료 runs `my-team shutdown --team <name>`
   without a shell or a terminal. The line then shows a spinner in place of its counts until the team leaves the
-  running list (it then shows under 기록); on a failure it comes back at once and an alert shows my-team's last
-  stderr line.
+  running list (팀 실행 then lists it with its last run); on a failure, or when my-team has not ended within 30
+  seconds (it is then stopped), it comes back at once and an alert shows my-team's last stderr line.
 - 팀 실행 (the running list's head) is a menu: the team configs in `~/teams/*.json`, one per `team_name` (the newest
-  file), each with `워커 N · <file>`, leaving out the board's `*.resume.json` and `.bak` copies; a team that runs or
-  is being started is dimmed (`실행 중`, `띄우는 중`). Other `.json` files are listed disabled under 읽지 못한 파일
-  with the reason (JSON 아님, team_name 없음, workers 없음, 읽기 권한 없음). Then 새 팀 만들기… and ~/teams 폴더
-  열기. Picking a team opens a new Ghostty window that runs `my-team start --continue --config <file>` (a team with
-  no previous state starts new; one with state keeps its task board and mail) and attaches to its tmux session; a
-  team that already runs is only attached. The config file is never written. Until the board sees the team run, a
-  `띄우는 중` line holds its place at the top of the running teams.
+  file; the resume of a stopped run reads the same one), leaving out the board's `*.resume.json` and any file with
+  `.bak` in its name. Each line reads `워커 N · 마지막 실행 <time>` (when the team's newest session in the history last
+  changed, on the clock the history list uses) or `워커 N · 기록 없음`; the team run last is first, the teams never
+  run follow by name. A team that runs or is being started is dimmed (`실행 중`, `띄우는 중`). Other `.json` files
+  are listed disabled under 읽지 못한 파일 with the reason (JSON 아님, team_name 없음, workers 없음, 읽기 권한 없음).
+  Then 새 팀 만들기… and ~/teams 폴더 열기. Picking a team opens a new Ghostty window and attaches to the team's tmux
+  session; a team that already runs is only attached. A team with a stopped run in the history comes back as that
+  run, each claude worker resuming its last conversation (`--resume <id>` in a `~/teams/<team>.resume.json` the
+  board writes, then `my-team start --continue`); a team with none runs `my-team start --continue --config <file>`
+  (no previous state: a new team). The line's tooltip says which. The config in `~/teams` is never written. Until
+  the board sees the team run, a `띄우는 중` line holds its place at the top of the running teams.
+- 기록 (history): the ended Claude Code or Codex sessions outside any team, newest first, Claude or Codex picked
+  above the list. A team's workers are not listed there: 팀 실행 starts a stopped team again.
 - Worker line: under an unfolded team, each worker's state icon, name, folder (when it is not the name) and time in
   the state. A worker whose folder is a git work tree with changes has `+N −M` before the time: the lines added and
   removed against the base the diff window uses (a base picked there too), its 커밋된 변경 and 미커밋 변경 counts

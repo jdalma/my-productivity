@@ -336,9 +336,12 @@ struct BoardView: View {
                 let launching = tower.launches.pending(c.team)
                 Button { tower.launchTeam(c) } label: {
                     Text(c.team)
-                    Text(launchItemSubtitle(c, last: last[c.team], running: running.contains(c.team), launching: launching, now: now))
+                    Text(tower.historyRead ? launchItemSubtitle(c, last: last[c.team], running: running.contains(c.team),
+                                                                launching: launching, now: now)
+                                           : "기록 읽는 중 · 워커 \(c.workers)")
                 }
-                .disabled(running.contains(c.team) || launching)
+                // before the first history read every team would look never run, and start without its conversations
+                .disabled(running.contains(c.team) || launching || !tower.historyRead)
                 .help(launchItemTooltip(c, last: last[c.team], running: running.contains(c.team), home: home, now: now))
             }
             if !list.unreadable.isEmpty {

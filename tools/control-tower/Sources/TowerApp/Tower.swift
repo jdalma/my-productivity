@@ -10,6 +10,8 @@ final class Tower {
     private(set) var myTeamError: String?
     /// Past sessions, newest first. Its own loop: the first scan takes 2-3 s and must not delay the board.
     private(set) var history: [HistorySession] = []
+    /// The history has been read once: until then 팀 실행 cannot tell a team with a stopped run from one without (T208).
+    private(set) var historyRead = false
     /// A row the dropdown asked the board to select; the board takes it, open already or opening now.
     var boardSelectRequest: RowID?
     /// Launch or reopen asked for the board window; the menu bar label opens it and clears this.
@@ -79,6 +81,7 @@ final class Tower {
                     continue
                 }
                 history = await Task.detached { await collectHistory(board: board) }.value
+                historyRead = true
                 try? await Task.sleep(for: .seconds(15))
             }
         }
@@ -227,6 +230,7 @@ final class Tower {
     /// 팀 실행: a team with a stopped run in the history comes back as that run, each worker resuming its last
     /// conversation; one with none starts from `config` with `--continue` (T208). Either way a terminal attaches to it.
     func launchTeam(_ config: TeamConfig) {
+        guard historyRead else { return }
         if case .resume(let run) = launchPlan(config, last: lastRuns(history)) { return resumeTeam(run) }
         guard launches.begin(config.team, at: Date()) else { return }
         let command = launchTeamCommand(team: config.team, path: config.path, myTeam: myTeamBin, tmux: towerTmuxBin)

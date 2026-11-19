@@ -83,7 +83,8 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   `<when> · 워커 N`: when the team's newest session in the history last changed (`오늘 14:30`, `어제 09:05`,
   `11-17 22:40` this year, else `2025-12-03`), or `기록 없음`; N is the workers of its last run (its manifest), else
   the config's. The team run last is first, the teams never run follow by name. A team that runs or is being
-  started is dimmed (`실행 중 · 워커 N`, `띄우는 중 · 워커 N`). The tooltip has the file, the time relative to now
+  started is dimmed (`실행 중 · 워커 N`, `띄우는 중 · 워커 N`), and every team is (`기록 읽는 중`) until the history
+  has been read once after launch, so a stopped team is never started without its conversations. The tooltip has the file, the time relative to now
   and what picking it does. Other `.json` files
   are listed disabled under 읽지 못한 파일 with the reason (JSON 아님, team_name 없음, workers 없음, 읽기 권한 없음).
   Then 새 팀 만들기… and ~/teams 폴더 열기. Picking a team opens a new Ghostty window and attaches to the team's tmux

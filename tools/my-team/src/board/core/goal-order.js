@@ -15,7 +15,7 @@ function parseRef(text) {
     if (lo === undefined) return { ref: task, task, items: null };
     const a = Number(lo), b = hi === undefined ? a : Number(hi);
     if (a < 1 || b < a) return `bad item range "${text}"`;
-    return { ref: text, task, items: Array.from({ length: b - a + 1 }, (_, i) => a + i) };
+    return { ref: a === b ? `${task}:${a}` : `${task}:${a}-${b}`, task, items: Array.from({ length: b - a + 1 }, (_, i) => a + i) };
 }
 
 /**
@@ -133,8 +133,9 @@ function findCycle(left) {
  */
 export function annotate(waveList, tasks) {
     const byId = new Map(tasks.map((t) => [t.id, t]));
-    const itemsDone = (task, items) =>
-        task?.state === 'done' || (!!items && items.every((i) => task?.progress_summary?.done_items?.includes(i)));
+    // a cancelled task completes nothing, whatever items it reported (plan 2.2: cancelled stays in blocked_by)
+    const itemsDone = (task, items) => task?.state !== 'cancelled' &&
+        (task?.state === 'done' || (!!items && items.every((i) => task?.progress_summary?.done_items?.includes(i))));
     const unregistered = new Set();
     const ready = [];
     const annotated = waveList.map((w) => w.map((n) => {

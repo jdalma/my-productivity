@@ -108,3 +108,14 @@ test('syntax errors carry their line numbers', () => {
     assert.deepEqual(r.invalid.map((e) => e.line), [4, 5, 6, 7]);
     assert.deepEqual(r.edges.map((e) => [e.from.ref, e.to.ref, e.line]), [['A', 'B', 3]]);
 });
+
+test('an item of a cancelled task does not count as complete', () => {
+    const graph = waves(parseOrder(order('A:1 -> B')).edges).waves;
+    const r = annotate(graph, [task('A', 'cancelled', [1]), task('B', 'ready')]);
+    assert.equal(nodeOf(r, 'B').status, 'waiting');
+    assert.deepEqual(nodeOf(r, 'B').blocked_by, [{ ref: 'A:1', state: 'cancelled' }]);
+});
+
+test('one item written as a range is the same node', () => {
+    assert.deepEqual(refsOf(order('A -> B:4', 'C -> B:4-4')), [['A', 'B', 'C'], ['B:4']]);
+});

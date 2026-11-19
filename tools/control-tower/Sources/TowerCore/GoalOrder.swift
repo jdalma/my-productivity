@@ -1,8 +1,9 @@
 import Foundation
 
-// The order of each goal's tasks (T213; plan research/my-team-goal-order-plan.md 2.4, 2.6). Read only, through
-// `my-team api goal-order --json` (tools/my-team/src/commands/api/goal-order.js): waves from the `## 순서` section
-// of the team's goal files, with each node's board state. Fields this app does not know are ignored.
+// The order of each goal's tasks (T213; schema: tools/my-team/docs/board.md, goal-order). Read only, through
+// `my-team api goal-order --json`: waves from the `## 순서` section of the team's goal files, with each node's board
+// state. Fields this app does not know are ignored. Two files may share a G number and so an `id`: `path` tells
+// goals apart.
 
 /// One goal file: `waves` is empty when it has no `## 순서`, a cycle (`cycle` set) or syntax errors (`errors` set).
 public struct GoalOrder: Decodable, Hashable, Sendable {

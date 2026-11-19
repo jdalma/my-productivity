@@ -50,6 +50,16 @@ private func goals(_ json: String) throws -> [GoalOrder] {
     #expect(try goals(#"{"ok":true,"goals":[]}"#).isEmpty)
 }
 
+@Test func twoFilesWithOneGNumberAreBothKept() throws {
+    // my-team T212 R7 L1: G3-a.md and G3-b.md both come out as G3
+    func goal(_ path: String) -> String {
+        #"{"id":"G3","title":"t","path":"\#(path)","waves":[],"ready_now":[],"unregistered":[],"cycle":null,"errors":[]}"#
+    }
+    let all = try goals(#"{"ok":true,"goals":[\#(goal("/tmp/example/G3-a.md")),\#(goal("/tmp/example/G3-b.md"))]}"#)
+    #expect(all.map(\.id) == ["G3", "G3"])
+    #expect(Set(all.map(\.path)).count == 2 && Set(all).count == 2)
+}
+
 @Test func anOlderMyTeamIsUnsupportedAndOtherFailuresStayFailures() {
     func read(_ status: Int32, _ out: String, _ err: String = "") -> GoalOrderRead { parseGoalOrder(CommandResult(status: status, stdout: out, stderr: err)) }
     // what my-team before T212 answers (commander), measured with the installed one

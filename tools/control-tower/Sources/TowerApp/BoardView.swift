@@ -339,7 +339,7 @@ struct BoardView: View {
                     Text(launchItemSubtitle(c, last: last[c.team], running: running.contains(c.team), launching: launching, now: now))
                 }
                 .disabled(running.contains(c.team) || launching)
-                .help(launchItemTooltip(c, plan: launchPlan(c, last: last), home: home))
+                .help(launchItemTooltip(c, last: last[c.team], running: running.contains(c.team), home: home, now: now))
             }
             if !list.unreadable.isEmpty {
                 Divider()

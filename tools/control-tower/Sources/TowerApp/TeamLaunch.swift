@@ -145,8 +145,12 @@ enum TeamLaunchError: LocalizedError {
 struct TeamConfig: Equatable {
     let team: String
     let path: String
+    /// The workers its last run had (the manifest keeps those add-worker added, and resume starts them all), else
+    /// the config's (T209 R3 L1).
     let workers: Int
     let modified: Date
+    /// The other files in `~/teams` that name the team; the newest, `path`, is the one started (T209 R3 S1).
+    var others: [String] = []
 
     var file: String { (path as NSString).lastPathComponent }
 }
@@ -163,12 +167,13 @@ struct TeamConfigList: Equatable {
     var unreadable: [UnreadableConfig] = []
 }
 
-/// The team configs right in `dir`, one a team: the newest file that names it, as `teamConfigPath` picks. The
-/// board's `.resume.json` and `.bak` copies are left out; any other `.json` file that is not a team config is listed
-/// in `unreadable` with its reason.
-func teamConfigs(in dir: String) -> TeamConfigList {
+/// The team configs right in `dir`, one a team: the newest file that names it (`teamConfigPath` reads the same),
+/// with the others named. The board's `.resume.json` and any file with `.bak` in its name are left out; any other
+/// `.json` file that is not a team config is listed in `unreadable` with its reason. A team's worker count is its
+/// manifest's under `stateBase` (or the config's `state_root`) when it has run.
+func teamConfigs(in dir: String, stateBase: String = homeDirectory() + "/.my-team/sessions") -> TeamConfigList {
     let fm = FileManager.default
-    var newest: [String: TeamConfig] = [:]
+    var found: [String: [(config: TeamConfig, json: [String: Any])]] = [:]
     var unreadable: [UnreadableConfig] = []
     for name in ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).sorted()
     where name.hasSuffix(".json") && !name.hasSuffix(".resume.json") && !name.contains(".bak") {
@@ -187,11 +192,22 @@ func teamConfigs(in dir: String) -> TeamConfigList {
         guard let workers = json["workers"] as? [Any], !workers.isEmpty else {
             unreadable.append(UnreadableConfig(file: name, reason: .noWorkers)); continue
         }
-        let config = TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path))
-        if let seen = newest[team], seen.modified >= config.modified { continue }
-        newest[team] = config
+        found[team, default: []].append((TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path)), json))
     }
-    return TeamConfigList(configs: newest.values.sorted { $0.team < $1.team }, unreadable: unreadable)
+    let configs = found.map { team, files -> TeamConfig in
+        // newest first; on the same time, the first by name
+        let sorted = files.enumerated().sorted { a, b in
+            a.element.config.modified != b.element.config.modified ? a.element.config.modified > b.element.config.modified : a.offset < b.offset
+        }.map(\.element)
+        let (newest, json) = sorted[0]
+        let root = json["state_root"] as? String ?? "\(stateBase)/\(team)"
+        let manifest = fm.contents(atPath: "\(root)/manifest.json")
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        let ran = (manifest?["workers"] as? [Any])?.count
+        return TeamConfig(team: team, path: newest.path, workers: ran ?? newest.workers, modified: newest.modified,
+                          others: sorted.dropFirst().map(\.config.file).sorted())
+    }
+    return TeamConfigList(configs: configs.sorted { $0.team < $1.team }, unreadable: unreadable)
 }
 
 /// Starts the team in `path` with `--continue` (a team with no previous state starts new; one with state keeps its
@@ -303,19 +319,47 @@ func launchPlan(_ config: TeamConfig, last: [String: TeamLastRun]) -> TeamLaunch
     last[config.team].map { .resume($0.run) } ?? .start
 }
 
-/// A 팀 실행 menu line's second line: how big the team is, and when it last ran, or why it cannot be picked now.
-func launchItemSubtitle(_ config: TeamConfig, last: TeamLastRun?, running: Bool, launching: Bool, now: Date) -> String {
-    "워커 \(config.workers) · " + (running ? "실행 중" : launching ? "띄우는 중"
-        : last.map { "마지막 실행 " + relativeTime($0.updatedAt, now: now) } ?? "기록 없음")
+/// When a team last ran, as 팀 실행 shows it (T209): `오늘 14:30`, `어제 09:05`, `11-17 22:40` this year, else
+/// `2025-12-03`; 24-hour, on the user's calendar and time zone.
+func lastRunTime(_ iso: String, now: Date, calendar: Calendar = .current) -> String? {
+    guard let ms = parseISO(iso) else { return nil }
+    let date = Date(timeIntervalSince1970: ms / 1000)
+    func format(_ pattern: String) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = calendar
+        f.timeZone = calendar.timeZone
+        f.dateFormat = pattern
+        return f.string(from: date)
+    }
+    if calendar.isDate(date, inSameDayAs: now) { return "오늘 " + format("HH:mm") }
+    if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+        return "어제 " + format("HH:mm")
+    }
+    if calendar.component(.year, from: date) == calendar.component(.year, from: now) { return format("MM-dd HH:mm") }
+    return format("yyyy-MM-dd")
 }
 
-/// A 팀 실행 menu line's tooltip: what picking it does, then its file.
-func launchItemTooltip(_ config: TeamConfig, plan: TeamLaunchPlan, home: String) -> String {
-    let how = switch plan {
-    case .resume: "기록의 마지막 실행을 이어서 띄웁니다: 워커마다 마지막 대화를 resume합니다 (my-team start --continue)."
-    case .start: "기록이 없어 config로 띄웁니다 (my-team start --continue)."
+/// A 팀 실행 menu line's second line: when the team last ran, or that it runs or is being started, then its size.
+func launchItemSubtitle(_ config: TeamConfig, last: TeamLastRun?, running: Bool, launching: Bool, now: Date) -> String {
+    let when = running ? "실행 중" : launching ? "띄우는 중" : last.flatMap { lastRunTime($0.updatedAt, now: now) } ?? "기록 없음"
+    return "\(when) · 워커 \(config.workers)"
+}
+
+/// A 팀 실행 menu line's tooltip: its file, when it last ran, and what picking it does; the team's other files.
+func launchItemTooltip(_ config: TeamConfig, last: TeamLastRun?, running: Bool, home: String, now: Date) -> String {
+    var lines = [abbreviate(config.path, home: home)]
+    if running {
+        lines.append("이 팀은 지금 실행 중입니다")
+    } else if let last {
+        lines += ["마지막 실행 " + relativeTime(last.updatedAt, now: now), "실행: 작업판을 이어 가고, 워커마다 마지막 대화를 resume합니다"]
+    } else {
+        lines.append("실행: 작업판을 이어 가고, 워커는 새 대화로 시작합니다")
     }
-    return how + "\n" + abbreviate(config.path, home: home)
+    if !config.others.isEmpty {
+        lines.append("같은 팀 config: \(config.others.joined(separator: ", ")) (가장 최근 수정 파일로 띄움)")
+    }
+    return lines.joined(separator: "\n")
 }
 
 /// The 팀 종료 failure alert: my-team's last stderr line, or its exit code, then the command to try by hand.

@@ -79,15 +79,18 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   seconds (it is then stopped), it comes back at once and an alert shows my-team's last stderr line.
 - 팀 실행 (the running list's head) is a menu: the team configs in `~/teams/*.json`, one per `team_name` (the newest
   file; the resume of a stopped run reads the same one), leaving out the board's `*.resume.json` and any file with
-  `.bak` in its name. Each line reads `워커 N · 마지막 실행 <time>` (when the team's newest session in the history last
-  changed, on the clock the history list uses) or `워커 N · 기록 없음`; the team run last is first, the teams never
-  run follow by name. A team that runs or is being started is dimmed (`실행 중`, `띄우는 중`). Other `.json` files
+  `.bak` in its name; the team's other files are named in the tooltip. Each line's second line reads
+  `<when> · 워커 N`: when the team's newest session in the history last changed (`오늘 14:30`, `어제 09:05`,
+  `11-17 22:40` this year, else `2025-12-03`), or `기록 없음`; N is the workers of its last run (its manifest), else
+  the config's. The team run last is first, the teams never run follow by name. A team that runs or is being
+  started is dimmed (`실행 중 · 워커 N`, `띄우는 중 · 워커 N`). The tooltip has the file, the time relative to now
+  and what picking it does. Other `.json` files
   are listed disabled under 읽지 못한 파일 with the reason (JSON 아님, team_name 없음, workers 없음, 읽기 권한 없음).
   Then 새 팀 만들기… and ~/teams 폴더 열기. Picking a team opens a new Ghostty window and attaches to the team's tmux
   session; a team that already runs is only attached. A team with a stopped run in the history comes back as that
   run, each claude worker resuming its last conversation (`--resume <id>` in a `~/teams/<team>.resume.json` the
   board writes, then `my-team start --continue`); a team with none runs `my-team start --continue --config <file>`
-  (no previous state: a new team). The line's tooltip says which. The config in `~/teams` is never written. Until
+  (no previous state: a new team). The config in `~/teams` is never written. Until
   the board sees the team run, a `띄우는 중` line holds its place at the top of the running teams.
 - 기록 (history): the ended Claude Code or Codex sessions outside any team, newest first, Claude or Codex picked
   above the list. A team's workers are not listed there: 팀 실행 starts a stopped team again.

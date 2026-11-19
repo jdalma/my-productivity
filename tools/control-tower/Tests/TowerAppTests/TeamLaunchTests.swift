@@ -231,9 +231,14 @@ private final class Stubs {
     try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: "\(dir)/locked.json")
     try FileManager.default.createDirectory(atPath: "\(dir)/legacy-teams", withIntermediateDirectories: true)
     try FileManager.default.createDirectory(atPath: "\(dir)/folder.json", withIntermediateDirectories: true)
-    let list = teamConfigs(in: dir)
+    // a's last run had a third worker (add-worker): its manifest says so; b never ran
+    let state = "\(dir)/sessions"
+    try FileManager.default.createDirectory(atPath: "\(state)/a", withIntermediateDirectories: true)
+    try Data(#"{"workers":[{"name":"pm"},{"name":"core"},{"name":"qa"}]}"#.utf8).write(to: URL(fileURLWithPath: "\(state)/a/manifest.json"))
+    let list = teamConfigs(in: dir, stateBase: state)
     #expect(list.configs.map { [$0.team, $0.file] } == [["a", "a-new.json"], ["b", "b.json"]])
-    #expect(list.configs.map(\.workers) == [2, 2])
+    #expect(list.configs.map(\.workers) == [3, 2])
+    #expect(list.configs.map(\.others) == [["a-old.json"], []])
     #expect(list.unreadable == [
         UnreadableConfig(file: "broken.json", reason: .notJSON),
         UnreadableConfig(file: "empty.json", reason: .noWorkers),
@@ -244,15 +249,39 @@ private final class Stubs {
     #expect(teamConfigs(in: "\(dir)/missing") == TeamConfigList())
 }
 
-@Test func aLaunchLineSaysWhenTheTeamLastRanOrThatItRunsNow() {
-    let c = TeamConfig(team: "shop", path: "/t/shop.json", workers: 3, modified: .distantPast)
-    let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let ran = TeamLastRun(run: TeamRun(team: "shop", start: nil), updatedAt: Date(timeIntervalSince1970: 1_800_000_000 - 3 * 3600).formatted(.iso8601))
-    #expect(launchItemSubtitle(c, last: ran, running: false, launching: false, now: now)
-        == "워커 3 · 마지막 실행 " + relativeTime(ran.updatedAt, now: now))  // the history list's clock
-    #expect(launchItemSubtitle(c, last: nil, running: false, launching: false, now: now) == "워커 3 · 기록 없음")
-    #expect(launchItemSubtitle(c, last: ran, running: true, launching: false, now: now) == "워커 3 · 실행 중")
-    #expect(launchItemSubtitle(c, last: ran, running: false, launching: true, now: now) == "워커 3 · 띄우는 중")
+@Test func aLaunchLineSaysWhenTheTeamLastRanOrThatItRunsNow() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try #require(TimeZone(identifier: "Asia/Seoul"))
+    let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 19, minute: 8)))
+    func at(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int) -> String {
+        calendar.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!.formatted(.iso8601)
+    }
+    #expect(lastRunTime(at(2026, 11, 19, 14, 30), now: now, calendar: calendar) == "오늘 14:30")
+    #expect(lastRunTime(at(2026, 11, 18, 9, 5), now: now, calendar: calendar) == "어제 09:05")
+    #expect(lastRunTime(at(2026, 11, 17, 22, 40), now: now, calendar: calendar) == "11-17 22:40")
+    #expect(lastRunTime(at(2025, 12, 3, 8, 0), now: now, calendar: calendar) == "2025-12-03")
+    #expect(lastRunTime("not a time", now: now, calendar: calendar) == nil)
+
+    let c = TeamConfig(team: "shop", path: "/h/teams/shop.json", workers: 3, modified: .distantPast)
+    let ran = TeamLastRun(run: TeamRun(team: "shop", start: nil), updatedAt: Date().addingTimeInterval(-60).formatted(.iso8601))
+    let real = Date()
+    #expect(launchItemSubtitle(c, last: ran, running: false, launching: false, now: real) == "\(lastRunTime(ran.updatedAt, now: real)!) · 워커 3")
+    #expect(launchItemSubtitle(c, last: nil, running: false, launching: false, now: real) == "기록 없음 · 워커 3")
+    #expect(launchItemSubtitle(c, last: ran, running: true, launching: false, now: real) == "실행 중 · 워커 3")
+    #expect(launchItemSubtitle(c, last: ran, running: false, launching: true, now: real) == "띄우는 중 · 워커 3")
+}
+
+@Test func aLaunchLinesTooltipSaysWhatPickingItDoes() {
+    var c = TeamConfig(team: "shop", path: "/h/teams/shop.json", workers: 3, modified: .distantPast)
+    let now = Date()
+    let ran = TeamLastRun(run: TeamRun(team: "shop", start: nil), updatedAt: now.addingTimeInterval(-3 * 3600).formatted(.iso8601))
+    #expect(launchItemTooltip(c, last: ran, running: false, home: "/h", now: now)
+        == "~/teams/shop.json\n마지막 실행 \(relativeTime(ran.updatedAt, now: now))\n실행: 작업판을 이어 가고, 워커마다 마지막 대화를 resume합니다")
+    #expect(launchItemTooltip(c, last: nil, running: false, home: "/h", now: now)
+        == "~/teams/shop.json\n실행: 작업판을 이어 가고, 워커는 새 대화로 시작합니다")
+    c.others = ["shop-old.json"]
+    #expect(launchItemTooltip(c, last: ran, running: true, home: "/h", now: now)
+        == "~/teams/shop.json\n이 팀은 지금 실행 중입니다\n같은 팀 config: shop-old.json (가장 최근 수정 파일로 띄움)")
 }
 
 @Test func eachTeamsLastRunIsItsNewestSessionsRun() {
@@ -287,8 +316,6 @@ private final class Stubs {
     let lab = TeamConfig(team: "lab", path: "/h/teams/lab.json", workers: 1, modified: .distantPast)
     #expect(launchPlan(shop, last: last) == .resume(run))  // Tower.resumeTeam: each worker back in its conversation
     #expect(launchPlan(lab, last: last) == .start)          // launchTeamCommand: start --continue
-    #expect(launchItemTooltip(shop, plan: .resume(run), home: "/h").contains("마지막 대화를 resume"))
-    #expect(launchItemTooltip(lab, plan: .start, home: "/h") == "기록이 없어 config로 띄웁니다 (my-team start --continue).\n~/teams/lab.json")
 }
 
 @Test func aFailedShutdownSaysMyTeamsLastLineOrItsExitCode() {

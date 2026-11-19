@@ -29,7 +29,7 @@ private func team(_ name: String, board: Bool) -> Team {
 @Test func onlyATaskBoardTeamGetsTheButtonAndItsCounts() throws {
     let board = Board(at: "2026-11-12T00:00:00.000Z", teams: [team("plain", board: false), team("boarded", board: true)], loose: [])
     let s = try taskBoard([task("T1", "held"), task("T2", "review"), task("T3", "doing"), task("T4", "ready")].joined(separator: ","))
-    let m = sidebarModel(board: board, history: [], query: "", filter: .team, historyLimit: historyPageSize, home: "/Users/me",
+    let m = sidebarModel(board: board, history: [], query: "", filter: .claude, historyLimit: historyPageSize, home: "/Users/me",
                          taskBoards: ["boarded": s, "plain": s])
     let plain = try #require(m.teams.first { $0.name == "plain" })
     let boarded = try #require(m.teams.first { $0.name == "boarded" })
@@ -40,7 +40,7 @@ private func team(_ name: String, board: Bool) -> Team {
             "the line counts decisions only; the panels are the button's tooltip (T152, T184)")
     #expect(teamLine(plain, .full).board == nil && teamLine(plain, .full).decisions == 0)
 
-    let unread = sidebarModel(board: board, history: [], query: "", filter: .team, historyLimit: historyPageSize, home: "/Users/me")
+    let unread = sidebarModel(board: board, history: [], query: "", filter: .claude, historyLimit: historyPageSize, home: "/Users/me")
     #expect(unread.teams.first { $0.name == "boarded" }?.hasTaskBoard == true, "the button shows before the first read")
     let calm = try taskBoard(task("T2", "review"))
     #expect(teamLine(TeamGroup(name: "x", myTurn: 0, rows: [], hasTaskBoard: true,

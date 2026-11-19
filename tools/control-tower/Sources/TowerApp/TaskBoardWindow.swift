@@ -47,7 +47,7 @@ struct TaskBoardWindow: View {
         Group {
             if let board = tower.board {
                 TaskBoardView(team: target.team, state: tower.taskBoards[target.team],
-                              model: sidebarModel(board: board, history: [], query: "", filter: .team, historyLimit: 0,
+                              model: sidebarModel(board: board, history: [], query: "", filter: .claude, historyLimit: 0,
                                                   home: homeDirectory()),
                               selectedTask: picked,
                               family: picked.flatMap { tower.taskFamilies[TaskRef(team: target.team, task: $0)] },

@@ -10,12 +10,20 @@ final class Tower {
     private(set) var myTeamError: String?
     /// Past sessions, newest first. Its own loop: the first scan takes 2-3 s and must not delay the board.
     private(set) var history: [HistorySession] = []
+    /// The history has been read once: until then 팀 실행 cannot tell a team with a stopped run from one without (T208).
+    private(set) var historyRead = false
     /// A row the dropdown asked the board to select; the board takes it, open already or opening now.
     var boardSelectRequest: RowID?
     /// Launch or reopen asked for the board window; the menu bar label opens it and clears this.
     var boardOpenRequested = false
     /// Teams the board asked to start and has not seen running yet: their resume button waits.
     private(set) var launches = TeamLaunches()
+    /// The 팀 종료 dialog and the teams being shut down.
+    private(set) var shutdowns = TeamShutdowns()
+    /// The team configs in `~/teams` the 팀 실행 menu offers, read with each collection.
+    private(set) var teamConfigList = TeamConfigList()
+    /// What each 팀 실행 line would start, by team (`launchWorkerCounts`).
+    private(set) var launchWorkers: [String: Int] = [:]
     /// Task boards of the running teams that keep one (T70), read only while the board or a task board window is open.
     private(set) var taskBoards: [String: TaskBoardState] = [:]
     /// A failure the board window shows attached to itself, until it is dismissed.
@@ -75,6 +83,7 @@ final class Tower {
                     continue
                 }
                 history = await Task.detached { await collectHistory(board: board) }.value
+                historyRead = true
                 try? await Task.sleep(for: .seconds(15))
             }
         }
@@ -90,6 +99,11 @@ final class Tower {
         }
         board = next
         launches.settle(running: runningTeams(next), now: Date())
+        shutdowns.settle(running: runningTeams(next))
+        let list = await Task.detached { teamConfigs(in: teamsDir) }.value
+        let read = history
+        launchWorkers = await Task.detached { launchWorkerCounts(list.configs, history: read) }.value
+        teamConfigList = list
     }
 
     var myTurn: Int { board.map { myTurnShown($0, taskBoards: taskBoardStatuses) } ?? 0 }
@@ -202,10 +216,8 @@ final class Tower {
     /// Opens a terminal that starts one run of a stopped team again, each claude worker resuming its last session.
     func resumeTeam(_ teamRun: TeamRun) {
         guard launches.begin(teamRun.team, at: Date()) else { return }
-        let runs = teamRuns(history)
-        let sessions = history.filter { runs[$0.transcriptPath] == teamRun }
-        guard let base = teamBase(teamRun.team),
-              let data = try? JSONSerialization.data(withJSONObject: resumeConfig(base, run: sessions),
+        guard let config = resumeConfig(for: teamRun, history: history),
+              let data = try? JSONSerialization.data(withJSONObject: config,
                                                      options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else {
             launches.cancel(teamRun.team)
@@ -218,6 +230,41 @@ final class Tower {
         }
     }
 
+    /// 팀 실행: a team with a stopped run in the history comes back as that run, each worker resuming its last
+    /// conversation; one with none starts from `config` with `--continue` (T208). Either way a terminal attaches to it.
+    func launchTeam(_ config: TeamConfig) {
+        guard historyRead else { return }
+        if case .resume(let run) = launchPlan(config, last: lastRuns(history)) { return resumeTeam(run) }
+        guard launches.begin(config.team, at: Date()) else { return }
+        let command = launchTeamCommand(team: config.team, path: config.path, myTeam: myTeamBin, tmux: towerTmuxBin)
+        run("“\(config.team)” 팀을 띄우지 못함", [planTerminal(in: teamsDir, commandLine: shellCommandLine(command))]) { [weak self] in
+            self?.launches.cancel(config.team)
+        }
+    }
+
+    /// Opens the 팀 종료 confirmation for `team`; nothing is shut down until it is confirmed.
+    func askShutdown(_ team: String) { _ = shutdowns.ask(team) }
+
+    /// The dialog closed, by a button or another way.
+    func closeShutdown() { shutdowns.close() }
+
+    func cancelShutdown() { shutdowns.cancel() }
+
+    /// The confirmed team's `my-team shutdown`, in the background with no terminal; stderr shows on failure.
+    func confirmShutdown(_ team: String) {
+        guard shutdowns.confirm(team) else { return }
+        Task {
+            do { try await FocusRunner.run([shutdownTeamArgv(team: team, myTeam: myTeamBin)], env: myTeamEnvironment(),
+                                           timeout: shutdownTimeout) } catch {
+                shutdowns.failed(team)
+                show(shutdownFailure(team: team, error))
+            }
+        }
+    }
+
+    /// Opens `~/teams` in Finder.
+    func openTeamsFolder() { run("~/teams 폴더를 열지 못함", [["open", teamsDir]]) }
+
     private func run(_ failure: String, _ argvs: [[String]], onFailure: @escaping () -> Void = {}) {
         Task {
             do { try await FocusRunner.run(argvs) } catch {
@@ -229,7 +276,10 @@ final class Tower {
 
     /// Never brings the app forward: a failed move to a terminal leaves the keyboard where the user is (T75).
     private func showAlert(_ title: String, _ error: any Error) {
-        let failure = Failure(title: title, reason: error.localizedDescription)
+        show(Failure(title: title, reason: error.localizedDescription))
+    }
+
+    private func show(_ failure: Failure) {
         switch failureRoute(windows) {
         case .sheet: self.failure = failure
         case .notification: notifier?.post(failure)

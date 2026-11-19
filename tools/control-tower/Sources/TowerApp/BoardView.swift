@@ -7,7 +7,7 @@ import TowerCore
 struct BoardView: View {
     let tower: Tower
     @State private var query = ""
-    @State private var filter = HistoryFilter.team
+    @State private var filter = HistoryFilter.claude
     @State private var historyLimit = historyPageSize
     /// Where the board is and has been: the sidebar's selection and the picked task are its current screen.
     @State private var nav = ScreenHistory()
@@ -87,6 +87,7 @@ struct BoardView: View {
                presenting: tower.failure) { _ in
             Button("확인") {}
         } message: { Text($0.reason) }
+        .modifier(ShutdownConfirmation(tower: tower))
         .onChange(of: activeState, initial: true) { tower.windows.boardKey = activeState == .key }
         .onAppear { tower.windows.board = true }
         .onChange(of: model.map { diffTotalFolders($0.teams) { opened.isExpanded($0, query: query) } } ?? [], initial: true) {
@@ -176,10 +177,14 @@ struct BoardView: View {
             if model.teams.isEmpty && model.agents.isEmpty {
                 Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "실행 중인 세션 없음" : "검색과 맞는 실행 중 세션 없음").foregroundStyle(.secondary)
             }
-            if model.liveAreas.contains(.team) {
+            if model.liveAreas.contains(.team) || !tower.launches.teams.isEmpty {
                 // the area's head only: no rows, so nothing in it can be selected or double-clicked
                 Section {} header: {
                     GroupHeader(tag: .team, count: nil, tooltip: "my-team 팀 \(model.teams.count)개")
+                }
+                // a team asked to start and not running yet holds a line at the top until the board sees it (T206 §2)
+                ForEach(tower.launches.teams, id: \.self) { name in
+                    Section {} header: { LaunchingTeamLine(team: name) }
                 }
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
@@ -191,7 +196,17 @@ struct BoardView: View {
                         TeamHeader(team: team, expanded: opened.isExpanded(team.name, query: query),
                                    board: TaskBoardButtonState(counts: team.taskCounts, problem: tower.taskBoards[team.name]?.shownFailure.map {
                                        let p = taskBoardProblem($0, bin: myTeamBin); return "\(p.title)\n\(p.detail)" }),
-                                   openBoard: { openTaskBoard(team.name) }, toggle: { toggleTeam(team.name) })
+                                   openBoard: { openTaskBoard(team.name) }, toggle: { toggleTeam(team.name) },
+                                   shuttingDown: tower.shutdowns.running.contains(team.name),
+                                   shutdown: { tower.askShutdown(team.name) })
+                        .contextMenu {
+                            if team.hasTaskBoard {
+                                Button("작업판 열기") { openTaskBoard(team.name) }
+                                Divider()
+                            }
+                            Button("팀 종료…", role: .destructive) { tower.askShutdown(team.name) }
+                                .disabled(tower.shutdowns.running.contains(team.name))
+                        }
                     }
                 }
             }
@@ -220,25 +235,8 @@ struct BoardView: View {
 
     private func historyList(_ model: SidebarModel) -> some View {
         List(selection: paneSelection(.history)) {
-            // my-team teams apart from single terminals, as in the running list above
-            if !model.historyTeams.isEmpty {
-                Section {
-                    // one line a team: its workers' sessions stay out of the list, the line resumes them together
-                    ForEach(model.historyTeams, id: \.run) { t in
-                        TeamHistoryHeader(team: t, now: Date(), launching: tower.launches.pending(t.run.team)) {
-                            tower.resumeTeam(t.run)
-                        }
-                    }
-                }
-            }
-            if !model.historySingles.isEmpty {
-                Section {
-                    ForEach(model.historySingles, id: \.transcriptPath) { h in
-                        HistoryRowView(h: h, now: Date(), home: home) { tower.open(h) }.tag(RowID.history(h.transcriptPath))
-                    }
-                } header: {
-                    Text("단일 터미널").scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).textCase(nil)
-                }
+            ForEach(model.history, id: \.transcriptPath) { h in
+                HistoryRowView(h: h, now: Date(), home: home) { tower.open(h) }.tag(RowID.history(h.transcriptPath))
             }
             if model.historyRemaining > 0 {
                 Button("더 보기 (남은 \(model.historyRemaining)개)") { historyLimit += historyPageSize }
@@ -307,7 +305,6 @@ struct BoardView: View {
             Text("기록 · 최근순").scaledFont(.headline, weight: .semibold)
             Spacer()
             Picker("기록 종류", selection: $filter) {
-                Text("my-team").tag(HistoryFilter.team)
                 Text("Claude").tag(HistoryFilter.claude)
                 Text("Codex").tag(HistoryFilter.codex)
             }
@@ -322,12 +319,47 @@ struct BoardView: View {
         HStack {
             Text("실행 중").scaledFont(.headline, weight: .semibold)
             Spacer()
-            Button("새 팀…", systemImage: "plus") { tower.newTeam() }
-                .buttonStyle(.borderless)
-                .scaledFont(.callout)
-                .help("~/teams 에서 Claude와 새 my-team 팀 config를 만들고 띄우는 터미널을 엽니다")
+            launchMenu(running: tower.board.map(runningTeams) ?? [])
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// 팀 실행 (T206 §2, T208): the team configs in ~/teams, the team run last first, each with when it last ran; then
+    /// the files that are not one, then 새 팀 만들기… and the folder. A team that runs or is being started is dimmed.
+    private func launchMenu(running: Set<String>) -> some View {
+        let list = tower.teamConfigList
+        let last = lastRuns(tower.history)
+        let now = Date()
+        return Menu {
+            if list.configs.isEmpty { Text("~/teams 에 팀 config가 없습니다") }
+            ForEach(launchOrder(list.configs, last: last), id: \.path) { c in
+                let launching = tower.launches.pending(c.team)
+                Button { tower.launchTeam(c) } label: {
+                    Text(c.team)
+                    Text(tower.historyRead ? launchItemSubtitle(workers: tower.launchWorkers[c.team] ?? c.workers, last: last[c.team], running: running.contains(c.team),
+                                                                launching: launching, now: now)
+                                           : "기록 읽는 중 · 워커 \(c.workers)")
+                }
+                // before the first history read every team would look never run, and start without its conversations
+                .disabled(running.contains(c.team) || launching || !tower.historyRead)
+                .help(launchItemTooltip(c, last: last[c.team], running: running.contains(c.team), home: home, now: now))
+            }
+            if !list.unreadable.isEmpty {
+                Divider()
+                Section("읽지 못한 파일") {
+                    ForEach(list.unreadable, id: \.file) { u in Text("\(u.file) — \(u.reason.rawValue)") }
+                }
+            }
+            Divider()
+            Button("새 팀 만들기…") { tower.newTeam() }
+            Button("~/teams 폴더 열기") { tower.openTeamsFolder() }
+        } label: {
+            Label("팀 실행", systemImage: "play")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .scaledFont(.callout)
+        .help("~/teams 의 config로 팀을 새 터미널에서 실행하거나, Claude와 새 팀 config를 만듭니다")
     }
 
     /// The history entry a row stands for: itself, or the entry reading a live session's transcript.
@@ -418,6 +450,10 @@ struct TeamHeader: View {
     let openBoard: () -> Void
     /// A click on the line, or VoiceOver's action.
     let toggle: () -> Void
+    /// 팀 종료 has been confirmed and the team still runs: its counts give way to a spinner (T206 §1).
+    var shuttingDown = false
+    /// VoiceOver's 팀 종료 action, as the line's context menu has it.
+    var shutdown: (() -> Void)?
     @Environment(\.boardFontScale) private var scale
     /// Wide enough for the chevron at `.callout` up to the largest font scale (R47).
     private static let iconWidth: CGFloat = 26
@@ -458,7 +494,7 @@ struct TeamHeader: View {
         .textCase(nil)
         .contentShape(.rect)
         .onTapGesture(perform: toggle)
-        .help(teamLineTooltip(team))
+        .help(shuttingDown ? "팀을 종료하는 중" : teamLineTooltip(team))
         // a section header is one accessibility element: the name carries the line's whole label, the task board's
         // counts or failure in it, and the button reaches VoiceOver as an action of that element
         .accessibilityElement(children: .contain)
@@ -474,12 +510,16 @@ struct TeamHeader: View {
                 .foregroundStyle(TaskColor.sidebarGray)
                 .frame(width: Self.iconWidth * scale, alignment: .leading)
                 .accessibilityHidden(true)
-            Text(team.name).scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
+            Text(team.name).scaledFont(.headline, weight: .semibold).foregroundStyle(shuttingDown ? .secondary : .primary).lineLimit(1)
                 .frame(idealWidth: shortName ? Self.nameShortWidth(team.name, scale: scale) : whole, maxWidth: whole, alignment: .leading)
-                .accessibilityLabel(teamLineLabel(team) + (team.hasTaskBoard ? ", " + board.spoken : ""))
+                .accessibilityLabel(shuttingDown ? "\(team.name), 팀을 종료하는 중"
+                                                 : teamLineLabel(team) + (team.hasTaskBoard ? ", " + board.spoken : ""))
                 .accessibilityValue(expanded ? "펼침" : "접힘")
                 .accessibilityAction(named: expanded ? "접기" : "펴기", toggle)
-                .accessibilityActions { if parts.board != nil { Button(board.label, action: openBoard) } }
+                .accessibilityActions {
+                    if parts.board != nil { Button(board.label, action: openBoard) }
+                    if let shutdown, !shuttingDown { Button("팀 종료", action: shutdown) }
+                }
             // hidden from accessibility: left in, the header's one element presses it along with the fold
             if let form = parts.board {
                 TaskBoardButton(state: board, showsWord: form == .words, open: openBoard).accessibilityHidden(true)
@@ -490,10 +530,13 @@ struct TeamHeader: View {
                 case .icon: count("person.2", parts.workers).help("워커 \(parts.workers)")
                 case nil: EmptyView()
                 }
-                if parts.decisions > 0 { decisions(parts) }
+                if parts.decisions > 0 && !shuttingDown { decisions(parts) }
             }
             .scaledFont(.callout).foregroundStyle(TaskColor.sidebarGray).fixedSize().accessibilityHidden(true)
             Spacer(minLength: 8)
+            if shuttingDown {
+                ProgressView().controlSize(.mini).accessibilityHidden(true)
+            } else {
             HStack(spacing: 8) {
                 ForEach(parts.statuses, id: \.badge.icon) { s in
                     HStack(spacing: 2) {
@@ -507,6 +550,7 @@ struct TeamHeader: View {
                 }
             }
             .scaledFont(.callout).foregroundStyle(TaskColor.sidebarGray).fixedSize().accessibilityHidden(true)
+            }
         }
     }
 
@@ -582,44 +626,6 @@ struct LiveRowView: View {
             }
             Text(row.badge.elapsed).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
         }
-    }
-}
-
-/// A stopped my-team team in the history: its name whole on the first line, when it started and its workers on the
-/// second, its size in the tooltip, and a button that starts it again with each worker back in its last session.
-private struct TeamHistoryHeader: View {
-    let team: TeamHistory
-    let now: Date
-    /// The board asked to start this team and has not seen it run yet.
-    let launching: Bool
-    let resume: () -> Void
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(team.run.team).scaledFont(.callout, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
-                Text(teamHistoryDetail(team)).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .layoutPriority(1)
-            Spacer(minLength: 8)
-            if let newest = team.sessions.first {
-                Text(relativeTime(newest.updatedAt, now: now)).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
-            }
-            if launching {
-                // the spinner the running list shows for "working"; the words are in its tooltip
-                ProgressView().controlSize(.mini)
-                    .help("팀을 띄우는 중: 보드에 실행 중으로 잡히면 끝납니다")
-                    .accessibilityLabel("팀을 띄우는 중")
-            } else {
-                RunButton(label: "팀 실행", action: resume)
-                    .disabled(team.running)
-                    .help(team.running ? "이 팀은 지금 실행 중입니다"
-                                       : "실행: 새 터미널에서 워커마다 마지막 세션을 resume해 팀을 다시 띄웁니다")
-            }
-        }
-        .help(transcriptSizeLabel(team.size).map { size in
-            (["크기 \(size)"] + team.workerSizes.map { "\($0.worker) \(transcriptSizeLabel($0.size) ?? "")" }).joined(separator: "\n")
-        } ?? "")
     }
 }
 
@@ -980,5 +986,43 @@ struct SearchField: NSViewRepresentable {
         func controlTextDidChange(_ note: Notification) {
             if let field = note.object as? NSSearchField { text.wrappedValue = field.stringValue }
         }
+    }
+}
+
+/// 팀 종료's confirmation: 취소 is the default button, so Return never shuts a team down; only 팀 종료 does.
+private struct ShutdownConfirmation: ViewModifier {
+    let tower: Tower
+
+    func body(content: Content) -> some View {
+        // closing the dialog (the binding's set, before or after a button's action, or any other way) only hides it;
+        // 팀 종료 still finds the team it was asked about, and 취소 forgets it (TeamShutdowns)
+        content.alert("“\(tower.shutdowns.asking ?? "")” 팀을 종료할까요?",
+                      isPresented: Binding { tower.shutdowns.asking != nil } set: { if !$0 { tower.closeShutdown() } },
+                      presenting: tower.shutdowns.asking) { team in
+            Button("취소", role: .cancel) { tower.cancelShutdown() }
+                .keyboardShortcut(.defaultAction)
+            Button("팀 종료", role: .destructive) { tower.confirmShutdown(team) }
+        } message: { team in
+            Text(shutdownMessage(workers: tower.board?.teams.first { $0.name == team }?.workers.count ?? 0))
+        }
+    }
+}
+
+/// A team 팀 실행 asked to start, at the top of the running teams until the board sees it run.
+private struct LaunchingTeamLine: View {
+    let team: String
+    @Environment(\.boardFontScale) private var scale
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini).frame(width: 26 * scale, alignment: .leading)
+            Text(team).scaledFont(.headline, weight: .semibold).foregroundStyle(.primary).lineLimit(1)
+            Spacer(minLength: 8)
+            Text("띄우는 중").scaledFont(.callout).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 3).padding(.leading, 6)
+        .textCase(nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(team), 띄우는 중")
     }
 }

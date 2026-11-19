@@ -61,6 +61,8 @@ private func goal(_ id: String, _ waves: [[GoalNode]], cycle: [String]? = nil, e
     let g3 = try fixtureGoals()[1]
     #expect(goalCardSpoken(g3.waves[3][0]) == "T177 할 일 4에서 7, title T177, 시작 전, 대기: T179, T180")
     #expect(goalCardSpoken(g3.waves[4][0]) == "T192, 작업판에 없음")
+    #expect(goalCardSpoken(g3.waves[0][0]) == "T178, title T178, 진행 중")  // the status line only names the state: once
+    #expect(goalCardSpoken(node("T1", state: "done", status: "done")) == "T1, t, 완료")
     #expect(goalRefSpoken("T177:4-7") == "T177 할 일 4에서 7" && goalRefLabel("T181:1") == "T181 할 일 1")
 }
 

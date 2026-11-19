@@ -85,7 +85,9 @@ struct GoalOrderList: View {
         let found = g.waves.joined().contains { goalCardMatches($0, query: query) }
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         if tag == .noOrder {
-            head(g, tag).help("목표 파일에 ## 순서 섹션이 없습니다")
+            // nothing to unfold: no triangle, the name where the others' names start
+            head(g, tag).padding(.leading, 20 * scale).help("목표 파일에 ## 순서 섹션이 없습니다")
+                .accessibilityElement(children: .combine).accessibilityLabel(goalSpoken(g))
         } else {
             DisclosureGroup(isExpanded: Binding {
                 !goalFolded(g, stored: prefs.goalFolds) && (!searching || found || g.waves.isEmpty)

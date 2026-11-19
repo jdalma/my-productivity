@@ -134,7 +134,10 @@ func waveCards(_ wave: [GoalNode]) -> [GoalNode] {
 /// `T177 할 일 4에서 7, 대시보드 화면, 시작 전, 지금 시작 가능` (design §2 VoiceOver).
 func goalCardSpoken(_ n: GoalNode) -> String {
     let head = [n.task, itemsSpoken(n.items)].compactMap { $0 }.joined(separator: " ")
-    return [head, n.title, n.state.map { TaskStateStyle.of($0).label }, GoalCardLine(n).spoken].compactMap { $0 }.joined(separator: ", ")
+    let state = n.state.map { TaskStateStyle.of($0).label }
+    let line = GoalCardLine(n).spoken
+    // a status line that only names the state (진행 중, 완료) is not read twice
+    return [head, n.title, state, line == state ? nil : line].compactMap { $0 }.joined(separator: ", ")
 }
 
 // MARK: - Waves

@@ -254,3 +254,32 @@ private func lines(_ path: String) -> [String] {
     #expect(documentsSummary(documents(.groups([]))) == "없음")
     #expect(documentsSummary(documents(.groups([]), rows: 3)) == "3")
 }
+
+// MARK: - T218: an Excalidraw drawing opens in the app macOS has for it, else Finder shows it
+
+@MainActor @Test func aDrawingOpensInItsAppOrFinderShowsIt() throws {
+    let (root, folder) = try scratch()
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    let drawing = folder + "/flow.excalidraw"
+    try #"{"type":"excalidraw"}"#.write(toFile: drawing, atomically: true, encoding: .utf8)
+    let app = URL(fileURLWithPath: "/Applications/Example Draw.app")
+    let line = row("flow.excalidraw", folder: folder)
+    // macOS knows no document type for it, yet the board's other open rules still hold
+    #expect(openRefusal(drawing) != nil && openRefusal(drawing, documentType: false) == nil)
+    #expect(drawingOpen(drawing, app: { _ in app }) == .app(app))
+    #expect(drawingOpen(drawing, app: { _ in nil }) == .reveal)
+    // whatever editor the settings name: the drawing goes by its own rule
+    #expect(documentFileOpen(line, stored: vsCodeID, drawingApp: { _ in app }) == .app("Example Draw"))
+    #expect(documentFileOpen(line, stored: "", drawingApp: { _ in nil }) == .reveal)
+    #expect(DocumentRowStyle.of(line, fileOpen: .reveal).help.hasPrefix("이 파일을 여는 앱이 없어 Finder에서 보여 줍니다"))
+    // what leaves the app, as the dry run writes it: the app, or Finder
+    let log = root + "/actions.log"
+    #expect(openDocument(line, folder: folder, stored: vsCodeID, dryRun: log, drawingApp: { _ in app }, show: { _ in }) == nil)
+    #expect(openDocument(line, folder: folder, stored: vsCodeID, dryRun: log, drawingApp: { _ in nil }, show: { _ in }) == nil)
+    let opened = URL(fileURLWithPath: drawing).resolvingSymlinksInPath().path  // as `openFile` writes a path
+    #expect(lines(log) == ["open-file \(app.path) \(opened)", "reveal \(opened)"])
+    // a drawing that could run is not opened, nor shown
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: drawing)
+    guard case .refused = drawingOpen(drawing, app: { _ in app }) else { Issue.record("an executable drawing must be refused"); return }
+    #expect(openDocument(line, folder: folder, stored: "", dryRun: log, drawingApp: { _ in app }, show: { _ in })?.contains("실행 권한") == true)
+}

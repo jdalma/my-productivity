@@ -184,7 +184,7 @@ private func fixtureFolder(_ mode: String? = nil) throws -> (t: String, folder: 
     defer { try? FileManager.default.removeItem(atPath: t) }
     let docs = listed(listFolderDocuments(folder))
     #expect(docs.count == 43)
-    #expect(DocumentKind.allCases.map { k in docs.filter { $0.kind == k }.count } == [40, 2, 1])
+    #expect(DocumentKind.allCases.map { k in docs.filter { $0.kind == k }.count } == [40, 2, 1, 0])  // the fixture has no drawing (T218)
     #expect(groupByFolder(folderRows(docs)).map { "\($0.name) \($0.rows.count)" } == [" 1", "design 4", "reports 30", "review 3", "tickets 5"])
     #expect(docs.prefix(3).map(\.relative) == ["reports/example-report-10.md", "reports/example-report-11.md", "reports/example-report-12.md"])
     #expect(docs.first { $0.relative == "tickets/example-ticket-without-a-heading.md" }?.title == "example-ticket-without-a-heading.md")
@@ -219,4 +219,22 @@ func theRealFolderOfATeamLists() throws {
     #expect(second.map(\.relative) == first.map(\.relative))
     let kinds = DocumentKind.allCases.map { k in "\(k.rawValue) \(first.filter { $0.kind == k }.count)" }.joined(separator: ", ")
     print("T197 real folder \(folder): \(first.count) documents (\(kinds)); first read \(cold), next read \(warm) with \(reads) titles read again")
+}
+
+@Test func anExcalidrawDrawingIsADocumentByItsEnding() throws {
+    // T218 (D#17): `.excalidraw` only; Excalidraw's Markdown and SVG exports keep their own kinds
+    #expect(DocumentKind(path: "/a/flow.excalidraw") == .excalidraw)
+    #expect(DocumentKind(path: "/a/FLOW.Excalidraw") == .excalidraw)
+    #expect(DocumentKind(path: "/a/flow.excalidraw.md") == .markdown)
+    #expect(DocumentKind(path: "/a/flow.excalidraw.svg") == nil)
+    #expect(DocumentKind(path: "/a/flow.excalidrawlib") == nil)
+    let (root, folder) = try scratch()
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    try write("\(folder)/design/flow.excalidraw", #"{"type":"excalidraw","elements":[]}"#, at: 200)
+    try write("\(folder)/design/flow.excalidraw.svg", "<svg/>", at: 300)
+    try write("\(folder)/notes.md", "# Notes", at: 100)
+    let docs = listed(listFolderDocuments(folder))
+    #expect(docs.map(\.relative) == ["design/flow.excalidraw", "notes.md"])
+    #expect(docs.map(\.title) == ["flow.excalidraw", "Notes"])  // a drawing's title is its file's name
+    #expect(docs.map(\.kind) == [.excalidraw, .markdown])
 }

@@ -159,7 +159,9 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   name and under the same rules: nothing that runs, installs or goes elsewhere (a script, an executable, an app, an
   installer, an internet shortcut, a folder), and SVG, calendar, contact and profile files not in the macOS
   default app. One exception, for the documents alone: a file named `.html` or `.htm` (a team's mock) goes to
-  the macOS default app for it (usually the browser), whatever the editor. A file opens only when its real path (symbolic links and `..` resolved) is in the team's documents
+  the macOS default app for it (usually the browser), whatever the editor. An Excalidraw drawing (`.excalidraw`)
+  goes to the app macOS has for it whatever the editor, or, with none (most Macs), Finder shows it selected; the
+  same rules hold but for the type's own check, as macOS knows no document type for it. A file opens only when its real path (symbolic links and `..` resolved) is in the team's documents
   folder, and a Markdown file is read only when what was opened is in it. A line that does not open (a path that
   leaves the folder, a `file://` address or any other scheme, a refused kind of file) says 열 수 없음 and why on
   the line in a few words, and in full in its tooltip; a line that opens says in its tooltip what opens it (the window, the browser, the editor's name or the
@@ -167,7 +169,8 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   it. The index file's first link on a list line is the document, the line's other words its note; an image and a
   link written inside code are not links.
   Those lines are 고른 문서. Under them, 모든 문서 lists every document in the folder without anyone listing it:
-  the Markdown, `.html`, `.htm` and PDF files, however deep, but no symbolic link (none is followed), no hidden
+  the Markdown, `.html`, `.htm`, PDF and `.excalidraw` files (not Excalidraw's `.excalidraw.svg` export; its
+  `.excalidraw.md` is Markdown), however deep, but no symbolic link (none is followed), no hidden
   file, nothing inside a bundle (a folder macOS shows as one file, such as an app) and not the index itself. A line has the title (a Markdown file's first heading, else the file's name), the
   path from the folder and when the file last changed; the latest change is first, or 폴더별 groups the lines by
   the folder right under the documents folder, each group foldable. A group shows 20 lines until 더 보기. 문서 걸러

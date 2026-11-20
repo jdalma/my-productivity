@@ -374,7 +374,7 @@ struct TaskBoardView: View {
     var goalOrder: GoalOrderRead?
     @State private var query = ""
     /// A new value scrolls the 순서 view to the picked task's card.
-    @State private var orderScrollTo: String?
+    @State private var orderScrollTo: OrderScroll?
     @State private var doneOpen = false
     /// 지난 결정 shown under the waiting ones (T147).
     @State private var pastOpen = false
@@ -676,7 +676,7 @@ struct TaskBoardView: View {
                            now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
                            goalLinks: goalLinks(of: line.task.id, in: goals),
                            boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-                           showInOrder: { showInOrder(line.task.id) })
+                           showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
         } else {
             overview(s, now: now)
         }
@@ -684,10 +684,12 @@ struct TaskBoardView: View {
 
     /// The detail's 목표 line (design §4): the 순서 view, the task's card scrolled into view. Narrow, the detail has the
     /// list's place, so it closes for the list to show (T214 R1 S1).
-    private func showInOrder(_ task: String) {
+    private func showInOrder(_ to: OrderScroll) {
         setMode(.order)
         if narrow { pick(nil) }
-        orderScrollTo = task
+        // a search the card does not match keeps its goal folded: the link asks for the card, so the search goes (R2 L2)
+        query = ""
+        orderScrollTo = to
     }
 
     /// A goal's file in the detail's place, as a document of the team's folder opens (design §2 목표 파일 열기).

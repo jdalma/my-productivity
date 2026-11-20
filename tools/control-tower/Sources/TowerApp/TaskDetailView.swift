@@ -273,8 +273,8 @@ struct TaskDetailView: View {
     var goalLinks: [GoalTaskLinks] = []
     /// The board's tasks by id, for the 선행·후행 links' state and title.
     var boardTasks: [String: TaskBoardTask] = [:]
-    /// The 목표 line's link: the 순서 view, this task's card picked.
-    var showInOrder: (() -> Void)?
+    /// The 목표 line's link, with that goal's file: the 순서 view, this task's card in that goal picked.
+    var showInOrder: ((String) -> Void)?
 
     var body: some View {
         // one task's folds stay with it: another task starts from the defaults
@@ -298,7 +298,7 @@ private struct TaskDetailBody: View {
     let reload: () -> Void
     let goalLinks: [GoalTaskLinks]
     let boardTasks: [String: TaskBoardTask]
-    let showInOrder: (() -> Void)?
+    let showInOrder: ((String) -> Void)?
     /// History lines the user opened or folded, against `historyOpenAtFirst`.
     @State private var flipped: Set<String> = []
     @State private var piles: [FindingPile: Bool] = [:]
@@ -447,7 +447,7 @@ private struct TaskDetailBody: View {
             ForEach(goalLinks, id: \.goal.path) { g in
                 GridRow {
                     PropertyName("목표", symbol: "flag.checkered")
-                    Button { showInOrder?() } label: { Text(g.goalLine).scaledFont(.callout).lineLimit(1) }
+                    Button { showInOrder?(g.goal.path) } label: { Text(g.goalLine).scaledFont(.callout).lineLimit(1) }
                         .buttonStyle(.link)
                         .disabled(showInOrder == nil)
                         .help("순서 보기에서 이 작업으로 갑니다")

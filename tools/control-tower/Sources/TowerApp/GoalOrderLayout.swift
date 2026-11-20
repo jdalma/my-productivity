@@ -261,6 +261,12 @@ func goalCardMatches(_ n: GoalNode, query: String) -> Bool {
     return q.isEmpty || [n.ref, n.task, n.title].compactMap { $0 }.contains { $0.localizedCaseInsensitiveContains(q) }
 }
 
+/// The card the detail's 목표 line goes to: that goal's (by its file, two goals may share a G number) card of the task.
+struct OrderScroll: Equatable {
+    var task: String
+    var goal: String
+}
+
 // MARK: - Moving between cards (design §2 키보드)
 
 enum CardMove { case up, down, left, right }

@@ -26,7 +26,7 @@ struct GoalOrderList: View {
     let reload: () -> Void
     /// The task whose card the detail's 목표 line asked for: its goal opens and the card scrolls into view, also when
     /// this view has just appeared for it (T214 R1 S1). `scrolled` hands it back once done.
-    let scrollTo: String?
+    let scrollTo: OrderScroll?
     let scrolled: () -> Void
     @State private var width: CGFloat = 0
     @Environment(\.boardFontScale) private var scale
@@ -72,10 +72,11 @@ struct GoalOrderList: View {
             .onKeyPress(.leftArrow) { move(.left, goals) }
             .onKeyPress(.rightArrow) { move(.right, goals) }
             .task(id: scrollTo) {
-                guard let id = scrollTo else { return }
+                guard let to = scrollTo else { return }
                 defer { scrolled() }
-                guard let g = goals.first(where: { g in g.waves.joined().contains { $0.task == id } }),
-                      let n = g.waves.joined().first(where: { $0.task == id }) else { return }
+                // the goal the line was for, a task may be in several (R2 S1)
+                guard let g = goals.first(where: { $0.path == to.goal }),
+                      let n = g.waves.joined().first(where: { $0.task == to.task }) else { return }
                 prefs.goalFolds[g.path] = false
                 // the goal unfolds first; its cards are laid out on the next pass
                 try? await Task.sleep(for: .milliseconds(150))

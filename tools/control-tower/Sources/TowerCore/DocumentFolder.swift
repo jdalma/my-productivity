@@ -4,12 +4,15 @@ public enum DocumentKind: String, Hashable, Sendable, CaseIterable {
     case markdown
     case html
     case pdf
+    /// An Excalidraw drawing (T218, D#17); `.excalidraw.md` is Markdown and `.excalidraw.svg` no document.
+    case excalidraw
 
     public init?(path: String) {
         switch (path as NSString).pathExtension.lowercased() {
         case "md": self = .markdown
         case "html", "htm": self = .html
         case "pdf": self = .pdf
+        case "excalidraw": self = .excalidraw
         default: return nil
         }
     }

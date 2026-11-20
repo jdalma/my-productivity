@@ -28,7 +28,9 @@ enum FileOpenPlan: Equatable {
 /// run anything, in whichever app it opens: so only an absolute path whose target, links followed, is a regular file
 /// with no execute permission and a document's type (text, PDF, image), never a script, an executable or an internet
 /// shortcut. An app, an installer, a folder or any other bundle is no regular file or no document.
-func openRefusal(_ path: String) -> String? {
+/// `documentType: false` leaves out the type's own check, for a kind the board names by its ending that macOS has no
+/// document type for (an Excalidraw drawing, T218): the rest, what runs included, still applies.
+func openRefusal(_ path: String, documentType: Bool = true) -> String? {
     guard path.hasPrefix("/") else { return "열지 않았습니다: 절대 경로가 아닙니다: \(path)" }
     let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()
     guard let a = try? FileManager.default.attributesOfItem(atPath: target.path) else { return "파일이 없습니다: \(path)" }
@@ -36,7 +38,7 @@ func openRefusal(_ path: String) -> String? {
     if let mode = a[.posixPermissions] as? Int, mode & 0o111 != 0 { return "열지 않았습니다: 실행 권한이 있는 파일입니다: \(path)" }
     let type = UTType(filenameExtension: target.pathExtension) ?? .data
     let runs: [UTType] = [.executable, .script, .internetLocation, .internetShortcut]
-    guard [.text, .pdf, .image].contains(where: type.conforms), !runs.contains(where: type.conforms) else {
+    guard !documentType || [.text, .pdf, .image].contains(where: type.conforms), !runs.contains(where: type.conforms) else {
         return "열지 않았습니다: 문서가 아닌 파일 종류입니다(\(type.identifier)): \(path)"
     }
     return nil

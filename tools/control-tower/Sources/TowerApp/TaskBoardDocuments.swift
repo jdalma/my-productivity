@@ -50,6 +50,8 @@ func opensInBrowser(_ path: String) -> Bool { ["html", "htm"].contains((path as 
 
 enum DocumentFileOpen: Equatable {
     case refused(String)
+    /// No app opens it on this Mac: Finder shows the file selected (an Excalidraw drawing, T218).
+    case reveal
     case needsEditor(notInstalled: String?)
     case unpickedFolderHTML
     case app(String)
@@ -58,9 +60,17 @@ enum DocumentFileOpen: Equatable {
 }
 
 func documentFileOpen(_ row: DocumentRow, stored: String, picked: Set<String> = [],
-                      appURL: (String) -> URL? = { installedApp($0) }) -> DocumentFileOpen? {
+                      appURL: (String) -> URL? = { installedApp($0) },
+                      drawingApp: (URL) -> URL? = defaultApp) -> DocumentFileOpen? {
     guard case .file(let path) = row.target else { return nil }
     if previewsAsMarkdown(path) { return .window }
+    if isDrawing(path) {
+        switch drawingOpen(path, app: drawingApp) {
+        case .refused(let why): return .refused(why)
+        case .app(let app): return .app(app.deletingPathExtension().lastPathComponent)
+        case .reveal: return .reveal
+        }
+    }
     if opensInBrowser(path) {
         if row.isFromFolder, !picked.contains(path) { return .unpickedFolderHTML }
         return openRefusal(path).map { .refused($0) } ?? .defaultApp
@@ -76,6 +86,43 @@ func documentFileOpen(_ row: DocumentRow, stored: String, picked: Set<String> = 
     case .refused(let why): return .refused(why)
     case .open(let app, _): return app.map { .app($0.deletingPathExtension().lastPathComponent) } ?? .defaultApp
     }
+}
+
+// MARK: Excalidraw drawings (T218, D#17)
+
+/// A drawing by its ending, as `DocumentKind` names it.
+func isDrawing(_ path: String) -> Bool { DocumentKind(path: path) == .excalidraw }
+
+/// The app macOS has for `file`, nil when none.
+func defaultApp(_ file: URL) -> URL? { NSWorkspace.shared.urlForApplication(toOpen: file) }
+
+enum DrawingOpen: Equatable {
+    case app(URL)
+    /// No app opens it here (most Macs): Finder shows it.
+    case reveal
+    case refused(String)
+}
+
+/// What a drawing opens in, whatever editor the settings name and whichever list it is on: the app macOS gives it,
+/// else Finder with the file selected. It goes through the board's open rules but for the type's own check, as
+/// macOS knows no document type for `.excalidraw`.
+func drawingOpen(_ path: String, app: (URL) -> URL? = defaultApp) -> DrawingOpen {
+    if let why = openRefusal(path, documentType: false) { return .refused(why) }
+    return app(URL(fileURLWithPath: path).resolvingSymlinksInPath()).map { .app($0) } ?? .reveal
+}
+
+private func openDrawing(_ path: String, dryRun: String?, app: (URL) -> URL?, failed: @escaping @Sendable (String) -> Void) -> String? {
+    let file = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+    switch drawingOpen(path, app: app) {
+    case .refused(let why): return why
+    case .app(let a):
+        if let dryRun { recordDryRun("open-file \(a.path) \(file.path)", to: dryRun); return nil }
+        workspaceOpen(file, a) { e in if let e { failed("열지 못했습니다: \(e.localizedDescription)") } }
+    case .reveal:
+        if let dryRun { recordDryRun("reveal \(file.path)", to: dryRun); return nil }
+        NSWorkspace.shared.activateFileViewerSelecting([file])
+    }
+    return nil
 }
 
 func fileKindName(_ path: String) -> String {
@@ -115,13 +162,14 @@ func fileOpensByRow(_ rows: [DocumentRow], stored: String, picked: Set<String> =
 /// Opens a line; `show` takes a Markdown file's path. The line to show the user, nil when it went as asked. Under
 /// `TOWER_DRY_RUN` what would leave the app is a line in the log instead.
 @MainActor func openDocument(_ row: DocumentRow, folder: String, index: [DocumentRow] = [], stored: String, dryRun: String? = towerDryRun,
-                             appURL: (String) -> URL? = { installedApp($0) },
+                             appURL: (String) -> URL? = { installedApp($0) }, drawingApp: (URL) -> URL? = defaultApp,
                              failed: @escaping @Sendable (String) -> Void = { _ in }, show: (String) -> Void) -> String? {
     switch actionOnOpen(row, folder: folder, index: index) {
     case .showPage(let path): show(path)
     case .openURL(let url):
         if let dryRun { recordDryRun("open-url \(url.absoluteString)", to: dryRun) } else { NSWorkspace.shared.open(url) }
     case .openFile(let path):
+        if isDrawing(path) { return openDrawing(path, dryRun: dryRun, app: drawingApp, failed: failed) }
         return opensInBrowser(path) ? openInBrowser(path, dryRun: dryRun, failed: failed)
             : openFile(path, stored: stored, dryRun: dryRun, appURL: appURL, failed: failed)
     case .none: break
@@ -195,6 +243,8 @@ struct DocumentRowStyle: Equatable {
                                         help: "모든 문서의 HTML은 클릭으로 열지 않습니다. 목록 파일(index.md)에 올리면 열립니다: \(path)")
             case .app(let name):
                 return DocumentRowStyle(symbol: "doc", kind: .document, help: "\(name) 앱으로 열기: \(path)")
+            case .reveal:
+                return DocumentRowStyle(symbol: "doc", kind: .document, help: "이 파일을 여는 앱이 없어 Finder에서 보여 줍니다: \(path)")
             case .defaultApp:
                 let by = opensInBrowser(path) ? "macOS 기본 앱(보통 브라우저)으로 열기" : "macOS 기본 앱으로 열기"
                 return DocumentRowStyle(symbol: "doc", kind: .document, help: "\(by): \(path)")

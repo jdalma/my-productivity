@@ -24,8 +24,10 @@ struct GoalOrderList: View {
     @Binding var prefs: TaskPanelPrefs
     let openGoalFile: (GoalOrder) -> Void
     let reload: () -> Void
-    /// A new value scrolls to the picked task's card (the detail's 목표 line).
-    let scrollRequest: Int
+    /// The task whose card the detail's 목표 line asked for: its goal opens and the card scrolls into view, also when
+    /// this view has just appeared for it (T214 R1 S1). `scrolled` hands it back once done.
+    let scrollTo: String?
+    let scrolled: () -> Void
     @State private var width: CGFloat = 0
     @Environment(\.boardFontScale) private var scale
 
@@ -55,7 +57,8 @@ struct GoalOrderList: View {
     private func list(_ goals: [GoalOrder]) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // not lazy: a card in a goal far down must be there to scroll to (a team has a few goals)
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(goals, id: \.path) { g in section(g) }
                 }
                 .padding(12)
@@ -68,10 +71,14 @@ struct GoalOrderList: View {
             .onKeyPress(.downArrow) { move(.down, goals) }
             .onKeyPress(.leftArrow) { move(.left, goals) }
             .onKeyPress(.rightArrow) { move(.right, goals) }
-            .onChange(of: scrollRequest) {
-                guard let id = selected, let g = goals.first(where: { g in g.waves.joined().contains { $0.task == id } }),
+            .task(id: scrollTo) {
+                guard let id = scrollTo else { return }
+                defer { scrolled() }
+                guard let g = goals.first(where: { g in g.waves.joined().contains { $0.task == id } }),
                       let n = g.waves.joined().first(where: { $0.task == id }) else { return }
                 prefs.goalFolds[g.path] = false
+                // the goal unfolds first; its cards are laid out on the next pass
+                try? await Task.sleep(for: .milliseconds(150))
                 withAnimation { proxy.scrollTo(cardID(g, n), anchor: .center) }
             }
         }
@@ -245,7 +252,9 @@ private struct GoalCard: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // opaque under the selection's tint: an arrow behind the card never shows through it
+        // the words dim, the ground stays opaque under the selection's tint: an arrow behind a card, done or not found
+        // by the search too, never shows through it (R1 L3)
+        .opacity(found ? (muted ? 0.6 : 1) : 0.35)
         .background {
             ZStack {
                 RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor))
@@ -253,7 +262,6 @@ private struct GoalCard: View {
             }
         }
         .overlay { border(line) }
-        .opacity(found ? (muted ? 0.6 : 1) : 0.35)
         .contentShape(.rect)
         .onTapGesture { if line != .unregistered { open() } }
         .accessibilityElement(children: .ignore)

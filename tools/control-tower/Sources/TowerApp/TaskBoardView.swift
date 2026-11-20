@@ -374,7 +374,7 @@ struct TaskBoardView: View {
     var goalOrder: GoalOrderRead?
     @State private var query = ""
     /// A new value scrolls the 순서 view to the picked task's card.
-    @State private var orderScroll = 0
+    @State private var orderScrollTo: String?
     @State private var doneOpen = false
     /// 지난 결정 shown under the waiting ones (T147).
     @State private var pastOpen = false
@@ -640,7 +640,8 @@ struct TaskBoardView: View {
         VStack(spacing: 0) {
             if mode == .order {
                 GoalOrderList(read: goalOrder, query: query, selected: selectedTask, pick: pick, prefs: prefs,
-                              openGoalFile: openGoalFile, reload: reload, scrollRequest: orderScroll)
+                              openGoalFile: openGoalFile, reload: reload,
+                              scrollTo: orderScrollTo, scrolled: { orderScrollTo = nil })
             } else {
                 TaskPanelList(team: team, status: s, query: query, now: now, selected: selectedTask, pick: pick,
                               prefs: prefs, doneOpen: $doneOpen, pastOpen: $pastOpen, headTarget: $headTarget, arrange: arrange,
@@ -675,10 +676,18 @@ struct TaskBoardView: View {
                            now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
                            goalLinks: goalLinks(of: line.task.id, in: goals),
                            boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-                           showInOrder: { setMode(.order); orderScroll += 1 })
+                           showInOrder: { showInOrder(line.task.id) })
         } else {
             overview(s, now: now)
         }
+    }
+
+    /// The detail's 목표 line (design §4): the 순서 view, the task's card scrolled into view. Narrow, the detail has the
+    /// list's place, so it closes for the list to show (T214 R1 S1).
+    private func showInOrder(_ task: String) {
+        setMode(.order)
+        if narrow { pick(nil) }
+        orderScrollTo = task
     }
 
     /// A goal's file in the detail's place, as a document of the team's folder opens (design §2 목표 파일 열기).

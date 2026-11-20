@@ -86,8 +86,8 @@ public func readGoalOrder(team: String) -> GoalOrderRead {
     readGoalOrder(team: team, bin: myTeamBin, run: liveTaskBoardRunner)
 }
 
-/// One read per team whose order view is open (plan A7): the board's own reads run every 5 s while a board window is
-/// open, so goal-order is not added to them for windows that do not show it. With no view open, my-team is never run.
+/// One read per team in `teams`. The app passes every open task board window's team, whichever view it shows (D#13:
+/// a task's detail lists its 선행·후행 in the panels view too). With no window open, my-team is never run.
 func readGoalOrders(openViews teams: Set<String>, bin: String, run: TaskBoardRunner) -> [String: GoalOrderRead] {
     var out: [String: GoalOrderRead] = [:]
     for team in teams { out[team] = readGoalOrder(team: team, bin: bin, run: run) }

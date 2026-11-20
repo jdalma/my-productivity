@@ -550,3 +550,17 @@ private func decodeTask(_ history: String?) throws -> TaskBoardTask {
     #expect(try since(#"{"state_since":"2026-11-11T08:00:00.000Z"}"#) == "2026-11-11T08:00:00.000Z")
     #expect(try since(#"{"state_since":""}"#, updated: "") == "2026-11-11T07:00:00.000Z", "then when it was made")
 }
+
+@Test func theBoardsViewAndGoalFoldsAreKeptBesideThePanels() {
+    // T214: the 순서 view and its goals' folds go in the same per-team prefs; one that does not read is nothing
+    var p = TaskPanelPrefs(folded: [.done])
+    p.view = "order"
+    p.goalFolds = ["/tmp/example/G3.md": true]
+    let back = readPanelPrefs(storedPanelPrefs(["shop": p]))["shop"]
+    #expect(back?.view == "order" && back?.goalFolds == ["/tmp/example/G3.md": true] && back?.isFolded(.done) == true)
+    #expect(p.resetLayout.view == "order" && p.resetLayout.goalFolds == p.goalFolds)
+    let old = readPanelPrefs(#"{"shop":{"folded":["done"]}}"#)["shop"]
+    #expect(old?.view == nil && old?.goalFolds.isEmpty == true)
+    let odd = readPanelPrefs(#"{"shop":{"folded":["done"],"view":3,"goal_folds":"x"}}"#)["shop"]
+    #expect(odd?.isFolded(.done) == true && odd?.view == nil && odd?.goalFolds.isEmpty == true)
+}

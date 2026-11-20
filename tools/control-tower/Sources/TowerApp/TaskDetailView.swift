@@ -269,11 +269,18 @@ struct TaskDetailView: View {
     let pick: (String?) -> Void
     let select: (RowID) -> Void
     let reload: () -> Void
+    /// The goals whose order has this task (T214): a 목표, 선행 and 후행 line each, under 관련 작업.
+    var goalLinks: [GoalTaskLinks] = []
+    /// The board's tasks by id, for the 선행·후행 links' state and title.
+    var boardTasks: [String: TaskBoardTask] = [:]
+    /// The 목표 line's link, with that goal's file: the 순서 view, this task's card in that goal picked.
+    var showInOrder: ((String) -> Void)?
 
     var body: some View {
         // one task's folds stay with it: another task starts from the defaults
         TaskDetailBody(team: team, line: line, family: family, decisions: decisions, listsDecisions: listsDecisions, now: now,
-                       workerRow: workerRow, pick: pick, select: select, reload: reload)
+                       workerRow: workerRow, pick: pick, select: select, reload: reload, goalLinks: goalLinks,
+                       boardTasks: boardTasks, showInOrder: showInOrder)
             .id(line.task.id)
     }
 }
@@ -289,6 +296,9 @@ private struct TaskDetailBody: View {
     let pick: (String?) -> Void
     let select: (RowID) -> Void
     let reload: () -> Void
+    let goalLinks: [GoalTaskLinks]
+    let boardTasks: [String: TaskBoardTask]
+    let showInOrder: ((String) -> Void)?
     /// History lines the user opened or folded, against `historyOpenAtFirst`.
     @State private var flipped: Set<String> = []
     @State private var piles: [FindingPile: Bool] = [:]
@@ -429,6 +439,43 @@ private struct TaskDetailBody: View {
                         ForEach(d.family.filter { $0.id != t.id }, id: \.id) { o in
                             TaskLink(id: o.id, task: o, team: team, relation: relationWord(o, to: t), pick: pick)
                         }
+                    }
+                }
+            }
+            // T214 (goal-order-view §4): per goal whose order has the task, its 목표, then what it waits for and what
+            // waits for it; the line names the relation, so the links carry none
+            ForEach(goalLinks, id: \.goal.path) { g in
+                GridRow {
+                    PropertyName("목표", symbol: "flag.checkered")
+                    Button { showInOrder?(g.goal.path) } label: { Text(g.goalLine).scaledFont(.callout).lineLimit(1) }
+                        .buttonStyle(.link)
+                        .disabled(showInOrder == nil)
+                        .help("순서 보기에서 이 작업으로 갑니다")
+                }
+                if !g.before.isEmpty {
+                    GridRow {
+                        PropertyName("선행", symbol: "arrow.turn.up.left")
+                        goalRelations(g.before)
+                    }
+                }
+                if !g.after.isEmpty {
+                    GridRow {
+                        PropertyName("후행", symbol: "arrow.turn.down.right")
+                        goalRelations(g.after)
+                    }
+                }
+            }
+        }
+    }
+
+    private func goalRelations(_ rs: [GoalRelation]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(rs, id: \.self) { r in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    TaskLink(id: r.task, task: boardTasks[r.task], team: team, pick: pick)
+                    if let c = r.caption {
+                        Text(c).scaledFont(.caption1).foregroundStyle(.secondary).fixedSize()
+                            .accessibilityLabel(r.spoken ?? c)
                     }
                 }
             }

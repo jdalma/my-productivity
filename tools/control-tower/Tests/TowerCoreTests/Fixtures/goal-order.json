@@ -1,0 +1,254 @@
+{
+  "ok": true,
+  "goals": [
+    {
+      "id": "G2",
+      "title": "no order yet",
+      "path": "/tmp/demo/docs/demo/goals/G2-plain.md",
+      "waves": [],
+      "ready_now": [],
+      "unregistered": [],
+      "cycle": null,
+      "errors": []
+    },
+    {
+      "id": "G3",
+      "title": "대시보드: 사용량·인사이트",
+      "path": "/tmp/demo/docs/demo/goals/G3-dashboard.md",
+      "waves": [
+        [
+          {
+            "ref": "T178",
+            "task": "T178",
+            "items": null,
+            "after": [],
+            "title": "title T178",
+            "state": "doing",
+            "status": "ready_now",
+            "blocked_by": []
+          }
+        ],
+        [
+          {
+            "ref": "T179",
+            "task": "T179",
+            "items": null,
+            "after": [
+              {
+                "ref": "T178",
+                "task": "T178",
+                "items": null
+              }
+            ],
+            "title": "title T179",
+            "state": "doing",
+            "status": "waiting",
+            "blocked_by": [
+              {
+                "ref": "T178",
+                "state": "doing"
+              }
+            ]
+          },
+          {
+            "ref": "T180",
+            "task": "T180",
+            "items": null,
+            "after": [
+              {
+                "ref": "T178",
+                "task": "T178",
+                "items": null
+              }
+            ],
+            "title": "title T180",
+            "state": "doing",
+            "status": "waiting",
+            "blocked_by": [
+              {
+                "ref": "T178",
+                "state": "doing"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "ref": "T181",
+            "task": "T181",
+            "items": null,
+            "after": [
+              {
+                "ref": "T179",
+                "task": "T179",
+                "items": null
+              },
+              {
+                "ref": "T180",
+                "task": "T180",
+                "items": null
+              }
+            ],
+            "title": "title T181",
+            "state": "doing",
+            "status": "waiting",
+            "blocked_by": [
+              {
+                "ref": "T179",
+                "state": "doing"
+              },
+              {
+                "ref": "T180",
+                "state": "doing"
+              }
+            ]
+          },
+          {
+            "ref": "T177",
+            "task": "T177",
+            "items": null,
+            "after": [
+              {
+                "ref": "T179",
+                "task": "T179",
+                "items": null
+              },
+              {
+                "ref": "T180",
+                "task": "T180",
+                "items": null
+              }
+            ],
+            "title": "title T177",
+            "state": "ready",
+            "status": "waiting",
+            "blocked_by": [
+              {
+                "ref": "T179",
+                "state": "doing"
+              },
+              {
+                "ref": "T180",
+                "state": "doing"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "ref": "T177:4-7",
+            "task": "T177",
+            "items": [
+              4,
+              5,
+              6,
+              7
+            ],
+            "after": [
+              {
+                "ref": "T179",
+                "task": "T179",
+                "items": null
+              },
+              {
+                "ref": "T180",
+                "task": "T180",
+                "items": null
+              },
+              {
+                "ref": "T181:1",
+                "task": "T181",
+                "items": [
+                  1
+                ]
+              }
+            ],
+            "title": "title T177",
+            "state": "ready",
+            "status": "waiting",
+            "blocked_by": [
+              {
+                "ref": "T179",
+                "state": "doing"
+              },
+              {
+                "ref": "T180",
+                "state": "doing"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "ref": "T192",
+            "task": "T192",
+            "items": null,
+            "after": [
+              {
+                "ref": "T177",
+                "task": "T177",
+                "items": null
+              },
+              {
+                "ref": "T181",
+                "task": "T181",
+                "items": null
+              }
+            ],
+            "title": null,
+            "state": null,
+            "status": "unregistered",
+            "blocked_by": [
+              {
+                "ref": "T177",
+                "state": "ready"
+              },
+              {
+                "ref": "T181",
+                "state": "doing"
+              }
+            ]
+          }
+        ]
+      ],
+      "ready_now": [
+        "T178"
+      ],
+      "unregistered": [
+        "T192"
+      ],
+      "cycle": null,
+      "errors": []
+    },
+    {
+      "id": "G4",
+      "title": "loop",
+      "path": "/tmp/demo/docs/demo/goals/G4-loop.md",
+      "waves": [],
+      "ready_now": [],
+      "unregistered": [],
+      "cycle": [
+        "A",
+        "B",
+        "A"
+      ],
+      "errors": []
+    },
+    {
+      "id": "G5",
+      "title": "typo",
+      "path": "/tmp/demo/docs/demo/goals/G5-typo.md",
+      "waves": [],
+      "ready_now": [],
+      "unregistered": [],
+      "cycle": null,
+      "errors": [
+        {
+          "line": 4,
+          "text": "- A => C",
+          "reason": "expected exactly one \"->\""
+        }
+      ]
+    }
+  ]
+}

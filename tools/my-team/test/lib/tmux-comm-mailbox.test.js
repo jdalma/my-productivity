@@ -5,13 +5,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, utimesSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
-import { absorbIncomingSpool, MAILBOX_SCHEMA_VERSION } from '../../src/lib/tmux-comm.js';
+import { absorbIncomingSpool, updateMailbox, MAILBOX_SCHEMA_VERSION } from '../../src/lib/tmux-comm.js';
 
 function setupTeam(teamName = 't1') {
     const base = mkdtempSync(join(tmpdir(), 'my-team-test-'));
@@ -113,6 +113,66 @@ test('E4: processes racing on one mailbox lose no inbox, sent_pending, or spool 
         assert.equal(Object.keys(mailbox.sent_pending).length, PROCS * ROUNDS, 'every sent_pending entry survives');
         assert.deepEqual(readdirSync(join(ctx.stateRoot, 'incoming-spool', 'bob')), [], 'spool drained');
         assert.ok(!existsSync(`${mailboxFile}.lock`), 'lock released');
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+function seedMailbox(ctx, worker) {
+    const file = join(ctx.stateRoot, 'mailbox', `${worker}.json`);
+    writeFileSync(file, JSON.stringify({ schema_version: MAILBOX_SCHEMA_VERSION, worker, inbox: {}, sent_pending: {} }));
+    return file;
+}
+
+function addEntry(mailbox) {
+    mailbox.sent_pending.x = { message_id: 'x' };
+}
+
+test('E4: a lock held by a live process is never taken, even when old', async () => {
+    const ctx = setupTeam();
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+    process.env.MY_TEAM_MAILBOX_LOCK_WAIT_MS = '200';
+    try {
+        const file = seedMailbox(ctx, 'bob');
+        const before = readFileSync(file, 'utf-8');
+        const lockPath = `${file}.lock`;
+        writeFileSync(lockPath, `${holder.pid}:other`);
+        const old = new Date(Date.now() - 3_600_000);
+        utimesSync(lockPath, old, old);
+
+        assert.throws(() => updateMailbox(ctx.teamName, 'bob', ctx.base, addEntry),
+            (err) => err.message.includes(lockPath) && err.message.includes(String(holder.pid)));
+        assert.equal(readFileSync(file, 'utf-8'), before, 'mailbox untouched');
+        assert.equal(readFileSync(lockPath, 'utf-8'), `${holder.pid}:other`, 'holder keeps its lock');
+    } finally {
+        delete process.env.MY_TEAM_MAILBOX_LOCK_WAIT_MS;
+        holder.kill();
+        cleanup(ctx);
+    }
+});
+
+test('E4: release leaves a lock that now carries another token', () => {
+    const ctx = setupTeam();
+    try {
+        const lockPath = `${seedMailbox(ctx, 'bob')}.lock`;
+        updateMailbox(ctx.teamName, 'bob', ctx.base, () => writeFileSync(lockPath, '1:someone-else'));
+        assert.equal(readFileSync(lockPath, 'utf-8'), '1:someone-else');
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('E4: a lock left by a dead process is reclaimed', async () => {
+    const ctx = setupTeam();
+    try {
+        const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+        await new Promise((resolve) => dead.on('exit', resolve));
+        const file = seedMailbox(ctx, 'bob');
+        writeFileSync(`${file}.lock`, `${dead.pid}:gone`);
+
+        updateMailbox(ctx.teamName, 'bob', ctx.base, addEntry);
+        assert.deepEqual(JSON.parse(readFileSync(file, 'utf-8')).sent_pending, { x: { message_id: 'x' } });
+        assert.ok(!existsSync(`${file}.lock`), 'lock released');
     } finally {
         cleanup(ctx);
     }

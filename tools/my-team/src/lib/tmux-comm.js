@@ -41,7 +41,7 @@
  *     writes are impossible.
  */
 
-import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, writeFileSync, statSync } from 'fs';
+import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 
 import { sendToWorker } from './tmux-session.js';
@@ -127,49 +127,67 @@ function writeMailboxAt(canonicalPath, workerName, mailbox) {
 }
 
 const LOCK_WAIT_MS = 10_000;
-const LOCK_STALE_MS = 30_000;
 const sleepCell = new Int32Array(new SharedArrayBuffer(4));
 
-function lockHolderGone(lockPath) {
+function readLock(lockPath) {
     try {
-        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) return true;
-        process.kill(Number(readFileSync(lockPath, 'utf-8')), 0);
-        return false;
+        return readFileSync(lockPath, 'utf-8');
     } catch (err) {
-        return err.code === 'ESRCH';
+        if (err.code === 'ENOENT') return null;
+        throw err;
     }
 }
 
+function pidAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (err) {
+        return err.code !== 'ESRCH';
+    }
+}
+
+// ponytail: content is re-read right before unlink, so a lock replaced in the microseconds between the
+// read and the unlink can still be removed; close that with a rename-based or flock lock if it ever bites.
+function unlinkIfContent(lockPath, content) {
+    if (readLock(lockPath) === content) rmSync(lockPath, { force: true });
+}
+
 /**
- * Run `fn` while holding `<mailboxFile>.lock`. Synchronous on purpose: no
- * critical section spans an await, so two calls in one process can never
- * deadlock on each other. A lock whose pid is dead or older than
- * LOCK_STALE_MS is taken over.
+ * Run `fn` while holding `<mailboxFile>.lock`, whose content is a token unique to this call.
+ * Synchronous on purpose: no critical section spans an await, so two calls in one process can
+ * never deadlock on each other. Only a lock whose holder pid is dead is taken over; a live holder,
+ * however slow, keeps it and the waiter throws after the wait (MY_TEAM_MAILBOX_LOCK_WAIT_MS).
  */
 function withMailboxLock(mailboxFile, fn) {
-    // ponytail: two waiters that both judge a lock stale can both remove it; only a crash mid-write
-    // leaves a stale lock, so this stays a pid/mtime check instead of a lease protocol.
     const lockPath = `${mailboxFile}.lock`;
     ensureDirWithMode(dirname(lockPath));
-    const deadline = Date.now() + LOCK_WAIT_MS;
+    const token = `${process.pid}:${Math.random().toString(36).slice(2)}`;
+    const waitMs = Number.parseInt(process.env.MY_TEAM_MAILBOX_LOCK_WAIT_MS ?? '', 10) || LOCK_WAIT_MS;
+    const deadline = Date.now() + waitMs;
     for (;;) {
         try {
-            writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
+            writeFileSync(lockPath, token, { flag: 'wx', mode: 0o600 });
             break;
         } catch (err) {
             if (err.code !== 'EEXIST') throw err;
-            if (lockHolderGone(lockPath)) {
-                rmSync(lockPath, { force: true });
+            const held = readLock(lockPath);
+            if (held === null) continue;
+            const pid = Number.parseInt(held, 10);
+            if (!pidAlive(pid)) {
+                unlinkIfContent(lockPath, held);
                 continue;
             }
-            if (Date.now() > deadline) throw new Error(`mailbox lock ${lockPath} still held after ${LOCK_WAIT_MS}ms`);
+            if (Date.now() > deadline) {
+                throw new Error(`mailbox lock ${lockPath} still held by live pid ${pid} after ${waitMs}ms`);
+            }
             Atomics.wait(sleepCell, 0, 0, 5);
         }
     }
     try {
         return fn();
     } finally {
-        rmSync(lockPath, { force: true });
+        unlinkIfContent(lockPath, token);
     }
 }
 

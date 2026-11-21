@@ -1,6 +1,6 @@
 ---
 name: takeover
-description: 사용자가 명시적으로 "/takeover" 슬래시 커맨드를 호출하거나 "/takeover 실행", "takeover 스킬 써" 같이 스킬 이름을 직접 지명할 때만 사용한다. 이전 세션의 handoff 문서(와 있으면 features/<feature-name>/task-index.md)를 읽고, hypothesis로 다루며 실제 코드·git 상태와 대조해 stale 여부를 판정한 뒤 검증 결과를 보고한다. 사용자가 "어제 이어서", "어디까지 했지" 등 의도만 표현하고 스킬을 지명하지 않았다면 절대 자동 호출하지 마라. 자동 제안 금지.
+description: 이전 세션의 handoff 문서(와 있으면 features/<feature-name>/task-index.md)를 hypothesis로 읽고 실제 코드·git 상태와 대조해 stale 여부를 판정한 뒤 검증 결과를 보고한다. 사용자가 /takeover로 직접 호출할 때만 쓴다.
 disable-model-invocation: true
 ---
 

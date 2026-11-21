@@ -1,7 +1,7 @@
 ---
 name: my-team-install
-description: Install or update the my-team CLI binary from this repo's tools/my-team package so the my-team skill can actually invoke commands. First install and update are the same command, tools/my-team/scripts/deploy.sh, which installs a commit of the repo (not the working tree) into npm's global prefix; an update first runs git pull --ff-only. Use when the user explicitly invokes /my-team-install, or when the my-team skill fails because `command -v my-team` is missing. Never run automatically — wait for explicit user invocation.
-aliases: []
+description: Install or update the my-team CLI binary from this repo's tools/my-team package so the my-team skill can actually invoke commands. First install and update are the same command, tools/my-team/scripts/deploy.sh, which installs a commit of the repo (not the working tree) into npm's global prefix; an update first runs git pull --ff-only. Use when the user explicitly invokes /my-team-install, or when the my-team skill fails because `command -v my-team` is missing. Never run automatically.
+disable-model-invocation: true
 ---
 
 # my-team-install — CLI 도구 설치

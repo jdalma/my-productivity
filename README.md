@@ -33,7 +33,7 @@
    $EDITOR ~/.config/my-claude-plugin/private-patterns.txt
    cd ~/IdeaProjects/my-productivity && sh scripts/install-pre-push.sh
    ```
-5. my-team CLI 설치. Node 20+, tmux 필요. Claude Code에서 `/my-team-install`을 호출하거나 직접 실행한다.
+5. my-team CLI 설치. Node 22.13+, tmux 필요. Claude Code에서 `/my-team-install`을 호출하거나 직접 실행한다.
    ```
    sh tools/my-team/scripts/deploy.sh
    ```
@@ -53,8 +53,8 @@
 cd tools/my-team && npm ci && npm test
 cd tools/control-tower && swift test
 sh scripts/public-scan.test.sh && sh scripts/push-gate.test.sh
-cd plugins/workflow/skills/my-team-config/scripts && python3 -m unittest test_plugins
-cd plugins/workflow/skills/session-resume/scripts && python3 -m unittest test_sessions
+cd plugins/workflow/skills/my-team-config/scripts && python3 test_plugins.py
+cd plugins/workflow/skills/session-resume/scripts && python3 test_sessions.py
 ```
 
 GitHub Actions(`.github/workflows/ci.yml`)가 같은 명령을 PR마다 돌린다. 실제 private-patterns 파일은 CI에 없다.

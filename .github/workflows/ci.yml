@@ -9,15 +9,28 @@ permissions:
   contents: read
 
 jobs:
-  scripts-and-my-team:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - run: brew install tmux
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.x
-      - run: sudo apt-get update && sudo apt-get install -y tmux
+          node-version: 22.13.x
+      - name: git identity
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.invalid"
+      - name: CLI stubs
+        run: |
+          stubs="$RUNNER_TEMP/stubs"
+          mkdir -p "$stubs"
+          for cli in claude codex gemini cursor-agent; do
+            printf '#!/bin/sh\nexec sleep 3600\n' > "$stubs/$cli"
+            chmod +x "$stubs/$cli"
+          done
+          echo "$stubs" >> "$GITHUB_PATH"
       - name: my-team
         working-directory: tools/my-team
         run: |
@@ -32,30 +45,8 @@ jobs:
           for t in plugins/workflow/skills/*/scripts/test_*.py; do
             (cd "$(dirname "$t")" && python3 "$(basename "$t")")
           done
-
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      control-tower: ${{ steps.filter.outputs.control-tower }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            control-tower:
-              - 'tools/control-tower/**'
-
-  control-tower:
-    needs: changes
-    if: needs.changes.outputs.control-tower == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 30
-    defaults:
-      run:
+      - name: control-tower
         working-directory: tools/control-tower
-    steps:
-      - uses: actions/checkout@v4
-      - run: brew install tmux
-      - run: swift build
-      - run: swift test
+        run: |
+          swift build
+          swift test

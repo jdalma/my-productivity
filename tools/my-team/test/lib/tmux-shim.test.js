@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'child_process';
-import { chmodSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -59,7 +59,7 @@ test('-L or -S passes anything, unless it names the default server', () => {
     assert.equal(v(['-S', '/tmp/my-socket', 'kill-server']), true);
     assert.equal(v(['-L', 'default', 'kill-server']), false);
     assert.equal(v(['-S', '/tmp/tmux-501/default', 'kill-server']), false);
-    assert.equal(v(['-S', '/private/tmp/tmux-501/default', 'kill-server']), false);
+    assert.equal(v(['-S', join(realpathSync('/tmp'), 'tmux-501/default'), 'kill-server']), false, 'the default socket under the resolved /tmp (/private/tmp on macOS)');
     assert.equal(v(['-S', '/tmp/tmux-501//default', 'kill-server']), false);
     assert.equal(v(['-S', '/tmp/x/tmux-501/default', 'kill-server'], { TMUX_TMPDIR: '/tmp/x' }), false);
     assert.equal(v(['-S', '/tmp/tmux-501/default', 'kill-server'], { TMUX_TMPDIR: '/tmp/x' }), false, 'a missing TMUX_TMPDIR falls back');
@@ -118,7 +118,7 @@ function setup(t) {
         rmSync(dir, { recursive: true, force: true });
     });
     const env = {
-        HOME: process.env.HOME, PATH: `${SHIM_DIR}:${bin}:/usr/bin:/bin`, TMUX_TMPDIR: join(dir, 'gone'),
+        HOME: process.env.HOME, PATH: `${SHIM_DIR}:${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, TMUX_TMPDIR: join(dir, 'gone'),
         MY_TEAM_STATE_ROOT: state, OMC_TEAM_WORKER: 't56/core', MY_TEAM_WORKER: 't56/core',
     };
     const sh = (script) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf-8', ...LIMIT });
@@ -253,7 +253,7 @@ test('the default server under another name is still the default server: symlink
         }
     };
     const alive = (path) => spawnSync(s.real, ['-S', path, 'has-session'], LIMIT).status === 0;
-    const env = { ...s.env, PATH: `${SHIM_DIR}:${dirname(s.real)}:/usr/bin:/bin`, TMUX_TMPDIR: tmpdir };
+    const env = { ...s.env, PATH: `${SHIM_DIR}:${dirname(s.real)}:${dirname(process.execPath)}:/usr/bin:/bin`, TMUX_TMPDIR: tmpdir };
     // killed here, not in t.after: setup's t.after runs first and deletes the sockets, and a server whose
     // socket is gone cannot be reached to be killed (R57a R1)
     try {

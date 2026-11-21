@@ -21,7 +21,7 @@ python3 <skill-dir>/scripts/sessions.py resume <key>... [--days N]
 - `[팀 <name>]` — key는 `team:<name>` (같은 이름이 다른 state_root에도 있으면 오래된 쪽은 `team:<name>@<state_root>`). 워커별 최신 세션 1개와 마지막 사용자 프롬프트를 표시
   - 워커 식별은 부팅 notice(`Team is live` / `You just joined team`)와 `/my-team-resume` 출력으로만 한다. `/clear` 후 `/my-team-resume`을 하지 않은 워커 세션은 `[단일]`로 보이고, 팀 resume은 `/clear` 이전 세션을 연다. 그 `[단일]`을 따로 resume하면 MY_TEAM env 없는 claude가 뜬다
   - `(실행 중)` 팀은 resume 대상이 아니다 (`tmux attach`만 안내)
-  - `(shutdown됨, .bak 복원 후 resume)` — 예전 `my-team shutdown`(T51 이전)이나 새 팀 start가 state_root를 `<root>.bak`으로 옮긴 팀. resume 시 `.bak`을 원래 경로로 rename해 mailbox·archive까지 되살린다. `<root>`가 따로 있으면 그쪽이 최신 세대라 `.bak`은 건드리지 않는다
+  - `(shutdown됨, .bak 복원 후 resume)` — 예전 `my-team shutdown`(T51 이전)이 state_root를 `<root>.bak`으로 옮긴 팀. resume 시 `.bak`을 원래 경로로 rename해 mailbox·archive까지 되살린다. `<root>`가 따로 있으면 그쪽이 최신 세대라 `.bak`은 건드리지 않는다. 새 `my-team start`가 남기는 `<root>.<timestamp>.bak`은 복원 대상이 아니다(`<root>`가 새로 생기므로 이 분기에 오지 않는다)
   - `(manifest 없음, resume 불가)` 팀은 대상이 아니다
   - `(manifest에서 제거됨)` 워커는 팀 resume에 포함되지 않는다 (remove-worker된 워커)
 

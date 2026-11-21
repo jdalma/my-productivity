@@ -84,8 +84,8 @@ def collect(days):
             continue
         root = s["state_root"]
         if root not in teams:
-            # my-team shutdown은 state_root를 <root>.bak으로 rename한다(1세대). <root>가 남아 있으면
-            # 그쪽이 최신 세대라 .bak은 보지 않는다
+            # T51 이전 my-team shutdown은 state_root를 <root>.bak으로 rename했다. 지금의 start가 남기는
+            # <root>.<timestamp>.bak은 보지 않는다(start가 <root>를 새로 만든다). <root>가 남아 있으면 .bak은 보지 않는다
             from_bak = not Path(root).exists()
             try:
                 manifest = json.loads((Path(root + ".bak" if from_bak else root) / "manifest.json").read_text())

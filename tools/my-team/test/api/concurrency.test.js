@@ -10,10 +10,9 @@
  * and per-worker ownership, all archive lines should survive and the
  * mailbox should converge to a consistent state.
  *
- * These tests use Promise.all to interleave calls; they do not fork
- * processes. Node's single-threaded event loop makes deterministic
- * lost-update reproduction hard — what we verify is that the data plane
- * survives interleaved fs reads/writes and reports no lost messages.
+ * These tests use Promise.all to interleave calls in one process. The
+ * cross-process lost-update race is covered by the forked-children test in
+ * test/lib/tmux-comm-mailbox.test.js.
  */
 
 import test from 'node:test';

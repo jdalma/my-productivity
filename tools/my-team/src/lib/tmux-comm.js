@@ -28,9 +28,12 @@
  *     mark-delivered.
  *
  * Concurrency model:
- *   - Each mailbox.json has exactly ONE writer (the owning worker / its
- *     mailbox-list and mark-delivered handlers running in the worker's
- *     process). Senders never touch the recipient mailbox file.
+ *   - Several processes write one mailbox.json: the owner's mailbox-list
+ *     (spool absorption) and mark-delivered, and its own sends that record
+ *     sent_pending. Parallel tool calls run them at once, so every
+ *     read-modify-write goes through updateMailbox / withMailboxLock, which
+ *     holds `<mailbox>.lock` (O_EXCL create) for the whole cycle.
+ *     Senders never touch the recipient mailbox file.
  *   - incoming-spool uses one file per message, so concurrent senders cannot
  *     clobber each other (filename uniqueness via random message_id).
  *   - archive jsonl is append-only.
@@ -38,8 +41,7 @@
  *     writes are impossible.
  */
 
-import { existsSync, unlinkSync, rmSync } from 'fs';
-import { mkdir, readFile, readdir, unlink } from 'fs/promises';
+import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, writeFileSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 
 import { sendToWorker } from './tmux-session.js';
@@ -80,10 +82,13 @@ function emptyMailbox(workerName) {
  * Schema mismatch → throw (no automatic migration; operator must shutdown).
  */
 export async function readMailboxFile(teamName, workerName, cwd) {
-    const canonicalPath = mailboxPath(teamName, workerName, cwd);
+    return readMailboxAt(mailboxPath(teamName, workerName, cwd), workerName);
+}
+
+function readMailboxAt(canonicalPath, workerName) {
     let raw;
     try {
-        raw = await readFile(canonicalPath, 'utf-8');
+        raw = readFileSync(canonicalPath, 'utf-8');
     } catch {
         return emptyMailbox(workerName);
     }
@@ -112,14 +117,74 @@ export async function readMailboxFile(teamName, workerName, cwd) {
     };
 }
 
-export async function writeMailboxFile(teamName, workerName, cwd, mailbox) {
-    const canonicalPath = mailboxPath(teamName, workerName, cwd);
-    await mkdir(join(canonicalPath, '..'), { recursive: true });
+function writeMailboxAt(canonicalPath, workerName, mailbox) {
     atomicWriteJson(canonicalPath, {
         schema_version: MAILBOX_SCHEMA_VERSION,
         worker: workerName,
         inbox: mailbox.inbox ?? {},
         sent_pending: mailbox.sent_pending ?? {},
+    });
+}
+
+const LOCK_WAIT_MS = 10_000;
+const LOCK_STALE_MS = 30_000;
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
+
+function lockHolderGone(lockPath) {
+    try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) return true;
+        process.kill(Number(readFileSync(lockPath, 'utf-8')), 0);
+        return false;
+    } catch (err) {
+        return err.code === 'ESRCH';
+    }
+}
+
+/**
+ * Run `fn` while holding `<mailboxFile>.lock`. Synchronous on purpose: no
+ * critical section spans an await, so two calls in one process can never
+ * deadlock on each other. A lock whose pid is dead or older than
+ * LOCK_STALE_MS is taken over.
+ */
+function withMailboxLock(mailboxFile, fn) {
+    // ponytail: two waiters that both judge a lock stale can both remove it; only a crash mid-write
+    // leaves a stale lock, so this stays a pid/mtime check instead of a lease protocol.
+    const lockPath = `${mailboxFile}.lock`;
+    ensureDirWithMode(dirname(lockPath));
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+        try {
+            writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
+            break;
+        } catch (err) {
+            if (err.code !== 'EEXIST') throw err;
+            if (lockHolderGone(lockPath)) {
+                rmSync(lockPath, { force: true });
+                continue;
+            }
+            if (Date.now() > deadline) throw new Error(`mailbox lock ${lockPath} still held after ${LOCK_WAIT_MS}ms`);
+            Atomics.wait(sleepCell, 0, 0, 5);
+        }
+    }
+    try {
+        return fn();
+    } finally {
+        rmSync(lockPath, { force: true });
+    }
+}
+
+/**
+ * Locked read-modify-write of one worker's mailbox. `mutate` edits the
+ * mailbox in place and must be synchronous; its return value is returned.
+ * A throw from `mutate` skips the write.
+ */
+export function updateMailbox(teamName, workerName, cwd, mutate) {
+    const canonicalPath = mailboxPath(teamName, workerName, cwd);
+    return withMailboxLock(canonicalPath, () => {
+        const mailbox = readMailboxAt(canonicalPath, workerName);
+        const result = mutate(mailbox);
+        writeMailboxAt(canonicalPath, workerName, mailbox);
+        return result;
     });
 }
 
@@ -165,29 +230,37 @@ export async function absorbIncomingSpool(teamName, workerName, cwd) {
     const dir = spoolDir(teamName, workerName, cwd);
     let entries;
     try {
-        entries = await readdir(dir);
+        entries = readdirSync(dir);
     } catch (err) {
         if (err && err.code === 'ENOENT') return [];
         throw err;
     }
-    const jsonFiles = entries.filter((n) => n.endsWith('.json'));
-    if (jsonFiles.length === 0) return [];
+    if (!entries.some((n) => n.endsWith('.json'))) return [];
 
-    const mailbox = await readMailboxFile(teamName, workerName, cwd);
+    const canonicalPath = mailboxPath(teamName, workerName, cwd);
+    // The unlink stays inside the lock: unlinked after release, a spool file another absorber
+    // still sees would come back into the inbox after mark-delivered removed it.
+    return withMailboxLock(canonicalPath, () => absorbLocked(dir, canonicalPath, workerName));
+}
+
+function absorbLocked(dir, canonicalPath, workerName) {
+    // Re-list under the lock: a concurrent absorber may have consumed files since the first look.
+    const jsonFiles = readdirSync(dir).filter((n) => n.endsWith('.json'));
+    const mailbox = readMailboxAt(canonicalPath, workerName);
     const absorbed = [];
     const absorbedFiles = [];
     for (const filename of jsonFiles) {
         const filePath = join(dir, filename);
         let payload;
         try {
-            payload = JSON.parse(await readFile(filePath, 'utf-8'));
+            payload = JSON.parse(readFileSync(filePath, 'utf-8'));
         } catch (err) {
             process.stderr.write(`[tmux-comm] dropping malformed spool file ${filePath}: ${err.message}\n`);
-            try { await unlink(filePath); } catch { /* ignore */ }
+            try { unlinkSync(filePath); } catch { /* ignore */ }
             continue;
         }
         if (!payload || !payload.message_id) {
-            try { await unlink(filePath); } catch { /* ignore */ }
+            try { unlinkSync(filePath); } catch { /* ignore */ }
             continue;
         }
         mailbox.inbox[payload.message_id] = {
@@ -211,10 +284,10 @@ export async function absorbIncomingSpool(teamName, workerName, cwd) {
         absorbedFiles.push(filePath);
     }
     if (absorbed.length > 0) {
-        await writeMailboxFile(teamName, workerName, cwd, mailbox);
+        writeMailboxAt(canonicalPath, workerName, mailbox);
     }
     for (const filePath of absorbedFiles) {
-        try { await unlink(filePath); } catch { /* ignore */ }
+        try { unlinkSync(filePath); } catch { /* ignore */ }
     }
     return absorbed;
 }
@@ -342,15 +415,15 @@ export async function queueDirectMessage(
     //    later failure cannot leave the recipient with a message that the
     //    sender doesn't know it sent.
     if (expectsReply) {
-        const senderMailbox = await readMailboxFile(teamName, fromWorker, cwd);
-        senderMailbox.sent_pending[messageId] = {
-            message_id: messageId,
-            to_worker: toWorker,
-            body,
-            expects_reply: true,
-            sent_at: createdAt,
-        };
-        await writeMailboxFile(teamName, fromWorker, cwd, senderMailbox);
+        updateMailbox(teamName, fromWorker, cwd, (senderMailbox) => {
+            senderMailbox.sent_pending[messageId] = {
+                message_id: messageId,
+                to_worker: toWorker,
+                body,
+                expects_reply: true,
+                sent_at: createdAt,
+            };
+        });
     }
 
     // 2. Sender archive (direction=out) — durable record before delivery.

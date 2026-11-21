@@ -50,7 +50,7 @@ function agentTypeGuidance(agentType) {
             return [
                 '### Agent-Type Guidance (claude)',
                 '- Keep reasoning focused on the brief in `## Role Context`. The user observes this pane directly; surface progress via your normal stdout.',
-                '- Ask the user in this pane (your normal Claude permission prompt) only before something expensive to undo: a DB migration, an external interface contract, a data deletion or backfill, an edit to a shared canonical document. Everything else, decide and proceed.',
+                '- Before any risky command, ask the user in this pane via your normal Claude permission/confirmation prompt and wait for their answer.',
             ].join('\n');
     }
 }

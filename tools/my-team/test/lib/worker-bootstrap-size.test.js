@@ -50,8 +50,6 @@ test('E7: each overlay keeps only the sections its worker can act on', () => {
     assert.match(boardDev, /### Mailbox: questions and notices only[\s\S]*best-effort hint[\s\S]*archive-lookup/);
     assert.doesNotMatch(boardDev, /reply_to resolution order/);
     assert.match(text('dev', 'worker'), /reply_to resolution order/, 'a team without a board keeps the full protocol');
-    for (const t of [text('dev', 'worker'), boardDev]) {
-        assert.match(t, /Never type into another worker's pane/);
-        assert.doesNotMatch(t, /Before any risky command/, 'no per-command approval stop, per the approval list');
-    }
+    assert.match(text('dev', 'worker'), /Before any risky command, ask the user in this pane/, 'the claude guidance keeps its risky-command rule');
+    for (const t of [text('dev', 'worker'), boardDev]) assert.match(t, /Never type into another worker's pane/);
 });

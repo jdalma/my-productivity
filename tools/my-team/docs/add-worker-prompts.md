@@ -67,12 +67,12 @@ they see you in the `roster` field of their next mailbox-list.
 
 | 섹션 | 내용 | 렌더링 조건 |
 |---|---|---|
-| Team Worker Protocol | "N명 중 한 명의 peer. 사용자는 pane에 직접 타이핑, 워커끼리는 mailbox" | 항상 |
+| Team Worker Protocol | "team <name>의 워커 중 하나. 사용자는 각 pane을 보며 직접 타이핑하고, 다른 워커는 mailbox로 닿는다" | 항상 |
 | Identity | 팀명, 워커명, agent type, env | 항상 |
 | Team Roster | 부팅 시점 팀원(이름·타입·한 줄 설명). "스냅샷이며 `mailbox-list`의 roster가 정본" | 항상 |
 | Liveness | `status.json`(idle/working/blocked/done/failed) | 항상 |
 | Team Role: ORCHESTRATOR / WORKER | 위임 규율, "블록 시 질문 1통·완료 시 보고 1통", cross-team 게이트 | **`workerRole`이 non-null일 때만** |
-| Message Protocol | send-message / mailbox-list / mark-delivered 예시, 비동기 원칙, reply_to 해석 순서, 자기 폴링 의무 | 항상 |
+| Message Protocol | send-message / mailbox-list / mark-delivered 예시. 비동기 원칙, reply_to 해석 순서, 자기 폴링 의무는 작업판이 없으면 절마다, 작업판 팀은 `### Mailbox: questions and notices only` 한 절로 | 항상 |
 | Rules | 파일 범위, tmux 직접 조작 금지, 중첩 팀 금지, **Parallel work(스폰 규약)**, 피어 제거, 교대 | 항상 |
 | Agent-Type Guidance | claude/codex/gemini/cursor별 팁 | 항상 (타입별 분기) |
 | Role Context | `--extra-prompt` 원문 | extra-prompt 있을 때만 |

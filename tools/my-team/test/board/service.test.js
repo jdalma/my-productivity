@@ -1298,6 +1298,7 @@ both('ask and wait: a fourth open decision of one asker is a warning; others\' a
     assert.equal((await b.as('app').ask(ask())).warnings, undefined, 'another asker');
     const r = await b.as('core').ask(ask());
     assert.match(r.warnings[0], /core now has 4 open decisions, more than 3/);
+    assert.match(r.warnings[0], /keep them all on the board.*lead with the one that blocks work.*one at a time/, 'agrees with the worker protocol');
     await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
     assert.match((await b.as('core').wait(ask('T1'))).warnings[0], /core now has 5 open decisions/);
     await b.as('pm').answer({ id: 'D#1', chosen: 'A', answer: 'a' });
@@ -1316,6 +1317,11 @@ both('add and edit: a ticket path that is relative or missing is a warning, and 
     assert.equal((await b.as('pm').add({ id: 'T3', title: 't', reviewer: 'rv', ticket: '/d/T3.md' })).warnings, undefined);
     assert.match((await b.as('pm', missing('/d/E.md')).edit({ id: 'T3', ticket: '/d/E.md' })).warnings[0], /does not exist/);
     assert.equal((await b.as('pm', missing('/d/E.md')).edit({ id: 'T3', title: 'new' })).warnings, undefined, 'no ticket in the edit');
+});
+
+both('add: a ticket that is not text keeps the store\'s own error, not a TypeError from the path warning', async (setup) => {
+    const b = await setup();
+    await assert.rejects(b.as('pm').add({ id: 'T1', title: 't', reviewer: 'rv', ticket: 5 }), { name: 'InvalidRow', message: /'ticket_path' must be text/ });
 });
 
 both('land: a report path that is relative or missing is a warning; the landing is made (E25)', async (setup) => {

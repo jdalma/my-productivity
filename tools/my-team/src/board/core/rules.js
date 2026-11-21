@@ -87,12 +87,13 @@ export function briefWarnings({ question, context }, asker, open) {
     const q = [...question].length, c = [...context].length;
     if (q > QUESTION_MAX) out.push(`question is ${q} chars (over ${QUESTION_MAX}): the user decides faster from a one-line question`);
     if (c > CONTEXT_MAX) out.push(`context is ${c} chars (over ${CONTEXT_MAX}): keep what the decision needs and point to a file for the rest`);
-    if (open > OPEN_DECISIONS_MAX) out.push(`${asker} now has ${open} open decisions, more than ${OPEN_DECISIONS_MAX}: decisions asked together tend to wait unanswered; ask the one that blocks work first`);
+    if (open > OPEN_DECISIONS_MAX) out.push(`${asker} now has ${open} open decisions, more than ${OPEN_DECISIONS_MAX}: decisions asked together tend to wait unanswered; keep them all on the board, and when raising them with the user lead with the one that blocks work and present them one at a time`);
     return out;
 }
 
 /** The line for a ticket or report path that is not absolute or not a file, or null. Teams keep documents in ~/.my-team/docs/<team>/. */
 export function pathWarning(label, path, exists) {
+    if (typeof path !== 'string') return null; // the store rejects it with its own error
     if (!path.startsWith('/')) return `${label} ${path} is not an absolute path: keep documents in ~/.my-team/docs/<team>/ and give the full path`;
     if (!exists(path)) return `${label} ${path} does not exist: write the file there, or correct the path`;
     return null;

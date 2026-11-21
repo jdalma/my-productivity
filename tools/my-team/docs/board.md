@@ -246,7 +246,7 @@ other input for its form and many boards already hold relative paths.
 | Command | Warns when |
 |---|---|
 | `board-add`, `board-assign` that changes the reviewer | `reviewer` is missing, so pm judges, or is a pm. A team that declares no roles is exempt: every worker is pm there |
-| `board-ask`, `board-wait` | `question` is over 120 characters, `context` is over 1000, or the asker then has more than 3 open decisions (its `board-ask` decisions in `open`, plus its `board-wait` tasks in `waiting`) |
+| `board-ask`, `board-wait` | `question` is over 120 characters, `context` is over 1000, or the asker then has more than 3 open decisions (its `board-ask` decisions in `open`, plus its `board-wait` tasks in `waiting`). The line tells the asker to keep them all on the board, and when raising them with the user to lead with the one that blocks work and present them one at a time, as the worker protocol says |
 | `board-add`, `board-edit` (with `ticket`) | the `ticket` path is not absolute, or the file does not exist |
 | `board-land` | the `report` path is not absolute, or the file does not exist |
 

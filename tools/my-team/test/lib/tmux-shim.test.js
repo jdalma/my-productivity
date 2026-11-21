@@ -40,6 +40,18 @@ test('without -L or -S only reading commands pass; anything not known to read is
     ]) assert.equal(allow(args), false, args.join(' '));
 });
 
+test('load-buffer passes only as stdin into a buffer: `-` and `-w -`', () => {
+    const allow = (args) => tmuxShimVerdict(args, { TMUX_TMPDIR: '/nonexistent' }, 501).allow;
+    for (const args of [['load-buffer', '-'], ['load-buffer', '-w', '-'], ['loadb', '-'], ['loadb', '-w', '-']]) {
+        assert.equal(allow(args), true, args.join(' '));
+    }
+    for (const args of [
+        ['load-buffer'], ['load-buffer', '/etc/passwd'], ['load-buffer', '-w'], ['load-buffer', '-w', '/tmp/x'],
+        ['load-buffer', '-b', 'x', '-'], ['load-buffer', '-t', '%1', '-'], ['load-buffer', '-', '/tmp/x'],
+        ['load-buffer', '-', ';', 'kill-server'], ['load-buffer', '-;', 'kill-server'], ['load-buffer', '-w', '-w', '-'],
+    ]) assert.equal(allow(args), false, args.join(' '));
+});
+
 test('-L or -S passes anything, unless it names the default server', () => {
     const v = (args, env = {}) => tmuxShimVerdict(args, env, 501).allow;
     assert.equal(v(['-L', 'scratch', 'kill-server']), true);

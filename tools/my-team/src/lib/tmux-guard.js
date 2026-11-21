@@ -116,6 +116,11 @@ export function tmuxShimVerdict(args, env = process.env, uid = process.getuid())
 
     const rest = args.slice(next);
     if (rest.length === 0 || rest.some((a) => a.endsWith(';'))) return { allow: false };
+    // stdin into a buffer (a clipboard copy); a path or any other flag reads or names something else
+    if (rest[0] === 'load-buffer' || rest[0] === 'loadb') {
+        const operands = rest.slice(1);
+        return { allow: operands.join(' ') === '-' || operands.join(' ') === '-w -' };
+    }
     const reader = READERS.get(rest[0]);
     if (!reader) return { allow: false };
     const opts = getopt(rest, 1, reader.flags, reader.withArg);

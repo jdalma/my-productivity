@@ -50,7 +50,7 @@ function agentTypeGuidance(agentType) {
             return [
                 '### Agent-Type Guidance (claude)',
                 '- Keep reasoning focused on the brief in `## Role Context`. The user observes this pane directly; surface progress via your normal stdout.',
-                '- Before any risky command, ask the user in this pane via your normal Claude permission/confirmation prompt and wait for their answer.',
+                '- Ask the user in this pane (your normal Claude permission prompt) only before something expensive to undo: a DB migration, an external interface contract, a data deletion or backfill, an edit to a shared canonical document. Everything else, decide and proceed.',
             ].join('\n');
     }
 }
@@ -69,7 +69,6 @@ function roleGuidance(workerRole, orchestratorNames, { solo = false, board = fal
             '## Team Role: ORCHESTRATOR (solo)',
             'You hold the initiative in this team and you do the work yourself: there is no worker to hand tickets to. The other worker reviews what you submit on the board and takes no tickets. You are the only role allowed to message OTHER teams (cross-team).',
             '- Big content travels as files: write specs/analysis to a file and send the PATH, not the content.',
-            '- At the end of every work cycle, review `sent_pending` from mailbox-list; surface long-outstanding questions in this pane so the user can intervene.',
         ].join('\n');
     }
     if (workerRole === 'orchestrator') {
@@ -92,7 +91,6 @@ function roleGuidance(workerRole, orchestratorNames, { solo = false, board = fal
             '- Batch related questions into ONE message per topic; keep different topics in separate messages so reply_to correlation stays clean.',
             '- If an exchange looks like it needs more than two round-trips, switch to an RFC file: write a proposal document, send its path; the peer answers in the document.',
             '- Big content travels as files: write specs/analysis to a file and send the PATH, not the content.',
-            '- At the end of every work cycle, review `sent_pending` from mailbox-list; surface long-outstanding questions in this pane so the user can intervene.',
             '- Worker-to-worker coordination goes through you by default. Only when a pair needs tight back-and-forth, explicitly delegate: message BOTH workers naming each other, and have the initiating worker send with expects_reply so the other can reply directly.',
             '',
             'Team changes:',
@@ -136,7 +134,7 @@ function decisionGuidance(api) {
         '- Every decision you ask the user goes on the board BEFORE you ask it in your pane, one board entry per decision. When several are queued, put them all on the board now, even if you ask the user one at a time. Write each so the user can decide from it alone.',
         '- Tie a decision to the task it serves: a plan or a migration approach is discussed for the work that will use it. When that task is not on the board yet (the next plan to write, the implementation), it goes on the board first, without an assignee if none is decided (pm adds tasks: ask pm for it); then the decision.',
         `- The task cannot go on without the answer: put it in waiting — \`${api('board-wait', { id: '<task>', ...decision })}\`. Until pm records the answer, the task cannot be taken, landed or judged.`,
-        `- The task can go on, or it has several decisions open: ask without stopping it — \`${api('board-ask', { ...decision, tasks: ['<task>'] })}\`. It gets an id D#1, D#2, …; a task may have several open.`,
+        `- The task can go on, or it has several decisions open: ask without stopping it — \`${api('board-ask', { tasks: ['<task>'] })}\`, with the same decision fields as board-wait added. It gets an id D#1, D#2, …; a task may have several open.`,
         '- Only a decision that serves no task at all goes on with `board-ask` and no `tasks`. That is the exception.',
         '- pm records the answer; you see it in `decisions.answered` of your board-inbox.',
         `- When the talk about an open decision you asked changes its question, options or recommendation, correct that entry instead of asking a new one, with only the fields that changed: \`${api('board-decision-edit', { id: '<D#… or the waiting task>', question: '<the question as it stands now>' })}\`. It takes question, context, options, recommendation, impact, refs, and tasks for a D#…; pm is told.`,
@@ -146,10 +144,10 @@ function decisionGuidance(api) {
 /**
  * The board section (T63g; docs/board.md, Turning it on): only for a board team (config `board`). Work state lives on
  * the board, not in message bodies; the mailbox carries one-line `[board]` notices and questions. Every worker
- * gets the worker and reviewer parts (a reviewer is set per task); an orchestrator, or anyone in a team that
- * declares no roles, also gets the pm part.
+ * gets the worker and reviewer parts (a reviewer is set per task), except the solo orchestrator, which is never
+ * a reviewer; an orchestrator, or anyone in a team that declares no roles, also gets the pm part.
  */
-function boardGuidance(teamName, workerName, workerRole) {
+function boardGuidance(teamName, workerName, workerRole, solo) {
     const api = (command, input) => formatOmcCliInvocation(`team api ${command} --input "${JSON.stringify({ team_name: teamName, ...input }).replaceAll('"', '\\"')}" --json`);
     const lines = [
         '## Team Board',
@@ -165,6 +163,8 @@ function boardGuidance(teamName, workerName, workerRole) {
         `- Leave progress on the board each time you finish one of the ticket's numbered items, and when you have been on one item for more than 30 minutes or are stuck: \`${api('board-progress', { id: '<task>', item: 1, note: '<what you did, what is left>', done: false })}\`. item is the item's number in the ticket's What list (0 for work outside it). Write the note as sentences a person can follow, not only a commit hash or a path.`,
         '- Never run a my-team of another version than the installed one (a branch you work on or review) on a running team\'s board: one command of a newer schema migrates the board file, and the installed my-team then refuses it for every worker. Try it on a copy in a temporary folder: set `MY_TEAM_STATE_ROOT_BASE` to that folder AND change `state_root` in the copied manifest.json to the copy\'s own folder (it is an absolute path, so a copied manifest still names the running board).',
         '- Other questions to pm still go by `send-message`, as before.',
+    ];
+    if (!(solo && workerRole === 'orchestrator')) lines.push(
         '',
         'As a reviewer (the board names you on a task):',
         `- Take review requests from \`${api('board-review-queue', {})}\`; each row carries the ticket, constraints, commits, focus and open findings.`,
@@ -181,7 +181,7 @@ function boardGuidance(teamName, workerName, workerRole) {
         '- A row under `incomplete` cannot be reviewed yet: tell pm with `send-message` which fields are missing (the row says), and leave it.',
         '- A task assigned to you or that you landed commits or a report for is not yours to judge; tell pm with `send-message` and leave it.',
         '- Do not send pm or the assignee a message about a verdict: the board notifies them.',
-    ];
+    );
     if (workerRole === 'orchestrator' || workerRole === null) {
         lines.push(
             '',
@@ -287,19 +287,13 @@ every \`mailbox-list\` call — trust that over this list when they differ.
 
 ${workerRole ? `${roleGuidance(workerRole, orchestratorNames, { solo: Boolean(params.solo), board: Boolean(params.board) })}
 
-` : ''}${params.board ? `${boardGuidance(teamName, workerName, workerRole)}
+` : ''}${params.board ? `${boardGuidance(teamName, workerName, workerRole, Boolean(params.solo))}
 
 ` : ''}${params.knowledge?.length ? `${knowledgeGuidance(params.knowledge)}
 
 ` : ''}## Message Protocol
 Talk to the user: surface output in this pane via your normal stdout. Permission
 or confirmation requests use your CLI's native prompt.${workerRole ? ' This team uses\nORCHESTRATOR/WORKER roles — see your Team Role section above; send-message\nenforces those routing rules.' : ' There is no orchestrator\nor leader role in this team, every worker (including you) is a peer.'}
-
-**Hard rule for peer messaging**: the ONLY allowed channel to another worker is
-\`my-team api send-message\`. You MUST NOT call \`tmux send-keys\`, \`tmux send-text\`,
-or any other mechanism that types into another worker's pane directly. You MUST
-NOT call \`my-team msg\` (that command was removed; only the user→worker channel
-remains, which is the user typing directly into your pane).
 
 Talk to other workers via CLI API:
 - Send a one-way notice (no answer expected): \`${formatOmcCliInvocation(`team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName}\\",\\"to_worker\\":\\"<other-worker>\\",\\"body\\":\\"<message>\\"}" --json`)}\`
@@ -309,7 +303,7 @@ Talk to other workers via CLI API:
 - Mark a message consumed (moves it to archive): \`${mailboxDeliveredCommand}\`
 - Resolve a reply_to that is not in sent_pending: \`${archiveLookupCommand}\`
 
-### Messaging a worker in ANOTHER team (cross-team)
+${workerRole === 'worker' ? '' : `### Messaging a worker in ANOTHER team (cross-team)
 
 Workers in other running teams are reachable by adding \`to_team\` — the target
 TEAM NAME (stable across restarts, e.g. \`payments\`). Without \`to_team\` the
@@ -336,7 +330,29 @@ Rules:
 - A wrong or dead team/session name is a hard error, not a silent drop — read
   the error message.
 
-### All worker-to-worker messaging is ASYNCHRONOUS
+`}${params.board ? `### Mailbox: questions and notices only
+
+The board carries the work state; the mailbox carries only questions, answers
+and \`[board]\` notices.
+- Messaging is asynchronous: send, keep working, pick the reply up later. Never
+  stop your work to wait for one.
+- Run \`mailbox-list\` at the end of every work cycle and right after any
+  \`new-message\` notification. The notification is a best-effort hint that is
+  lost when this pane is busy; your mailbox is the source of truth. Mark each
+  message delivered once handled. An empty \`messages\` is normal; a thrown error
+  is real: surface it in this pane.
+- \`mailbox-list\` returns \`{ ok, worker, messages, sent_pending, roster }\`:
+  \`messages\` is your unread inbox in \`created_at\` order (iterate the array);
+  \`roster\` is the team's current members, authoritative over the list above;
+  \`sent_pending\` is your questions (\`expects_reply: true\`) still unanswered.
+- An answer carries \`reply_to\` = your question's id and clears it from
+  \`sent_pending\`. A \`reply_to\` you cannot place there: \`archive-lookup\`; no
+  hit, take the body on its own merits.
+- Answer a message that has \`expects_reply: true\` with \`reply_to\` set to its
+  \`message_id\`. There is no broadcast: to ask several peers, message each.
+- If \`sent_pending\` stays non-empty too long, say so in this pane and keep working.
+
+` : `### All worker-to-worker messaging is ASYNCHRONOUS
 
 There is no blocking send. You **never stop your own work to wait** for a
 peer's reply. You send, you continue, and you pick up any reply later from
@@ -411,27 +427,15 @@ For each entry in \`messages\`:
      handoff. Act on it (or note it) — no reply needed.
    Either way, \`mailbox-mark-delivered\` when done.
 
-### When you send a message that needs an answer
-
-Use \`expects_reply: true\` so it lands in your \`sent_pending\`. Then keep
-working — do not block. The peer's reply arrives in your inbox with
-\`reply_to\` pointing at your \`message_id\`; the next \`mailbox-list\`
-surfaces it and clears the pending entry. If too many entries pile up in
-\`sent_pending\`, surface it on stdout so the user can intervene.
-
 ### Asking several peers
 
 There is no broadcast. To ask several peers, send one \`send-message\` to each,
 with \`expects_reply: true\`, so each answer resolves its own \`message_id\`.
 
-## Rules
+`}## Rules
 - Do NOT edit files outside the scope described in your \`## Role Context\` brief
-- You MAY use your own CLI's sub-agents and dynamic workflows for your own work. They run inside this worker session, create no tmux panes and no team mailbox, and are not team members — so they cannot collide with the peer model. The team rules below constrain only how you touch the *team* (tmux topology + peer channel), not what you run to do your own task.
-- Do NOT create tmux panes/sessions (\`tmux split-window\`, \`tmux new-session\`, etc.).
-- Do NOT type into another worker's pane via \`tmux send-keys\` / \`tmux send-text\` / any pane-targeting tmux command. The mailbox (\`my-team api send-message\`) is the ONLY peer channel. The pane IDs visible in the manifest are for the human user's monitoring, not for worker-to-worker control.
-- Do NOT call \`my-team msg\` — that command was removed. The user→worker channel is the user typing directly into your pane; the worker→worker channel is \`my-team api send-message\`. There is no third channel.
-- Do NOT boot a nested my-team team (\`my-team start\`, \`${teamCommand} ...\`). Spawning another team inside a worker would create overlapping tmux topology and state. (This is the only my-team restriction — your own CLI's sub-agents/workflows are fine, per the rule above.)
-- For touching the *team*, \`${teamApiCommand} ... --json\` is your peer channel; the only other my-team subcommands you may run are \`add-worker\` and \`remove-worker\` (below). (This does not restrict your own CLI's sub-agents or dynamic workflows.)
+- Touch the *team* only through \`${teamApiCommand} ... --json\`, \`add-worker\` and \`remove-worker\` (below). Never type into another worker's pane: the mailbox is the only peer channel (the tmux shim on your PATH refuses \`send-keys\`, pane and session creation; \`my-team msg\` no longer exists). Never boot a nested team (\`my-team start\`, \`${teamCommand} ...\`).
+- Your own CLI's sub-agents and workflows are fine: they run inside this session and are not team members.
 - **Parallel work on one repo**: when a task splits into independent parts, add a peer on its own git worktree instead of doing them serially:
   \`my-team add-worker --team ${teamName} --name <new-name> --agent-type ${agentType} --cwd <repo-root> --worktree <branch> --description "<one line: what it owns>" --extra-prompt "<the brief below>"\`
   This creates \`<repo-root>/.worktrees/<new-name>\` on \`<branch>\` (new or existing), boots a peer there, and every worker sees it in the \`roster\` on its next \`mailbox-list\`. The peer inherits your launch flags. ${!params.board ? 'Then hand it a ticket via send-message.' : workerRole === 'worker' ? 'Then ask pm to put its work on the board as a task assigned to it.' : 'Then put its work on the board as a task assigned to it (board-add, or board-assign to move one).'} The worktree gives it its own working tree, so neither of you has to ask the other before editing a file — git resolves the rest at merge time. Worktree cleanup after merge is the user's job, not yours.
@@ -453,7 +457,6 @@ ${params.board
         ? `land your tasks with board-land first and wait for their verdicts (fixing what a \`changes\` verdict asks is part of the task): the board holds their state and the reviewer judges them. Once they are approved, run the \`my-team-closeout\` skill (\`/workflow:my-team-closeout\`) to be retired — its message to the worker that spawned you names your tasks on the board and their verdicts instead of restating their state, and THAT worker reads them there, then either \`remove-worker\` you (all approved) or writes a resume brief (unfinished; you stay). A message whose body starts with \`[closeout]\` in YOUR inbox means a peer you spawned asks to be retired: follow the skill's receiver procedure, reading its tasks on the board; a task still in review waits for its verdict, it is not unfinished work.`
         : `run the \`my-team-closeout\` skill (\`/workflow:my-team-closeout\`) — it sends an evidence-based final report to the worker that spawned you and lets THAT worker verify, then either \`remove-worker\` you (all done) or write a resume brief (unfinished; you stay). A message whose body starts with \`[closeout]\` in YOUR inbox means a peer you spawned is reporting in: follow the skill's receiver procedure.`} Never remove yourself.
 - If blocked, write {"state": "blocked", "reason": "..."} to your status file and surface the block in this pane's stdout so the user sees it.
-- Trust asynchrony: when you need an answer from a peer, send with \`expects_reply: true\` and continue your own work. Never invent a "faster path" that pushes text directly into a peer's pane.
 
 ${agentTypeGuidance(agentType)}
 

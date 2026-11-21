@@ -24,19 +24,6 @@ import { join } from 'path';
 import { sanitizePromptContent } from './prompt-helpers.js';
 import { formatOmcCliInvocation } from './cli-rendering.js';
 
-const DEFAULT_INSTRUCTION_STATE_ROOT = '.omc/state';
-
-function buildInstructionPath(...parts) {
-    return join(...parts).replaceAll('\\', '/');
-}
-
-function buildTeamStateInstructionPath(teamName, instructionStateRoot, ...teamRelativeParts) {
-    const baseParts = instructionStateRoot === DEFAULT_INSTRUCTION_STATE_ROOT
-        ? [instructionStateRoot, 'team', teamName]
-        : [instructionStateRoot];
-    return buildInstructionPath(...baseParts, ...teamRelativeParts);
-}
-
 function agentTypeGuidance(agentType) {
     const teamApiCommand = formatOmcCliInvocation('team api');
     switch (agentType) {
@@ -236,13 +223,12 @@ function knowledgeGuidance(knowledge) {
 export function generateWorkerOverlay(params) {
     const { teamName, workerName, agentType, bootstrapInstructions } = params;
     const workerRole = params.workerRole ?? null;
-    const instructionStateRoot = params.instructionStateRoot ?? DEFAULT_INSTRUCTION_STATE_ROOT;
     const teamRoster = Array.isArray(params.teamRoster) ? params.teamRoster : [];
     const orchestratorNames = teamRoster
         .filter((p) => p.teamRole === 'orchestrator')
         .map((p) => p.name);
 
-    const statusPath = buildTeamStateInstructionPath(teamName, instructionStateRoot, 'workers', workerName, 'status.json');
+    const statusPath = join(params.instructionStateRoot, 'workers', workerName, 'status.json').replaceAll('\\', '/');
 
     const mailboxListCommand = formatOmcCliInvocation(`team api mailbox-list --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\"}" --json`);
     const mailboxDeliveredCommand = formatOmcCliInvocation(`team api mailbox-mark-delivered --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\",\\"message_id\\":\\"<id>\\"}" --json`);
@@ -266,7 +252,7 @@ export function generateWorkerOverlay(params) {
 
     return `# Team Worker Protocol
 
-You are one of N workers collaborating peer-to-peer. The user observes each
+You are one of the workers in team ${teamName}. The user observes each
 pane directly and types instructions into your pane when they want you to act.
 Other workers reach you through your mailbox.
 

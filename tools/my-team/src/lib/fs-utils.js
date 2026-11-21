@@ -23,10 +23,6 @@ export function atomicWriteJson(filePath, data, mode = 0o600) {
     renameSync(tmpPath, filePath);
 }
 
-export function writeFileWithMode(filePath, data, mode = 0o600) {
-    writeFileSync(filePath, data, { encoding: 'utf-8', mode });
-}
-
 export function appendFileWithMode(filePath, data, mode = 0o600) {
     const fd = openSync(
         filePath,

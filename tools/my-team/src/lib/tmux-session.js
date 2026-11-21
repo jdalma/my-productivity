@@ -696,19 +696,6 @@ export async function sendToWorker(_sessionName, paneId, message) {
     }
 }
 
-export async function injectToLeaderPane(_sessionName, leaderPaneId, message) {
-    const prefixed = `[MY_TEAM_INJECT] ${message}`.slice(0, 200);
-    try {
-        if (await paneInCopyMode(leaderPaneId)) return false;
-        const captured = await capturePaneAsync(leaderPaneId);
-        if (paneHasActiveTask(captured)) {
-            await tmuxExecAsync(['send-keys', '-t', leaderPaneId, 'C-c']);
-            await sleep(250);
-        }
-    } catch { /* best-effort */ }
-    return sendToWorker('', leaderPaneId, prefixed);
-}
-
 function isTmuxPaneNotFoundError(error) {
     const err = error;
     const text = [err?.stderr, err?.stdout, err?.message]
@@ -770,11 +757,6 @@ export async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, 
         } catch { /* best effort */ }
     }
     try { await tmuxExecAsync(['kill-session', '-t', sessionTarget]); } catch { /* gone */ }
-}
-
-/** True if pane id matches the `%N` tmux pane-id format. */
-export function isPaneId(value) {
-    return typeof value === 'string' && /^%\d+$/.test(value.trim());
 }
 
 export { existsSync };

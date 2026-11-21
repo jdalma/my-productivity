@@ -1,12 +1,8 @@
 /**
  * State root resolution for my-team.
  *
- * Replaces OMC's `dist/utils/config-dir.js` (`getClaudeConfigDir`). Instead of
- * defaulting to `~/.claude`, my-team uses `~/.my-team/sessions` and honours
- * `MY_TEAM_STATE_ROOT_BASE` as an override.
- *
- * Per-session callers can also call `setStateRoot()` once at startup so that
- * OMC modules which still call `getClaudeConfigDir()` see the same path.
+ * Defaults to `~/.my-team/sessions` and honours `MY_TEAM_STATE_ROOT_BASE` as
+ * an override. Per-session callers call `setStateRoot()` once at startup.
  */
 
 import { homedir } from 'os';
@@ -42,13 +38,3 @@ export function getStateRootBase() {
     return normalize(join(homedir(), '.my-team', 'sessions'));
 }
 
-/**
- * OMC compatibility shim. The originally-borrowed OMC modules that called this
- * (inbox-outbox, outbox-reader, task-file-ops) have all been removed in the
- * option-B cutover, so this export currently has no in-tree callers. Kept as a
- * one-line forwarder in case a future OMC-borrowed module needs the same
- * config-dir indirection.
- */
-export function getClaudeConfigDir() {
-    return getStateRootBase();
-}

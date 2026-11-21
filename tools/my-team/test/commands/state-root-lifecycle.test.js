@@ -1,7 +1,7 @@
 /**
  * A team's state_root across runs (T51): `shutdown` only ends the tmux side and
  * leaves state_root as it is; `start` begins a new team, moving a previous
- * state_root to <state_root>.bak (one generation); `start --continue` keeps it,
+ * state_root to <state_root>.<timestamp>.bak; `start --continue` keeps it,
  * so mail, work files and events carry over. isSafeToWipe guards the move.
  */
 
@@ -9,10 +9,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync, chmodSync } from 'fs';
 import { tmpdir, homedir } from 'os';
-import { join } from 'path';
+import { join, dirname, basename } from 'path';
 
-import { isSafeToWipe, backupAndRemoveStateRoot, prepareStateRoot, runStart } from '../../src/commands/start.js';
+import { createSqliteStore } from '../../src/board/store/sqlite/index.js';
+
+import { isSafeToWipe, backupAndRemoveStateRoot, backupPathFor, prepareStateRoot, unfinishedBoardSummary, runStart } from '../../src/commands/start.js';
 import { runShutdown } from '../../src/commands/shutdown.js';
+
+const sqlite = await import('node:sqlite').catch(() => null);
+const needsSqlite = sqlite ? {} : { skip: 'node:sqlite needs Node >= 22.13' };
+
+/** The timestamped backups of `stateRoot`, oldest name first. */
+const backups = (stateRoot) => readdirSync(dirname(stateRoot))
+    .filter((n) => n.startsWith(`${basename(stateRoot)}.`) && n.endsWith('.bak')).sort().map((n) => join(dirname(stateRoot), n));
 
 const MAIL = '{"schema_version":2,"messages":[{"message_id":"m1","body":"not delivered yet"}]}';
 
@@ -48,13 +57,14 @@ test('isSafeToWipe accepts a deep session state_root', () => {
     assert.equal(isSafeToWipe('/a/b/c'), true); // exactly 3 segments — the floor
 });
 
-test('backupAndRemoveStateRoot moves state_root to .bak and clears original', async () => {
+test('backupAndRemoveStateRoot moves state_root to a timestamped .bak and clears original', async () => {
     const { base, stateRoot } = makeStateRoot();
     try {
-        const bak = `${stateRoot}.bak`;
         const res = await backupAndRemoveStateRoot(stateRoot);
+        const bak = res.backedUpTo;
 
-        assert.equal(res.backedUpTo, bak);
+        assert.match(bak, new RegExp(`^${stateRoot}\\.\\d{8}-\\d{9}(-\\d+)?\\.bak$`));
+        assert.deepEqual(backups(stateRoot), [bak]);
         assert.equal(existsSync(stateRoot), false, 'original removed');
         assert.equal(existsSync(bak), true, 'backup exists');
         // Content preserved in the backup.
@@ -88,19 +98,21 @@ test('backupAndRemoveStateRoot preserves state when the backup rename fails', as
     }
 });
 
-test('backupAndRemoveStateRoot keeps exactly one generation (old .bak replaced)', async () => {
+test('a second backup keeps the first one (and a leftover plain .bak)', async () => {
     const { base, stateRoot } = makeStateRoot();
     try {
-        const bak = `${stateRoot}.bak`;
-        // Simulate a leftover .bak from a previous shutdown with stale content.
-        mkdirSync(bak, { recursive: true });
-        writeFileSync(join(bak, 'events.jsonl'), '{"ts":"OLD-stale"}\n', 'utf-8');
+        mkdirSync(`${stateRoot}.bak`, { recursive: true });
+        writeFileSync(join(`${stateRoot}.bak`, 'events.jsonl'), '{"ts":"OLD-stale"}\n', 'utf-8');
 
-        await backupAndRemoveStateRoot(stateRoot);
+        const first = (await backupAndRemoveStateRoot(stateRoot)).backedUpTo;
+        mkdirSync(stateRoot, { recursive: true });
+        writeFileSync(join(stateRoot, 'events.jsonl'), '{"ts":"run-2"}\n', 'utf-8');
+        const second = (await backupAndRemoveStateRoot(stateRoot)).backedUpTo;
 
-        // The old .bak must be gone, replaced by the current run's state.
-        assert.equal(readFileSync(join(bak, 'events.jsonl'), 'utf-8'), '{"ts":"run-1"}\n');
-        assert.equal(existsSync(stateRoot), false);
+        assert.notEqual(first, second);
+        assert.equal(readFileSync(join(first, 'events.jsonl'), 'utf-8'), '{"ts":"run-1"}\n');
+        assert.equal(readFileSync(join(second, 'events.jsonl'), 'utf-8'), '{"ts":"run-2"}\n');
+        assert.equal(readFileSync(join(`${stateRoot}.bak`, 'events.jsonl'), 'utf-8'), '{"ts":"OLD-stale"}\n');
     } finally {
         rmSync(base, { recursive: true, force: true });
     }
@@ -131,7 +143,7 @@ test('runShutdown ends the tmux side only: state_root, mail and work files stay,
         const took = Date.now() - t0;
         assert.deepEqual(killed, ['my-team-demo-team-zz:0'], 'the team session is killed right away');
         assert.ok(took < 5000, `shutdown took ${took}ms: a grace wait is back`);
-        assert.equal(existsSync(`${stateRoot}.bak`), false, 'nothing moved to .bak');
+        assert.deepEqual(backups(stateRoot), [], 'nothing moved to .bak');
         assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL, 'mail kept');
         assert.equal(readFileSync(join(stateRoot, 'work', 'notes.md'), 'utf-8'), 'half done\n', 'work kept');
         assert.equal(existsSync(join(stateRoot, 'manifest.json')), true, 'manifest kept: status reads the team as stopped');
@@ -158,9 +170,80 @@ test('a new team (no --continue) moves the previous state_root to .bak and start
         await prepareStateRoot(stateRoot, { keep: false });
         out.restore();
         assert.deepEqual(readdirSync(stateRoot), [], 'starts empty');
-        assert.equal(readFileSync(join(`${stateRoot}.bak`, 'mailbox', 'alice.json'), 'utf-8'), MAIL, 'previous run kept in .bak');
+        assert.equal(readFileSync(join(backups(stateRoot)[0], 'mailbox', 'alice.json'), 'utf-8'), MAIL, 'previous run kept in .bak');
         assert.ok(out.lines.some((l) => l.includes('.bak')), 'says where the previous state went');
     } finally {
+        out.restore();
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+const AT = '2026-11-21T00:00:00.000Z';
+const row = (extra) => ({ created_at: AT, created_by: 'pm', ...extra });
+
+/** A board.db under `stateRoot` with 2 open + 1 backlog + 1 fixed finding, 2 live + 1 done task, 1 open + 1 answered decision. */
+async function seedBoard(stateRoot) {
+    const store = createSqliteStore(join(stateRoot, 'board.db'));
+    await store.open();
+    const finding = (id, state) => ({ kind: 'finding', row: row({ id, verdict_id: 'R1', task_id: 'T1', severity: 'must', summary: 's', repro: 'r', state }) });
+    const task = (id, state) => ({ kind: 'task', row: row({ id, title: id, state, priority: 1 }) });
+    const brief = { question: 'A or B?' };
+    await store.apply({ creates: [
+        task('T1', 'doing'), task('T2', 'new'), task('T3', 'done'),
+        finding('R1 M1', 'open'), finding('R1 M2', 'open'), finding('R1 L1', 'backlog'), finding('R1 L2', 'fixed'),
+        { kind: 'decision', row: row({ id: 'D1', tasks: ['T1'], brief, state: 'open', answer: null }) },
+        { kind: 'decision', row: row({ id: 'D2', tasks: ['T1'], brief, state: 'answered', answer: { chosen: 'A', answer: 'a', answered_by: 'user', answered_at: AT } }) },
+    ] });
+    await store.close();
+}
+
+test('unfinishedBoardSummary counts what is still open, and is null without a board.db', needsSqlite, async () => {
+    const { base, stateRoot } = makeStateRoot();
+    try {
+        assert.equal(await unfinishedBoardSummary(stateRoot), null);
+        await seedBoard(stateRoot);
+        assert.equal(await unfinishedBoardSummary(stateRoot),
+            'board.db: open finding 2, backlog finding 1, unfinished task 2, open decision 1');
+    } finally {
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+test('a new team prints the unfinished board state and the .bak path to stderr before moving, and the board comes along unchanged', needsSqlite, async () => {
+    const { base, stateRoot } = makeStateRoot();
+    await seedBoard(stateRoot);
+    const out = quiet();
+    const errs = [];
+    const savedErr = console.error;
+    console.error = (...a) => { errs.push(a.join(' ')); };
+    try {
+        await prepareStateRoot(stateRoot, { keep: false });
+        out.restore();
+        console.error = savedErr;
+        const [bak] = backups(stateRoot);
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].includes('open finding 2, backlog finding 1, unfinished task 2, open decision 1'), errs[0]);
+        assert.ok(errs[0].includes(bak), 'names the path it moves to');
+        assert.equal(existsSync(join(bak, 'board.db')), true);
+        assert.deepEqual(readdirSync(bak).filter((n) => n.startsWith('board.db') && n !== 'board.db'), [], 'a read-only look leaves no -wal, -shm or migration copy');
+    } finally {
+        console.error = savedErr;
+        out.restore();
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+test('a new team without a board.db prints no summary', async () => {
+    const { base, stateRoot } = makeStateRoot();
+    const out = quiet();
+    const errs = [];
+    const savedErr = console.error;
+    console.error = (...a) => { errs.push(a.join(' ')); };
+    try {
+        await prepareStateRoot(stateRoot, { keep: false });
+        assert.deepEqual(errs, []);
+    } finally {
+        console.error = savedErr;
         out.restore();
         rmSync(base, { recursive: true, force: true });
     }
@@ -173,7 +256,7 @@ test('--continue keeps mail (undelivered too), work files and events as they are
         assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL);
         assert.equal(readFileSync(join(stateRoot, 'work', 'notes.md'), 'utf-8'), 'half done\n');
         assert.equal(readFileSync(join(stateRoot, 'events.jsonl'), 'utf-8'), '{"ts":"run-1"}\n');
-        assert.equal(existsSync(`${stateRoot}.bak`), false);
+        assert.deepEqual(backups(stateRoot), []);
     } finally {
         rmSync(base, { recursive: true, force: true });
     }
@@ -275,7 +358,7 @@ test('a new start is refused while the team of the same state_root runs, and its
     try {
         await assert.rejects(runStart({ config }, { listPanes: async () => live }), /already running/);
         assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL);
-        assert.equal(existsSync(`${stateRoot}.bak`), false);
+        assert.deepEqual(backups(stateRoot), []);
         // stopped: only the host pane is left, so a dry run goes through
         const plan = await runStart({ config, dryRun: true }, { listPanes: async () => [live[0]] });
         assert.equal(plan.dryRun, true);
@@ -295,7 +378,7 @@ test('a new start is refused when tmux cannot say whether the team runs, and its
     try {
         await assert.rejects(runStart({ config }, { listPanes: async () => { throw new Error('lost server'); } }), /lost server/);
         assert.equal(readFileSync(join(stateRoot, 'mailbox', 'alice.json'), 'utf-8'), MAIL);
-        assert.equal(existsSync(`${stateRoot}.bak`), false);
+        assert.deepEqual(backups(stateRoot), []);
     } finally {
         delete process.env.MY_TEAM_STATE_ROOT_BASE;
         delete process.env.MY_TEAM_STATE_ROOT;

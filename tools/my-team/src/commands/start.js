@@ -37,6 +37,9 @@ import { protocolReloadHook } from '../lib/protocol-reload.js';
 import { listPanes, runningByManifest } from '../lib/team-liveness.js';
 import { sendStartupNotices, startupNotice } from '../lib/startup-notice.js';
 import { mailAndState } from './status.js';
+import { decisionsOf } from '../board/core/queries.js';
+import { TERMINAL } from '../board/core/rules.js';
+import { openBoardFileReadonly } from '../board/compose.js';
 
 /** AGENT_TYPE → CLI binary name + install hint. */
 export const AGENT_CLI = {
@@ -92,10 +95,17 @@ export function isSafeToWipe(stateRoot) {
     return true;
 }
 
+/** Where `stateRoot` is backed up now: `<stateRoot>.<yyyymmdd-hhmmssmmm>.bak`; still ends in `.bak`, which status skips. */
+export function backupPathFor(stateRoot) {
+    const stamp = new Date().toISOString().replace(/[-:.]/g, '').replace('T', '-').replace('Z', '');
+    let path = `${stateRoot}.${stamp}.bak`;
+    for (let n = 2; existsSync(path); n++) path = `${stateRoot}.${stamp}-${n}.bak`;
+    return path;
+}
+
 /**
- * Back up `stateRoot` to `<stateRoot>.bak` (one generation), leaving it gone
- * from its original location. A pre-existing `.bak` is removed first so we keep
- * exactly one prior generation.
+ * Back up `stateRoot` to `<stateRoot>.<timestamp>.bak`, leaving it gone from its original location. The
+ * timestamp keeps every earlier backup: a second restart no longer replaces the first one's board.
  *
  * The user chose to always keep a backup, so if the atomic rename fails (e.g.
  * EXDEV across filesystems) we do NOT delete the state — we preserve it and
@@ -104,11 +114,7 @@ export function isSafeToWipe(stateRoot) {
  *
  * Returns { backedUpTo } on success, or { backedUpTo: null, error } on failure.
  */
-export async function backupAndRemoveStateRoot(stateRoot) {
-    const bakPath = `${stateRoot}.bak`;
-    if (existsSync(bakPath)) {
-        try { await rm(bakPath, { recursive: true, force: true }); } catch { /* ignore */ }
-    }
+export async function backupAndRemoveStateRoot(stateRoot, bakPath = backupPathFor(stateRoot)) {
     try {
         await rename(stateRoot, bakPath);
         return { backedUpTo: bakPath };
@@ -118,9 +124,33 @@ export async function backupAndRemoveStateRoot(stateRoot) {
 }
 
 /**
+ * What a board.db under `stateRoot` still holds that a restart moves aside: open and backlog findings,
+ * tasks not done or cancelled, open decisions. Read only (the store opens readonly, so no migration and no
+ * write lock). Null when there is no board.db; a line saying so when it cannot be read.
+ */
+export async function unfinishedBoardSummary(stateRoot) {
+    const file = join(stateRoot, 'board.db');
+    if (!existsSync(file)) return null;
+    let store;
+    try {
+        store = await openBoardFileReadonly(file);
+        const findings = await store.list('finding', { state: ['open', 'backlog'] });
+        const tasks = (await store.list('task', {})).filter((t) => !TERMINAL.includes(t.state));
+        const log = await store.logSince(0, Number.MAX_SAFE_INTEGER);
+        const decisions = decisionsOf(log, tasks, await store.list('decision', {})).filter((d) => d.state === 'open');
+        const n = (state) => findings.filter((f) => f.state === state).length;
+        return `board.db: open finding ${n('open')}, backlog finding ${n('backlog')}, unfinished task ${tasks.length}, open decision ${decisions.length}`;
+    } catch (err) {
+        return `board.db could not be read (${err.message})`;
+    } finally {
+        await store?.close();
+    }
+}
+
+/**
  * Readies `stateRoot` for a run. A new team (`keep` false) never inherits a
  * previous run's mail, work files or events: an existing state_root moves to
- * <state_root>.bak first, and the start stops if it cannot. `keep` (--continue)
+ * <state_root>.<timestamp>.bak first, and the start stops if it cannot. `keep` (--continue)
  * uses it as it is, or starts a new team when there is none.
  */
 export async function prepareStateRoot(stateRoot, { keep }) {
@@ -132,9 +162,12 @@ export async function prepareStateRoot(stateRoot, { keep }) {
         if (!isSafeToWipe(stateRoot)) {
             throw new Error(`state_root ${stateRoot} looks unsafe to move aside. Clear it manually, or pass --continue to keep it.`);
         }
-        const { backedUpTo, error } = await backupAndRemoveStateRoot(stateRoot);
+        const bakPath = backupPathFor(stateRoot);
+        const summary = await unfinishedBoardSummary(stateRoot);
+        if (summary) console.error(`[my-team] ${summary}. Moving the previous state to ${bakPath} (--continue keeps it in place).`);
+        const { backedUpTo, error } = await backupAndRemoveStateRoot(stateRoot, bakPath);
         if (!backedUpTo) {
-            throw new Error(`Could not move the previous state ${stateRoot} to .bak (${error?.message}); it is kept. Clear it manually, or pass --continue to keep it.`);
+            throw new Error(`Could not move the previous state ${stateRoot} to a .bak (${error?.message}); it is kept. Clear it manually, or pass --continue to keep it.`);
         }
         console.log(`[my-team] New team: the previous state moved to ${backedUpTo}.`);
     }

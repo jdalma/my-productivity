@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scripts-and-my-team:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: my-team
+        working-directory: tools/my-team
+        run: |
+          npm ci
+          npm test
+      - name: scripts
+        run: |
+          sh scripts/public-scan.test.sh
+          sh scripts/push-gate.test.sh
+      - name: workflow skill scripts
+        run: |
+          for t in plugins/workflow/skills/*/scripts/test_*.py; do
+            (cd "$(dirname "$t")" && python3 "$(basename "$t")")
+          done
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      control-tower: ${{ steps.filter.outputs.control-tower }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            control-tower:
+              - 'tools/control-tower/**'
+
+  control-tower:
+    needs: changes
+    if: needs.changes.outputs.control-tower == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: tools/control-tower
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install tmux
+      - run: swift build
+      - run: swift test

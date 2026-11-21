@@ -1,5 +1,7 @@
 # 플러그인 비교 분석 — my-claude-plugin 개선 관점
 
+> **ARCHIVED (2026-11-21)**: 2026-06 시점의 비교 기록이다. 아래 §3의 `plugins/workflow/lib/check-state-matrix.mjs`(4-에셋 매트릭스 동일성 검사기)와 orchestrator 모듈은 현재 레포에 없다. 설계 선택의 근거와 비채택 판단만 참고하고, 현재 구조는 루트 `CLAUDE.md`를 따른다.
+
 > 출처: `plugin-analysis` 멀티워커 세션 (2026-06-03~04). 4개 워커(my-claude-plugin / oh-my-claudecode / gajae-code / oh-my-openagent)가 각 플러그인을 분석하고 교차 비교.
 > 목적: my-claude-plugin(workflow·my-team·orchestrator)의 설계 선택을 외부 플러그인과 대조해 **개선건과 비채택 근거를 영속 기록**. (세션 디렉터리는 팀 종료 시 휘발하므로 repo로 이관.)
 > 이 문서는 자급식 요약이다 — 세션 경로에 의존하지 않는다.

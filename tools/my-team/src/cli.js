@@ -69,7 +69,10 @@ function parseApiInput(opts) {
  */
 async function boardRun(opts, fn) {
     try {
-        emit(await fn(parseApiInput(opts)), opts.json);
+        const result = await fn(parseApiInput(opts));
+        emit(result, opts.json);
+        // the JSON result carries `warnings`; without --json each is also a stderr line (docs/board.md, Warnings)
+        if (!opts.json) for (const w of result?.warnings ?? []) console.error(`[my-team] warning: ${w}`);
     } catch (err) {
         const code = typeof err?.code === 'string' && !err.code.startsWith('ERR_') ? err.code : 'error';
         if (opts.json) console.log(JSON.stringify({ ok: false, code, message: err.message }));

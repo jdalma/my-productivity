@@ -1256,3 +1256,29 @@ both('a document task: its mark does not change while a report waits for its ver
     const l = await b.as('core').land(land('T1a', H('1')));
     assert.deepEqual([l.landing.base_commit, l.landing.commits], [BASE, [H('1')]]);
 });
+
+// warnings: advice in `warnings`, the command goes through (E23, E24, E25)
+
+both('add: no reviewer, or pm as reviewer, is a warning; another worker as reviewer is none (E23)', async (setup) => {
+    const b = await setup();
+    const none = await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core' });
+    assert.match(none.warnings[0], /no reviewer: pm judges T1/);
+    const pm = await b.as('pm').add({ id: 'T2', title: 't', assignee: 'core', reviewer: 'pm' });
+    assert.match(pm.warnings[0], /reviewer pm is the team's pm/);
+    assert.equal((await b.store.get('task', 'T2')).reviewer, 'pm');
+    assert.equal((await b.as('pm').add({ id: 'T3', title: 't', assignee: 'app', reviewer: 'rv' })).warnings, undefined);
+});
+
+both('assign: changing the reviewer to pm or to none is a warning; changing only the assignee is none (E23)', async (setup) => {
+    const b = await setup();
+    await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
+    assert.match((await b.as('pm').assign({ id: 'T1', reviewer: 'pm' })).warnings[0], /reviewer pm is the team's pm/);
+    assert.match((await b.as('pm').assign({ id: 'T1', reviewer: null })).warnings[0], /no reviewer/);
+    assert.equal((await b.as('pm').assign({ id: 'T1', reviewer: 'rv' })).warnings, undefined);
+    assert.equal((await b.as('pm').assign({ id: 'T1', assignee: 'app' })).warnings, undefined);
+});
+
+both('a team with no roles has no independent reviewer to ask for: no reviewer warning (E23)', async (setup) => {
+    const b = await setup({ roster: [{ name: 'a' }, { name: 'b' }] });
+    assert.equal((await b.as('a').add({ id: 'T1', title: 't', assignee: 'b' })).warnings, undefined);
+});

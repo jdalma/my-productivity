@@ -108,6 +108,12 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
     const pms = () => pmsOf(team());
     const isPm = (name) => pms().includes(name);
     const member = (name, what) => (names().includes(name) ? name : fail('invalid', `${what} '${name}' is not in the team`));
+    /** The line when the reviewer is pm or missing, so pm judges its own work; a team with no roles has no one else to ask. */
+    const reviewerWarning = (reviewer, id) => {
+        if (pms().length === names().length) return null;
+        if (!reviewer) return `no reviewer: pm judges ${id}; name a worker other than pm`;
+        return pms().includes(reviewer) ? `reviewer ${reviewer} is the team's pm, who also plans the work; name a worker other than pm` : null;
+    };
     const needPm = () => { if (!isPm(actor)) fail('forbidden', `${actor} is not the team's pm`); };
 
     async function attempt(build) {
@@ -137,7 +143,12 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
         if (to.length) {
             try { warnings.push(...(await notify(to, plan.ref, plan.action))); } catch (err) { warnings.push(`notify: ${err.message}`); }
         }
-        return { ok: true, ...plan.result(applied), notified: to, ...(warnings.length ? { warning: warnings.join('; ') } : {}) };
+        // `warning` is what went wrong after the write; `warnings` is advice on the input (E23 to E25), one line each
+        const advice = (plan.warnings ?? []).filter(Boolean);
+        return {
+            ok: true, ...plan.result(applied), notified: to,
+            ...(warnings.length ? { warning: warnings.join('; ') } : {}), ...(advice.length ? { warnings: advice } : {}),
+        };
     }
 
     /** The user's choice: one of the options' labels, 기타, or 철회 where it may close the question. */
@@ -247,6 +258,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 changes: { creates: [{ kind: 'task', row }], updates, log: [log('add', 'task', id, { state_to: state })] },
                 notify: [assignee],
                 warning: assignee && loadWarning([...tasks, row], team(), assignee),
+                warnings: [reviewerWarning(reviewer, id)],
                 result: () => ({ task: { ...row, version: 1 } }),
             };
         }),
@@ -316,6 +328,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             return {
                 action: 'assign', kind: 'task', ref: task.id, states,
                 warning: addsLoad && loadWarning((await store.list('task', {})).map(after), team(), assignee),
+                warnings: [input.reviewer !== undefined && reviewerWarning(reviewer, task.id)],
                 changes: { updates: [touch('task', task, patch)], log: [log('assign', 'task', task.id, { ...states, detail: { form, assignee, reviewer, was: task.assignee } })] },
                 notify,
                 result: () => ({ task: { ...task, ...patch, ...stamp(), version: task.version + 1 } }),

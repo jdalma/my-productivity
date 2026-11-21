@@ -72,6 +72,25 @@ export function loadWarning(tasks, roster, assignee) {
     return `${assignee} now has ${n} tasks in hand (ready, doing or changes) while ${idle.join(', ')} ${idle.length > 1 ? 'have' : 'has'} none: split the task or give it to ${idle.length > 1 ? 'one of them' : idle[0]}`;
 }
 
+/**
+ * Bounds for warnings, from the boards of 6 teams (87 briefs): question p95 is 120 characters (max 139), context
+ * p95 is about 1000 (median 207, max 2988). A team's askers held 1 open decision at most, except the three that
+ * put 4, 8 and 13 on the board at once and waited hours for an answer: more than 3 open is a pile.
+ */
+export const QUESTION_MAX = 120;
+export const CONTEXT_MAX = 1000;
+export const OPEN_DECISIONS_MAX = 3;
+
+/** The lines board-ask and board-wait give when a brief is long or its asker has many open decisions: `open` counts this one. */
+export function briefWarnings({ question, context }, asker, open) {
+    const out = [];
+    const q = [...question].length, c = [...context].length;
+    if (q > QUESTION_MAX) out.push(`question is ${q} chars (over ${QUESTION_MAX}): the user decides faster from a one-line question`);
+    if (c > CONTEXT_MAX) out.push(`context is ${c} chars (over ${CONTEXT_MAX}): keep what the decision needs and point to a file for the rest`);
+    if (open > OPEN_DECISIONS_MAX) out.push(`${asker} now has ${open} open decisions, more than ${OPEN_DECISIONS_MAX}: decisions asked together tend to wait unanswered; ask the one that blocks work first`);
+    return out;
+}
+
 export function move(name, task) {
     const m = TASK_MOVES[name];
     if (!m.from.includes(task.state)) {

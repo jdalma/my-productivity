@@ -245,6 +245,11 @@ the event log. None of these refuses a command.
 | Command | Warns when |
 |---|---|
 | `board-add`, `board-assign` that changes the reviewer | `reviewer` is missing, so pm judges, or is a pm. A team that declares no roles is exempt: every worker is pm there |
+| `board-ask`, `board-wait` | `question` is over 120 characters, `context` is over 1000, or the asker then has more than 3 open decisions (its `board-ask` decisions in `open`, plus its `board-wait` tasks in `waiting`) |
+
+- The bounds come from the boards of 6 teams (87 briefs): the question's p95 is 120 characters and its maximum 139;
+  the context's median is 207, its p95 about 1000 and its maximum 2988. Askers held 1 open decision at most,
+  except three who put 4, 8 and 13 on the board at once. Change the bounds in `core/rules.js`.
 
 **Notices.** A write that concerns other workers sends each of them one mailbox line,
 `[board] <ref> <action>`. The line carries no state: the reader runs `board-inbox`. The pane trigger is typed

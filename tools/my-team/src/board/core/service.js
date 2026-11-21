@@ -20,7 +20,7 @@
 
 import {
     BoardError, COMMIT, DELIVERABLES, FINDING_CODE, FINDING_MOVES, FIXABLE, IN_HAND, SETTLED, SEVERITIES, TASK_ID, TERMINAL, VERDICTS,
-    fail, isDocument, loadWarning, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
+    briefWarnings, fail, isDocument, loadWarning, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
 } from './rules.js';
 import { pendingBacklogCloses, waitId } from './queries.js';
 
@@ -114,6 +114,9 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
         if (!reviewer) return `no reviewer: pm judges ${id}; name a worker other than pm`;
         return pms().includes(reviewer) ? `reviewer ${reviewer} is the team's pm, who also plans the work; name a worker other than pm` : null;
     };
+    /** Open decisions `name` asked: board-ask's open ones and the tasks waiting on a board-wait. */
+    const openAsked = async (name) => (await store.list('decision', {})).filter((d) => d.state === 'open' && d.created_by === name).length
+        + (await store.list('task', {})).filter((t) => t.state === 'waiting' && t.waiting?.asked_by === name).length;
     const needPm = () => { if (!isPm(actor)) fail('forbidden', `${actor} is not the team's pm`); };
 
     async function attempt(build) {
@@ -352,6 +355,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 action: 'wait', kind: 'task', ref: task.id, states,
                 changes: { updates: [touch('task', task, { state: 'waiting', waiting })], log: [log('wait', 'task', task.id, { at, ...states, detail: { question } })] },
                 notify: [...pms(), task.assignee, task.reviewer],
+                warnings: briefWarnings(waiting, actor, (await openAsked(actor)) + 1),
                 result: () => ({ task: { ...task, state: 'waiting', waiting, ...stamp(), version: task.version + 1 } }),
             };
         }),
@@ -697,6 +701,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 action: 'ask', kind: 'decision', ref: id,
                 changes: { creates: [{ kind: 'decision', row }], log: logs },
                 notify: answer ? [] : pms(),
+                warnings: answer ? [] : briefWarnings(asked, actor, (await openAsked(actor)) + 1),
                 result: () => ({ decision: { ...row, updated_at: null, updated_by: null, version: 1 } }),
             };
         }),

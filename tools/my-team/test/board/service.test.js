@@ -1282,3 +1282,24 @@ both('a team with no roles has no independent reviewer to ask for: no reviewer w
     const b = await setup({ roster: [{ name: 'a' }, { name: 'b' }] });
     assert.equal((await b.as('a').add({ id: 'T1', title: 't', assignee: 'b' })).warnings, undefined);
 });
+
+both('ask: a question over 120 characters or a context over 1000 is a warning; the decision is made (E24)', async (setup) => {
+    const b = await setup();
+    assert.equal((await b.as('core').ask(ask(undefined, 'x'.repeat(120)))).warnings, undefined);
+    const r = await b.as('core').ask(ask(undefined, 'x'.repeat(121), { context: 'c'.repeat(1001) }));
+    assert.deepEqual(r.warnings.map((w) => w.slice(0, 21)), ['question is 121 chars', 'context is 1001 chars']);
+    assert.equal((await b.store.get('decision', r.decision.id)).state, 'open');
+});
+
+both('ask and wait: a fourth open decision of one asker is a warning; others\' and answered ones do not count (E24)', async (setup) => {
+    const b = await setup();
+    for (let i = 0; i < 3; i++) assert.equal((await b.as('core').ask(ask())).warnings, undefined);
+    assert.equal((await b.as('app').ask(ask())).warnings, undefined, 'another asker');
+    const r = await b.as('core').ask(ask());
+    assert.match(r.warnings[0], /core now has 4 open decisions, more than 3/);
+    await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
+    assert.match((await b.as('core').wait(ask('T1'))).warnings[0], /core now has 5 open decisions/);
+    await b.as('pm').answer({ id: 'D#1', chosen: 'A', answer: 'a' });
+    await b.as('pm').add({ id: 'T2', title: 't', assignee: 'core', reviewer: 'rv' });
+    assert.match((await b.as('core').wait(ask('T2'))).warnings[0], /core now has 5 open decisions/, 'D#1 answered, T1 still waits');
+});

@@ -154,7 +154,9 @@ function dropSpoolMessage(teamName, toWorker, cwd, message, recipientStateRoot) 
 
 /**
  * Absorb all messages from a worker's incoming-spool into its mailbox.inbox.
- * Each spool file is deleted after its contents are merged. Resolves
+ * Spool files are deleted only after the mailbox write succeeds, so a crash or
+ * a failed write leaves them for the next call; re-absorbing is idempotent
+ * because inbox is keyed by message_id. Resolves
  * sent_pending entries when an absorbed message carries a known reply_to.
  *
  * Returns the list of absorbed message_ids (for logging / debugging).
@@ -173,6 +175,7 @@ export async function absorbIncomingSpool(teamName, workerName, cwd) {
 
     const mailbox = await readMailboxFile(teamName, workerName, cwd);
     const absorbed = [];
+    const absorbedFiles = [];
     for (const filename of jsonFiles) {
         const filePath = join(dir, filename);
         let payload;
@@ -205,10 +208,13 @@ export async function absorbIncomingSpool(teamName, workerName, cwd) {
             delete mailbox.sent_pending[payload.reply_to];
         }
         absorbed.push(payload.message_id);
-        try { await unlink(filePath); } catch { /* ignore */ }
+        absorbedFiles.push(filePath);
     }
     if (absorbed.length > 0) {
         await writeMailboxFile(teamName, workerName, cwd, mailbox);
+    }
+    for (const filePath of absorbedFiles) {
+        try { await unlink(filePath); } catch { /* ignore */ }
     }
     return absorbed;
 }

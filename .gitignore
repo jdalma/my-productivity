@@ -11,3 +11,6 @@ docs/handoffs/
 
 # my-team 워커별 스킬 스택 (서드파티 플러그인 복사본·clone). public 레포에 커밋 금지
 stack/
+
+# 병렬 작업용 git worktree
+.worktrees/

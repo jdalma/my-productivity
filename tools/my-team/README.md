@@ -6,7 +6,7 @@ Adapted from [`oh-my-claude-sisyphus`](https://github.com/Yeachan-Heo/oh-my-clau
 
 ## Status
 
-**WIP** — see `PLAN.md` for the full 31-criterion acceptance set and implementation phases.
+In use. The commands, the mailbox protocol and the board (`board.db`, needs Node 22.13+ for `node:sqlite`) below are implemented and covered by `npm test`. `PLAN.md` is the original design record and is no longer kept in step with the code; `docs/architecture.md` and `docs/board.md` describe the current behaviour.
 
 ## Install
 
@@ -24,7 +24,7 @@ that are running until you deploy again. First install and update are the same c
 installs somewhere else (for a trial). Do not `npm link`: it makes every saved edit live for every team.
 
 Requires:
-- Node.js ≥ 20
+- Node.js ≥ 22.13 (the board needs `node:sqlite`; on Node 20 or 22 before 22.13 only the board commands fail)
 - `tmux`
 - At least one of: `claude`, `codex`, `gemini`, `cursor-agent` on PATH
 

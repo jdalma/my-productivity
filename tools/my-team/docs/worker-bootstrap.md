@@ -8,7 +8,7 @@
 >
 > **세션 도중 합류하는 워커**(`add-worker`)의 주입 프롬프트와 role 게이트·보고 빈도 분석은 [`add-worker-prompts.md`](add-worker-prompts.md).
 >
-> **관련 다이어그램**: peer 메시지 흐름의 현행 시각 자료는 [`worker-message-flow.html`](worker-message-flow.html)(브라우저로 열기). [`diagrams/communication-flow.excalidraw`](diagrams/communication-flow.excalidraw)는 옵션 B 이전(inbox.md 시대)을 묘사한다 — peer mailbox 사이클 부분만 그대로 유효한 구버전.
+> **관련 다이어그램**: peer 메시지 흐름의 현행 시각 자료는 [`worker-message-flow.html`](worker-message-flow.html)(브라우저로 열기). 옵션 B 이전(inbox.md 시대)의 excalidraw 다이어그램은 삭제됐다.
 
 ---
 

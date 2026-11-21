@@ -11,7 +11,7 @@
 >
 > **시각 다이어그램**:
 > - [`worker-message-flow.html`](worker-message-flow.html) — **현행 모델 기준** peer 메시지 흐름을 한 장으로 보여주는 단일 HTML (브라우저로 열면 됨). spool→mailbox 데이터 흐름, ①~⑦ 단계, 설계 근거 FAQ(왜 spool이 필요한가 / 수신자 메시지 구분 / 흡수 담당) 포함.
-> - [`diagrams/communication-flow.excalidraw`](diagrams/communication-flow.excalidraw)는 옵션 B 이전(채널 4개 시대)을 묘사한다. peer mailbox 사이클(§3 이하)은 그대로 유효하지만 user→worker free-form 레인은 폐기됐다. (구버전 — 최신 시각 자료는 위 HTML 참조)
+> - 옵션 B 이전(채널 4개 시대)의 excalidraw 다이어그램은 삭제됐다. peer mailbox 사이클(§3 이하)은 그대로 유효하지만 user→worker free-form 레인은 폐기됐다.
 
 ---
 

@@ -238,7 +238,7 @@ transcripts. A response is counted once, however many lines and files it is in. 
 Build `tower-cli` in release mode first (above), then:
 
 ```tmux
-set -g status-right '#(~/IdeaProjects/my-claude-plugin/tools/control-tower/scripts/tmux-badge.sh) %H:%M'
+set -g status-right '#(~/IdeaProjects/my-productivity/tools/control-tower/scripts/tmux-badge.sh) %H:%M'
 ```
 
 Prints `my turn N` while N > 0. Prints nothing and exits 0 when N is 0 or `.build/release/tower-cli` is missing or fails.

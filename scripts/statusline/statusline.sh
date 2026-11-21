@@ -4,7 +4,7 @@
 #
 # Reads the session JSON from stdin and prints a single line:
 #
-#   ~/IdeaProjects/my-claude-plugin  feat/cli-neutral ✱  Opus 4.8  $0.42
+#   ~/IdeaProjects/my-productivity  feat/cli-neutral ✱  Opus 4.8  $0.42
 #
 # Segments (each shown only when its data is present):
 #   - cwd        : workspace.current_dir, with $HOME shortened to ~

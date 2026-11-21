@@ -35,7 +35,7 @@ import tempfile
 from pathlib import Path
 
 HOME = Path.home()
-STACK = Path(os.environ.get("MY_TEAM_STACK_DIR", HOME / "IdeaProjects" / "my-claude-plugin" / "stack"))
+STACK = Path(os.environ.get("MY_TEAM_STACK_DIR", HOME / "IdeaProjects" / "my-productivity" / "stack"))
 MARKETPLACES = Path(os.environ.get("MY_TEAM_MARKETPLACES_DIR", HOME / ".claude" / "plugins" / "marketplaces"))
 SETTINGS = Path(os.environ.get("MY_TEAM_CLAUDE_SETTINGS", HOME / ".claude" / "settings.json"))
 # Claude Code가 받아두는 공식 마켓플레이스 통계(설치 수·상주 토큰). 없으면 0으로 둔다.

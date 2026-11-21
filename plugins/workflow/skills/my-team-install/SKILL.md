@@ -34,14 +34,14 @@ command -v my-team && my-team --version 2>/dev/null || echo "not installed"
 
 설치돼 있든 아니든 다음 단계는 같다.
 
-### Step 2: my-claude-plugin 레포 위치 확인
+### Step 2: my-productivity 레포 위치 확인
 
 ```bash
 for candidate in \
-    ~/IdeaProjects/my-claude-plugin \
-    ~/Projects/my-claude-plugin \
-    ~/code/my-claude-plugin \
-    ~/src/my-claude-plugin; do
+    ~/IdeaProjects/my-productivity \
+    ~/Projects/my-productivity \
+    ~/code/my-productivity \
+    ~/src/my-productivity; do
   if [ -f "$candidate/tools/my-team/scripts/deploy.sh" ]; then
     echo "found: $candidate"
     break
@@ -52,8 +52,8 @@ done
 - 발견되면 그 경로를 쓴다.
 - 없으면 사용자에게 묻는다:
   ```
-  my-claude-plugin 레포를 어디에 clone할까요?
-  기본: ~/IdeaProjects/my-claude-plugin
+  my-productivity 레포를 어디에 clone할까요?
+  기본: ~/IdeaProjects/my-productivity
 
   답변 후:
     git clone https://github.com/jdalma/my-productivity.git <path>

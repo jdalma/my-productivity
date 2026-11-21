@@ -4,7 +4,7 @@ import Foundation
 // does (tools/my-team/src/commands/status.js). Nothing here writes, absorbs or consumes.
 
 /// `MY_TEAM_STATE_ROOT_BASE` (trimmed, `~` and `~/` expanded) or `~/.my-team/sessions`, home being `$HOME`.
-func stateRootBase(_ env: [String: String] = ProcessInfo.processInfo.environment) -> String {
+public func stateRootBase(_ env: [String: String] = ProcessInfo.processInfo.environment) -> String {
     let home = homeDirectory(env)
     let path = env["MY_TEAM_STATE_ROOT_BASE"]?.trimmed.nonEmpty.map { o in
         o == "~" ? home : o.hasPrefix("~/") ? home + o.dropFirst() : o

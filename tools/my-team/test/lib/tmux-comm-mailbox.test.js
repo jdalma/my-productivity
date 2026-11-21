@@ -177,3 +177,20 @@ test('E4: a lock left by a dead process is reclaimed', async () => {
         cleanup(ctx);
     }
 });
+
+test('E4: an empty lock left by a crash between create and write is reclaimed', () => {
+    const ctx = setupTeam();
+    process.env.MY_TEAM_MAILBOX_LOCK_WAIT_MS = '200';
+    try {
+        const file = seedMailbox(ctx, 'bob');
+        writeFileSync(`${file}.lock`, '');
+
+        updateMailbox(ctx.teamName, 'bob', ctx.base, addEntry);
+        assert.deepEqual(JSON.parse(readFileSync(file, 'utf-8')).sent_pending, { x: { message_id: 'x' } });
+        assert.deepEqual(readdirSync(join(ctx.stateRoot, 'mailbox')).filter((n) => n.includes('.lock')), [],
+            'no lock or token file left behind');
+    } finally {
+        delete process.env.MY_TEAM_MAILBOX_LOCK_WAIT_MS;
+        cleanup(ctx);
+    }
+});

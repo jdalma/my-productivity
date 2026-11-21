@@ -41,7 +41,7 @@
  *     writes are impossible.
  */
 
-import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, writeFileSync, linkSync } from 'fs';
 import { join, dirname } from 'path';
 
 import { sendToWorker } from './tmux-session.js';
@@ -139,6 +139,7 @@ function readLock(lockPath) {
 }
 
 function pidAlive(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) return false;
     try {
         process.kill(pid, 0);
         return true;
@@ -165,12 +166,20 @@ function withMailboxLock(mailboxFile, fn) {
     const token = `${process.pid}:${Math.random().toString(36).slice(2)}`;
     const waitMs = Number.parseInt(process.env.MY_TEAM_MAILBOX_LOCK_WAIT_MS ?? '', 10) || LOCK_WAIT_MS;
     const deadline = Date.now() + waitMs;
+    // The token is written to a private file first and linked into place, so the lock path never
+    // exists without its token: a crash between create and write cannot leave an empty lock.
+    const tokenFile = `${lockPath}.${token.replace(':', '-')}`;
+    writeFileSync(tokenFile, token, { mode: 0o600 });
     for (;;) {
         try {
-            writeFileSync(lockPath, token, { flag: 'wx', mode: 0o600 });
+            linkSync(tokenFile, lockPath);
+            rmSync(tokenFile, { force: true });
             break;
         } catch (err) {
-            if (err.code !== 'EEXIST') throw err;
+            if (err.code !== 'EEXIST') {
+                rmSync(tokenFile, { force: true });
+                throw err;
+            }
             const held = readLock(lockPath);
             if (held === null) continue;
             const pid = Number.parseInt(held, 10);
@@ -179,6 +188,7 @@ function withMailboxLock(mailboxFile, fn) {
                 continue;
             }
             if (Date.now() > deadline) {
+                rmSync(tokenFile, { force: true });
                 throw new Error(`mailbox lock ${lockPath} still held by live pid ${pid} after ${waitMs}ms`);
             }
             Atomics.wait(sleepCell, 0, 0, 5);

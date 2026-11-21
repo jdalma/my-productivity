@@ -14,13 +14,14 @@
  *   actor     the worker acting (resolved from MY_TEAM_WORKER by compose)
  *   now       () => ISO time
  *   git       { range(repo, base, commit) => {ancestor, commits} } — land's checks (T63e implements it)
+ *   fileExists (path) => boolean, for the ticket and report path warnings (default: every path exists)
  *   event     (fields) => Promise<boolean>, after the change is applied
  *   notify    (to[], ref, action) => Promise<string[] warnings>, after the event
  */
 
 import {
     BoardError, COMMIT, DELIVERABLES, FINDING_CODE, FINDING_MOVES, FIXABLE, IN_HAND, SETTLED, SEVERITIES, TASK_ID, TERMINAL, VERDICTS,
-    briefWarnings, fail, isDocument, loadWarning, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
+    briefWarnings, fail, isDocument, loadWarning, pathWarning, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
 } from './rules.js';
 import { pendingBacklogCloses, waitId } from './queries.js';
 
@@ -102,7 +103,7 @@ const BRIEF_FIELDS = ['question', 'context', 'options', 'recommendation', 'impac
 const asInput = (stored) => ({ ...stored, options: stored.options?.map((o) => ({ ...o, detail: o.detail || null })) });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-export function createBoard({ store, roster, actor, now, git, notify = async () => [], event = async () => true }) {
+export function createBoard({ store, roster, actor, now, git, notify = async () => [], event = async () => true, fileExists = () => true }) {
     const team = () => roster();
     const names = () => team().map((w) => w.name);
     const pms = () => pmsOf(team());
@@ -261,7 +262,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 changes: { creates: [{ kind: 'task', row }], updates, log: [log('add', 'task', id, { state_to: state })] },
                 notify: [assignee],
                 warning: assignee && loadWarning([...tasks, row], team(), assignee),
-                warnings: [reviewerWarning(reviewer, id)],
+                warnings: [reviewerWarning(reviewer, id), row.ticket_path && pathWarning('ticket', row.ticket_path, fileExists)],
                 result: () => ({ task: { ...row, version: 1 } }),
             };
         }),
@@ -299,6 +300,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 action: 'edit', kind: 'task', ref: task.id,
                 changes: { updates: [{ kind: 'task', key: task.id, expect_version: task.version, patch }], log: [log('edit', 'task', task.id, { detail: { changed } })] },
                 notify: [task.assignee, ...(task.state === 'review' || task.waiting?.resume_state === 'review' ? judgesOf(task) : [])],
+                warnings: ['ticket_path' in patch && pathWarning('ticket', patch.ticket_path, fileExists)],
                 result: () => ({ task: { ...task, ...patch, version: task.version + 1 } }),
             };
         }),
@@ -501,6 +503,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 changes: { creates: [{ kind: 'landing', row }], updates, log: [log('land', 'landing', id, { ...states, detail: { task: task.id, superseded: previous?.id ?? null } })] },
                 // the judge only: pm hears of a reviewed task at its verdict (R70 L2); and the families it fixes for
                 notify: [...judgesOf(task), ...toldOutside],
+                warnings: [pathWarning('report', report, fileExists)],
                 result: () => ({ task: { ...task, state }, landing: { ...row, superseded_by: null, version: 1 }, fixed }),
             };
         }),

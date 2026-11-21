@@ -3,7 +3,8 @@
  * A team is a board team when its manifest carries the config's `board` item; its store is then
  * <state_root>/board.db (sqlite) or a memory store (tests). A team without the item gets board-unavailable
  * before any file is touched. The write service gets its ports here: the git checks (git.js), notices through
- * the mailbox (one line, no state: `[board] <ref> <action>`; docs/board.md, Commands) and a `board` line in events.jsonl.
+ * the mailbox (one line, no state: `[board] <ref> <action>`; docs/board.md, Commands), a `board` line in events.jsonl,
+ * and the file check behind the ticket and report path warnings.
  */
 
 import { existsSync } from 'node:fs';
@@ -64,7 +65,7 @@ export function boardFor({ store, roster, manifest, actor }) {
         type: 'board', team: manifest.team_name, worker, action, kind, ref, log_seq,
         ...(state_from ? { state_from } : {}), ...(state_to ? { state_to } : {}),
     });
-    return createBoard({ store, roster: () => roster, actor, now: () => new Date().toISOString(), git: gitRange, notify, event });
+    return createBoard({ store, roster: () => roster, actor, now: () => new Date().toISOString(), git: gitRange, notify, event, fileExists: existsSync });
 }
 
 /**

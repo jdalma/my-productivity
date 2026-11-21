@@ -86,12 +86,12 @@ test('without --json a warning is a stderr line, with --json it is in the result
     }));
     const env = { ...process.env, MY_TEAM_STATE_ROOT_BASE: base, MY_TEAM_WORKER: 'demo/pm' };
     for (const k of ['OMC_TEAM_WORKER', 'MY_TEAM_STATE_ROOT', 'TMUX', 'TMUX_PANE']) delete env[k];
-    const add = (id, ...flags) => spawnSync(process.execPath, [MY_TEAM, 'api', 'board-add', '--input', JSON.stringify({ team_name: 'demo', id, title: 't', ticket: 'T.md' }), ...flags], { env, encoding: 'utf-8' });
+    const add = (id, ...flags) => spawnSync(process.execPath, [MY_TEAM, 'api', 'board-add', '--input', JSON.stringify({ team_name: 'demo', id, title: 't', reviewer: 'dev', ticket: 'T.md' }), ...flags], { env, encoding: 'utf-8' });
     const plain = add('T1');
     assert.equal(plain.status, 0, plain.stderr);
-    assert.match(plain.stderr, /\[my-team\] warning: no reviewer: pm judges T1/);
+    assert.match(plain.stderr, /\[my-team\] warning: ticket T\.md is not an absolute path/);
     const json = add('T2', '--json');
     assert.equal(json.status, 0, json.stderr);
-    assert.match(JSON.parse(json.stdout).warnings[0], /no reviewer: pm judges T2/);
+    assert.match(JSON.parse(json.stdout).warnings[0], /ticket T\.md is not an absolute path/);
     assert.doesNotMatch(json.stderr, /warning:/);
 });

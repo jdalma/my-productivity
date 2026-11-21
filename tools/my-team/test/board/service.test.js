@@ -55,6 +55,7 @@ async function setup({ roster = ROSTER } = {}, makeStore) {
         store: over.store ?? store, roster: () => roster, actor, now, git,
         notify: over.notify ?? (async (to, ref, action) => { sent.push({ to: [...to].sort(), ref, action }); return []; }),
         event: async (e) => { events.push(e); return true; },
+        ...(over.fileExists ? { fileExists: over.fileExists } : {}),
     });
     return { store, as, sent, events, ranges };
 }
@@ -1302,4 +1303,27 @@ both('ask and wait: a fourth open decision of one asker is a warning; others\' a
     await b.as('pm').answer({ id: 'D#1', chosen: 'A', answer: 'a' });
     await b.as('pm').add({ id: 'T2', title: 't', assignee: 'core', reviewer: 'rv' });
     assert.match((await b.as('core').wait(ask('T2'))).warnings[0], /core now has 5 open decisions/, 'D#1 answered, T1 still waits');
+});
+
+both('add and edit: a ticket path that is relative or missing is a warning, and it is stored all the same (E25)', async (setup) => {
+    const b = await setup();
+    const missing = (p) => ({ fileExists: (f) => f !== p });
+    const rel = await b.as('pm').add({ id: 'T1', title: 't', reviewer: 'rv', ticket: 'docs/T1.md' });
+    assert.match(rel.warnings[0], /ticket docs\/T1.md is not an absolute path.*~\/\.my-team\/docs\/<team>\//);
+    assert.equal(rel.task.ticket_path, 'docs/T1.md');
+    const gone = await b.as('pm', missing('/d/T2.md')).add({ id: 'T2', title: 't', reviewer: 'rv', ticket: '/d/T2.md' });
+    assert.match(gone.warnings[0], /ticket \/d\/T2.md does not exist/);
+    assert.equal((await b.as('pm').add({ id: 'T3', title: 't', reviewer: 'rv', ticket: '/d/T3.md' })).warnings, undefined);
+    assert.match((await b.as('pm', missing('/d/E.md')).edit({ id: 'T3', ticket: '/d/E.md' })).warnings[0], /does not exist/);
+    assert.equal((await b.as('pm', missing('/d/E.md')).edit({ id: 'T3', title: 'new' })).warnings, undefined, 'no ticket in the edit');
+});
+
+both('land: a report path that is relative or missing is a warning; the landing is made (E25)', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'doing');
+    const rel = await b.as('core').land(land('T1', H('1'), { report: 'r/c.md' }));
+    assert.match(rel.warnings[0], /report r\/c.md is not an absolute path/);
+    const gone = await b.as('core', { fileExists: () => false }).land(land('T1', H('2')));
+    assert.match(gone.warnings[0], /report \/r\/c.md does not exist/);
+    assert.equal((await b.as('core').land(land('T1', H('3')))).warnings, undefined);
 });

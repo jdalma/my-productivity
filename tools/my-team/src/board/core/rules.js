@@ -91,6 +91,13 @@ export function briefWarnings({ question, context }, asker, open) {
     return out;
 }
 
+/** The line for a ticket or report path that is not absolute or not a file, or null. Teams keep documents in ~/.my-team/docs/<team>/. */
+export function pathWarning(label, path, exists) {
+    if (!path.startsWith('/')) return `${label} ${path} is not an absolute path: keep documents in ~/.my-team/docs/<team>/ and give the full path`;
+    if (!exists(path)) return `${label} ${path} does not exist: write the file there, or correct the path`;
+    return null;
+}
+
 export function move(name, task) {
     const m = TASK_MOVES[name];
     if (!m.from.includes(task.state)) {

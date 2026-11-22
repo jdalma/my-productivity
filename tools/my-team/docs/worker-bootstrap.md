@@ -52,11 +52,11 @@ my-team start --config my-team.json
 
 | 섹션 | 내용 |
 |------|------|
-| `# Team Worker Protocol` (헤더) | peer-to-peer 모델 한 줄 선언 + user는 pane으로, peer는 mailbox로 본다 |
+| `# Team Worker Protocol` (헤더) | "팀 <name>의 워커 중 하나"라는 한 줄 + user는 pane으로, peer는 mailbox로 본다 |
 | `## Identity` | team_name, worker name, agent_type, `OMC_TEAM_WORKER` env |
 | `## Team Roster` | 모든 워커 한 줄씩: `- **name** [agent_type] — role`. role은 config의 `description` (없으면 `extra_prompt` 첫 줄). 부팅 스냅샷이며, 최신 로스터는 `mailbox-list` 응답의 `roster`가 권위 있다고 명시. WORKER role은 "로스터에 보인다고 메시지 보낼 이유는 아니다"(orchestrator 경유)로, peer 팀은 "범위 밖이면 그 피어에게 직접 보내라"로 분기 |
 | `## Liveness` | `status.json` 갱신 안내 (`my-team status`가 읽는다) |
-| `## Message Protocol` | **hard rule**: peer 통신은 오직 `api send-message`. `tmux send-keys` 금지, `my-team msg` 금지 |
+| `## Message Protocol` | user와는 pane stdout과 CLI 확인 프롬프트로 말한다. peer 채널을 api send-message 하나로 제한하는 금지(`tmux send-keys`, `my-team msg`)는 `## Rules`에 있다 |
 | `## Message Protocol > Talk to other workers via CLI API` | 6개 명령 한 줄씩 (send-message 1-way / send-message expects_reply / 답장 / mailbox-list / mark-delivered / archive-lookup) |
 | `### Messaging a worker in ANOTHER team (cross-team)` | 다른 팀 워커에게 보내는 방법. orchestrator와 역할 없는 peer 팀에만 있고, WORKER에는 없다 |
 | `### All worker-to-worker messaging is ASYNCHRONOUS` | 절대 블로킹하지 말라는 원칙 — **작업판이 없는 팀만** |
@@ -64,7 +64,7 @@ my-team start --config my-team.json
 | `### MANDATORY — Mailbox self-poll discipline` | 사이클 끝마다 + new-message 트리거 받을 때 mailbox-list, 처리 후 mark-delivered — 작업판이 없는 팀만 |
 | `### Handling a received message — reply_to resolution order` | sent_pending hit → archive-lookup 순서 — 작업판이 없는 팀만 |
 | `### Asking several peers` | broadcast는 없다. 여럿에게 물으려면 각자에게 `expects_reply`로 보낸다 — 작업판이 없는 팀만 |
-| `### Mailbox: questions and notices only` | 위 네 절(비동기, correlation, self-poll, reply_to 해석)과 여럿에게 묻기를 불릿으로 압축한 절 — **작업판 팀만** |
+| `### Mailbox: questions and notices only` | 위 네 절(비동기, correlation, self-poll, reply_to 해석)과 여럿에게 묻기를 불릿으로 압축한 절. archive-lookup의 direction 해석, 못 찾은 reply_to는 pane에 남기기, `expects_reply: false`에는 답장하지 않기를 포함한다 — **작업판 팀만** |
 | `## Team Role: ORCHESTRATOR` | 위임 규율 + cross-team 게이트웨이 + **Team changes**(합류 보고 1통을 받아 사용자에게 stdout으로 알림, 파일 겹침은 관리하지 않음) — `workerRole`이 non-null일 때만 |
 | `## Team Board` | 작업판 사용법. config `board`가 있는 팀에만 |
 | `## Team Role: WORKER` | 오케스트레이터에게만 blocked/done 보고, 파일 조율 없음(워크트리가 워킹 트리를 분리하므로 피어에게 편집 중인 파일을 묻지 않음), 합류 시 자기소개 금지 — `workerRole`이 non-null일 때만 |
@@ -82,7 +82,8 @@ add-worker Spawn protocol이 메시지 대신 작업판을 가리키는 문장�
 `## Rules`의 불릿은 다음과 같다 (정확한 문구는 `generateWorkerOverlay`의 렌더로 확인한다).
 
 - `## Role Context` 브리프 밖의 파일을 고치지 않는다.
-- *팀*은 `my-team api ... --json`, `add-worker`, `remove-worker`로만 건드린다. 다른 워커의 pane에 타이핑하지 않는다
+- *팀*은 `my-team api ... --json`, `add-worker`, `remove-worker`로만 건드린다. tmux pane·session을 만들지 않는다. shim이 덮지 않는 tmux(절대 경로)로도 만들지 않는다.
+  다른 워커의 pane에 타이핑하지 않는다
   (mailbox가 유일한 peer 채널이며 PATH의 tmux shim이 `send-keys`와 pane·session 생성을 거부한다. `my-team msg`는 없다).
   중첩 팀(`my-team start` 등)을 띄우지 않는다.
 - 자기 CLI의 sub-agent와 workflow는 써도 된다. 같은 세션 안에서 돌고 팀원이 아니다.

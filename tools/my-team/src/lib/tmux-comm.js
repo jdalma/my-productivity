@@ -32,7 +32,8 @@
  *     (spool absorption) and mark-delivered, and its own sends that record
  *     sent_pending. Parallel tool calls run them at once, so every
  *     read-modify-write goes through updateMailbox / withMailboxLock, which
- *     holds `<mailbox>.lock` (O_EXCL create) for the whole cycle.
+ *     holds `<mailbox>.lock` (a token file hard-linked into place) for the
+ *     whole cycle.
  *     Senders never touch the recipient mailbox file.
  *   - incoming-spool uses one file per message, so concurrent senders cannot
  *     clobber each other (filename uniqueness via random message_id).

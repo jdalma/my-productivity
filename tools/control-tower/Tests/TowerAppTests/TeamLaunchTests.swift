@@ -5,7 +5,7 @@ import TowerCore
 
 private func session(_ id: String, team: String?, worker: String, at: String, agent: AgentKind = .claude,
                      live: Bool = false) -> HistorySession {
-    HistorySession(id: id, agent: agent, title: worker, workspace: "/w", branch: nil, createdAt: nil, updatedAt: at,
+    HistorySession(id: id, agent: agent, title: worker, workspace: "/", branch: nil, createdAt: nil, updatedAt: at,
                    lastPrompt: nil, transcriptPath: "/t/\(id).jsonl", live: live, resumeCommand: ["claude", "--resume", id],
                    member: team.map { TeamWorker(team: $0, worker: worker) })
 }
@@ -21,10 +21,10 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     let base: [String: Any] = [
         "team_name": "t", "note": "kept",
         "workers": [
-            ["name": "pm", "agent_type": "claude", "cwd": "/w", "extra_prompt": "brief",
+            ["name": "pm", "agent_type": "claude", "cwd": "/", "extra_prompt": "brief",
              "launch_args": ["--plugin-dir", "/p", "--resume", "stale"]],
-            ["name": "cx", "agent_type": "codex", "cwd": "/w", "launch_args": ["-m", "x"]],
-            ["name": "later", "agent_type": "claude", "cwd": "/w"],  // not in this run
+            ["name": "cx", "agent_type": "codex", "cwd": "/", "launch_args": ["-m", "x"]],
+            ["name": "later", "agent_type": "claude", "cwd": "/"],  // not in this run
         ],
     ]
     let config = resumeConfig(base, run: run)
@@ -34,8 +34,30 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     #expect(workers[0]["extra_prompt"] as? String == "brief")
     #expect(workers[0]["launch_args"] as? [String] == ["--plugin-dir", "/p", "--resume", "pm-new"])
     #expect(workers[1]["launch_args"] as? [String] == ["-m", "x"])  // codex starts afresh
-    #expect(workers[2]["agent_type"] as? String == "claude" && workers[2]["cwd"] as? String == "/w")
+    #expect(workers[2]["agent_type"] as? String == "claude" && workers[2]["cwd"] as? String == "/")
     #expect(workers[2]["launch_args"] as? [String] == ["--resume", "core"])
+}
+
+@Test func aWorkerWhoseFolderIsGoneIsLeftOutOfTheResume() throws {
+    // a worker added on a worktree that was removed since: my-team start would refuse the whole config
+    var gone = session("app", team: "t", worker: "app", at: "2026-11-02T00:00:00.000Z")
+    gone.workspace = "/nonexistent-\(UUID().uuidString)"
+    let run = [session("pm", team: "t", worker: "pm", at: "2026-11-02T00:00:00.000Z"), gone]
+    let base: [String: Any] = ["workers": [["name": "pm", "agent_type": "claude", "cwd": "~"]]]
+    let workers = try #require(resumeConfig(base, run: run)["workers"] as? [[String: Any]])
+    #expect(workers.map { $0["name"] as? String } == ["pm"])
+}
+
+@Test func onlyAFolderOfTheFormMyTeamTakesCanBeGone() throws {
+    // my-team config/parser.js: cwd absolute or ~, ~ being $HOME; any other form is my-team's to refuse and report
+    let home = NSTemporaryDirectory() + "home-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: home + "/repo", withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    try Data().write(to: URL(fileURLWithPath: home + "/file"))
+    #expect(!folderIsGone("~", home: home) && !folderIsGone("~/repo", home: home) && !folderIsGone(home + "/repo", home: home))
+    #expect(folderIsGone("~/gone", home: home) && folderIsGone(home + "/gone", home: home))
+    #expect(folderIsGone("~/file", home: home), "a file is not a folder")
+    #expect(!folderIsGone("gone", home: home) && !folderIsGone("~other/gone", home: home) && !folderIsGone(nil, home: home))
 }
 
 @Test func theTeamsConfigIsTheNewestOneThatNamesIt() throws {
@@ -436,7 +458,7 @@ private final class Stubs {
     let teams = "\(root)/teams", state = "\(root)/sessions"
     try FileManager.default.createDirectory(atPath: teams, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(atPath: root) }
-    try Data(#"{"team_name":"shop","workers":[{"name":"pm","agent_type":"claude","cwd":"/w"}]}"#.utf8)
+    try Data(#"{"team_name":"shop","workers":[{"name":"pm","agent_type":"claude","cwd":"/"}]}"#.utf8)
         .write(to: URL(fileURLWithPath: "\(teams)/shop.json"))
     try Data(#"{"team_name":"lab","workers":[{"name":"a"},{"name":"b"}]}"#.utf8).write(to: URL(fileURLWithPath: "\(teams)/lab.json"))
     let history = ["pm", "core", "qa"].map { w in

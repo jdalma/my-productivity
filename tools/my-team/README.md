@@ -323,7 +323,9 @@ review requests, verdicts and findings, notes and announcements. It is a SQLite 
 ```
 
 - pm puts a task on the board with `api board-add` (ticket path, constraints, base commit, reviewer), and
-  corrects what it says afterwards with `board-edit`.
+  corrects what it says afterwards with `board-edit`. A task with no parent names its goal (`"goal":"G<n>"`,
+  listed in that goal file's `## 순서`) or says it is the whole request (`"single":true`); board-add refuses it
+  otherwise. A request of two or more tasks gets its goal file and order first, then its tasks.
 - The assignee runs `board-take`, then `board-land` with the commit when it is done.
 - A task whose result is a report and no commit is a document task (`deliverable` `document`): it lands with
   its report alone, and an approve makes it done.

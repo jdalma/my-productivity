@@ -26,7 +26,10 @@ import { status } from '../../board/core/queries.js';
 import { BoardError } from '../../board/core/rules.js';
 import { getStateRootBase } from '../../lib/state-root.js';
 
-const GOAL_FILE = /^(G\d+)-.*\.md$/;
+export const GOAL_FILE = /^(G\d+)-.*\.md$/;
+
+/** The team's goals folder: docs/<team>/goals next to the state base. */
+export const goalsDir = (team) => join(dirname(getStateRootBase()), 'docs', team, 'goals');
 
 async function boardTasks(team) {
     try {
@@ -53,7 +56,7 @@ function goalOf(path, id, tasks) {
 export async function runApiGoalOrder(input = {}, env = process.env) {
     refuseOutsider(env, input.team_name);
     const tasks = await boardTasks(input.team_name);
-    const dir = join(dirname(getStateRootBase()), 'docs', input.team_name, 'goals');
+    const dir = goalsDir(input.team_name);
     const files = existsSync(dir) ? readdirSync(dir).filter((f) => GOAL_FILE.test(f)) : [];
     const found = files
         .map((f) => ({ id: GOAL_FILE.exec(f)[1], path: join(dir, f) }))

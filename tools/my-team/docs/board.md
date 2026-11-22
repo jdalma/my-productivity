@@ -40,7 +40,7 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 
 | Command | Who | Input (required **bold**) | Output |
 |---|---|---|---|
-| `board-add` | pm | **`title`**; `id`, `parent`, `ticket`, `assignee`, `reviewer`, `priority`, `base`, `constraints`, `deliverable` (`document` for a document task) | `task` |
+| `board-add` | pm | **`title`**; with no `parent`, exactly one of **`goal`** (`G<n>`, with `id`) or **`single`** (`true`); `id`, `parent`, `ticket`, `assignee`, `reviewer`, `priority`, `base`, `constraints`, `deliverable` (`document` for a document task) | `task` |
 | `board-edit` | pm | **`id`**, and one or more of `title`, `ticket`, `constraints`, `base`, `priority`, `deliverable` (`commits` or `document`) | `task` |
 | `board-assign` | pm | **`id`**; `assignee` (reassign → ready); `reviewer` (change it); neither, on a held task → review again | `task` |
 | `board-take` | assignee | **`id`** | `task` |
@@ -209,6 +209,14 @@ row says `"deliverable": "document"`; any other task says null and delivers comm
 - Its `closes` names findings of document tasks only, its own or another's, and so does `board-finding`
   `fixed` with a landing that has no commit: a finding of a task that delivers commits is fixed by commits.
 - It makes no commit pushable: the push gate reads approved commits, and it has none.
+
+**Goal of a task (T221).** A task with no `parent` says which request it serves. With `goal` `G<n>`, the
+team's goals folder (`docs/<team>/goals` next to the state base, `~/.my-team/docs/<team>/goals` by default) holds
+exactly one `G<n>-<slug>.md`, and its `## 순서` section names the task's `id` (`T7`, or by items `T7:2-3`). With
+`single` `true`, the request is this one task. Neither, both, no such file, two files of one number or an order
+that does not name the task: `invalid`, and the message gives the folder and the line format. So a request of
+two or more tasks gets its goal file and order before its tasks. `goal` and `single` are checked, not stored. A
+derived task (`parent`) needs neither: it serves its parent's request.
 
 **Load warning.** `board-add` with an `assignee`, and `board-assign` that moves a task to another assignee or
 releases a `held` one to the same assignee, add a `warning` to their result when work piles up on that worker. The task is added or moved all the same.
@@ -390,7 +398,7 @@ the finding, and rv approves. `$BASE`, `$C1` and `$C2` stand for full commit has
 
 <!-- example:start -->
 ```sh
-MY_TEAM_WORKER=demo/pm my-team api board-add --input '{"team_name":"demo","id":"T1","title":"Add the parser","assignee":"dev","reviewer":"rv","ticket":"docs/tickets/T1.md","constraints":"없음","base":"$BASE"}' --json
+MY_TEAM_WORKER=demo/pm my-team api board-add --input '{"team_name":"demo","id":"T1","title":"Add the parser","single":true,"assignee":"dev","reviewer":"rv","ticket":"docs/tickets/T1.md","constraints":"없음","base":"$BASE"}' --json
 MY_TEAM_WORKER=demo/dev my-team api board-take --input '{"team_name":"demo","id":"T1"}' --json
 MY_TEAM_WORKER=demo/dev my-team api board-land --input '{"team_name":"demo","id":"T1","commit":"$C1","check":{"cmd":"npm test","result":"12/12"},"focus":["the parser"],"closes":[],"report":"docs/reports/T1.md","review_report":"docs/reports/R1-review.md"}' --json
 MY_TEAM_WORKER=demo/rv my-team api board-review-queue --input '{"team_name":"demo"}' --json

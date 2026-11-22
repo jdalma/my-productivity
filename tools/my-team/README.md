@@ -6,7 +6,7 @@ Adapted from [`oh-my-claude-sisyphus`](https://github.com/Yeachan-Heo/oh-my-clau
 
 ## Status
 
-**WIP** — see `PLAN.md` for the full 31-criterion acceptance set and implementation phases.
+In use. The commands, the mailbox protocol and the board (`board.db`, needs Node 22.13+ for `node:sqlite`) below are implemented and covered by `npm test`. `PLAN.md` is the original design record and is no longer kept in step with the code; `docs/architecture.md` and `docs/board.md` describe the current behaviour.
 
 ## Install
 
@@ -24,7 +24,7 @@ that are running until you deploy again. First install and update are the same c
 installs somewhere else (for a trial). Do not `npm link`: it makes every saved edit live for every team.
 
 Requires:
-- Node.js ≥ 20
+- Node.js ≥ 22.13 (the board needs `node:sqlite`; on Node 20 or 22 before 22.13 only the board commands fail)
 - `tmux`
 - At least one of: `claude`, `codex`, `gemini`, `cursor-agent` on PATH
 
@@ -77,7 +77,7 @@ my-team start --continue --config ./my-team.json
 ```
 
 > **`start` is a new team; `start --continue` picks the last run up.** A plain
-> `start` moves an existing state_root to `<state_root>.bak` and begins empty;
+> `start` moves an existing state_root to `<state_root>.<timestamp>.bak` and begins empty;
 > `--continue` keeps it, including mail not yet delivered (see "State across
 > runs" below).
 
@@ -269,7 +269,7 @@ will actually do. High user attention required.
 
 | Command | Purpose |
 |---------|---------|
-| `start` | Boot a **new** team from config (or inline `--worker name:agent:cwd`); an existing `state_root` moves to `<state_root>.bak` first. `--continue` keeps it instead, so the team picks up its previous mail, work files and events |
+| `start` | Boot a **new** team from config (or inline `--worker name:agent:cwd`); an existing `state_root` moves to `<state_root>.<timestamp>.bak` first. `--continue` keeps it instead, so the team picks up its previous mail, work files and events |
 | `solo` | Boot a board team of two in the current folder without a config file: `dev` (orchestrator, you talk to it) and `reviewer` (read-only). Arguments after `--` go to both claude workers. See "One terminal: `solo`" below |
 | `status` | Per worker: tmux liveness, self-reported `state` (+ `reason` when blocked), and stuck mail — `spool` (never absorbed), `unread` (absorbed, not consumed), `pending` (questions awaiting a reply, with the oldest age). A worker that stalled without saying so shows up here without opening its pane. A worker is alive only if its team's tmux session exists and holds a pane whose `@worker_name` and pane id both match the manifest (pane ids get reused across teams). A team is alive while one of its workers is: a split-pane team's session is the user's and outlives it. `start` refuses a team that is alive by this rule, and `remove-worker` and `shutdown` kill or type into only live panes of it (a stopped team's pane ids may belong to other panes after a tmux restart). `--all --json` (`--all` requires `--json`) reports every team under the state base as `{teams: [...]}` with `team_alive` per team, skipping `*.bak` and `.omc` |
 | `add-worker` | Add one worker to a **running** team mid-session (`--team --name --agent-type --cwd`, optional `--role orchestrator\|worker` — defaults to `worker` in a role-declaring team, optional `--description` for the roster one-liner, optional `--worktree <branch>` to create `<repo>/.worktrees/<name>` from the repo at `--cwd` and boot the worker there) — splits a new pane, registers it in `manifest.workers`, and notifies existing workers. Pass `--launch-arg` (repeatable) for permission-bypass flags; when a worker runs this command itself and passes none, the new worker inherits the caller's flags |
@@ -463,7 +463,7 @@ therefore share this directory.
 the next `start` does with it is the caller's choice:
 
 - `my-team start --config <file>` is a **new team**. An existing `state_root` is
-  renamed to `<state_root>.bak` (keeping exactly one prior generation) and the
+  renamed to `<state_root>.<timestamp>.bak` (every earlier backup is kept; the unfinished board state is printed to stderr first) and the
   run begins empty. If the rename fails (e.g. across filesystems, or a path too
   shallow to move safely), `start` stops with the state untouched.
 - `my-team start --continue --config <file>` **continues** the team: mailbox,
@@ -478,8 +478,8 @@ the next `start` does with it is the caller's choice:
   gets the full notice, as a new team does.
 - Killing the tmux session directly (`tmux kill-session`) leaves the same state
   behind as `shutdown`.
-- **Known limitation:** `<state_root>.bak` for a team you never re-run lingers
-  until you delete it manually. Only one generation is kept per team.
+- **Known limitation:** `<state_root>.<timestamp>.bak` for a team you never re-run lingers
+  until you delete it manually. Backups accumulate, one per restart; delete old ones yourself.
 - This handles *sequential* reuse (shut down, then start again). Running two
   teams from one config **concurrently** is still unsupported — they would
   share one `state_root`; give each a distinct `team_name` for that.

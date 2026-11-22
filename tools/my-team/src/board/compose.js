@@ -33,6 +33,13 @@ export async function openBoard(teamName, { write = false } = {}) {
     return { store, roster: rosterOf(manifest), manifest, close: () => store.close() };
 }
 
+/** A board.db file opened for reading only, outside any team's manifest (start looks at the one it moves aside). */
+export async function openBoardFileReadonly(file) {
+    const store = createSqliteStore(file);
+    await store.open({ readonly: true });
+    return store;
+}
+
 /** The write service for `actor`, with the team's notices, events and git checks wired in. */
 export function boardFor({ store, roster, manifest, actor }) {
     const root = manifest.state_root;

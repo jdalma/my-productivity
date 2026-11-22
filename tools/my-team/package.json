@@ -15,15 +15,13 @@
     "commander": "^12.1.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.13.0"
   },
   "license": "MIT",
   "files": [
     "bin",
     "shim",
     "src",
-    "skills",
-    "plugin.json",
     "README.md",
     "LICENSE"
   ]

@@ -1,6 +1,6 @@
 # my-team — 구현 계획 (PLAN.md)
 
-> **상태**: `구현 완료` (테스트 65개 통과). 본 PLAN의 §1~§7은 초기 설계 의도 기록용 역사 문서다 — 현재 정상 동작 명세는 `README.md`와 `docs/architecture.md`를 따른다.
+> **역사 문서 (갱신하지 않음)**: 초기 설계 시점(테스트 65개)의 기록이다. 아래 AC 체크박스는 미체크로 남아 있어도 미구현을 뜻하지 않으며, 일부 AC는 옵션 B에서 제거됐다. 현재 동작 명세는 `README.md`, `docs/architecture.md`, `docs/board.md`를 따른다.
 > **실제 위치**: `~/IdeaProjects/my-claude-plugin/tools/my-team/` (본문 §1~§7의 `plugins/teams/` 경로는 초안 시점 계획이며 실제와 다름)
 > **추정 규모**: 1,200–1,500줄, 작업 기간 2–3일
 > **라이선스**: MIT (OMC `oh-my-claude-sisyphus` 차용 표시)

@@ -90,7 +90,7 @@ test('one task from add to approve through the CLI: notices to the right workers
     const { base, root, typed } = scratchTeam(t, repo.dir);
     const work = { ticket: '/t/T1.md', constraints: 'tmux -L only' };
 
-    as(base, 'pm', 'board-add', { id: 'T1', title: 'first', assignee: 'core', reviewer: 'rv', base: base0, ...work });
+    as(base, 'pm', 'board-add', { id: 'T1', title: 'first', single: true, assignee: 'core', reviewer: 'rv', base: base0, ...work });
     as(base, 'core', 'board-take', { id: 'T1' });
     const c1 = repo.commit('one');
     const l1 = as(base, 'core', 'board-land', {
@@ -145,7 +145,7 @@ test('write commands refuse what the worker may not do, as JSON errors', { skip:
         return { code: r.status, json: JSON.parse(r.stdout) };
     };
     assert.deepEqual(run('core', 'board-add', { title: 'x' }).json.code, 'forbidden');
-    as(base, 'pm', 'board-add', { id: 'T1', title: 'first', assignee: 'core', reviewer: 'rv', base: base0, ticket: '/t', constraints: 'c' });
+    as(base, 'pm', 'board-add', { id: 'T1', title: 'first', single: true, assignee: 'core', reviewer: 'rv', base: base0, ticket: '/t', constraints: 'c' });
     as(base, 'core', 'board-take', { id: 'T1' });
     const missing = run('core', 'board-land', { id: 'T1', commit: 'f'.repeat(40), check: { cmd: 'x', result: 'y' }, focus: ['f'], closes: [], report: '/r', review_report: '/R' });
     assert.deepEqual([missing.code, missing.json.code], [1, 'invalid']);
@@ -171,7 +171,7 @@ test('through the CLI: pm edits a task; a document task lands from a folder that
     const handIn = { check: { cmd: 'read it against the ticket', result: 'every item answered' }, focus: ['the advice'], closes: [], report: '/r/T1.md' };
 
     // rv's folder is no repository: a task that needs commits cannot land from it, with or without a commit
-    as(base, 'pm', 'board-add', { id: 'T1', title: 'advice', assignee: 'rv', reviewer: 'core', ticket: '/t/T1.md', base: base0 });
+    as(base, 'pm', 'board-add', { id: 'T1', title: 'advice', single: true, assignee: 'rv', reviewer: 'core', ticket: '/t/T1.md', base: base0 });
     as(base, 'rv', 'board-take', { id: 'T1' });
     assert.match(refused('rv', 'board-land', { id: 'T1', ...handIn }).message, /not inside a git repository/);
     assert.equal(refused('core', 'board-edit', { id: 'T1', deliverable: 'document' }).code, 'forbidden');

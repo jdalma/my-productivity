@@ -43,10 +43,14 @@ private func withEveryGCDWorkerBlocked<T>(_ body: () throws -> T) rethrows -> T 
 /// R51 L2: a body that throws still lets the workers go: a job on a global queue runs soon after, not 20 s later.
 @Test func blockedWorkersAreLetGoWhenTheBodyThrows() throws {
     struct Thrown: Error {}
+    let start = Date()
     #expect(throws: Thrown.self) { try withEveryGCDWorkerBlocked { throw Thrown() } }
+    let thrown = Date().timeIntervalSince(start)
     let ran = DispatchSemaphore(value: 0)
     DispatchQueue.global().async { ran.signal() }
-    #expect(ran.wait(timeout: .now() + 10) == .success)
+    let got = ran.wait(timeout: .now() + 30)
+    let took = Date().timeIntervalSince(start) - thrown
+    #expect(got == .success && took < 10, "threw after \(thrown) s, the job ran after \(took) s (\(got))")
 }
 
 /// R51 L1: the timeout counts from before the killer's thread exists, so a thread that starts late kills on time, not

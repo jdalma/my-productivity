@@ -47,22 +47,28 @@ enum FocusRunner {
         let status: Int32
         // the pid, not the Process, goes to the timer; `ended` under the lock keeps it from signalling a reused pid
         let state = OSAllocatedUnfairLock(initialState: (ended: false, timedOut: false))
+        let exited = DispatchSemaphore(value: 0)
         do {
             status = try await withCheckedThrowingContinuation { c in
                 p.terminationHandler = { ended in
                     state.withLock { $0.ended = true }
+                    exited.signal()
                     c.resume(returning: ended.terminationStatus)
                 }
                 do { try p.run() } catch { c.resume(throwing: error); return }
                 guard let timeout else { return }
                 let pid = p.processIdentifier
-                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                // On a thread of its own, as runCommand's (T130): a timer on a global queue fired only once a GCD
+                // worker came back, so with all of them blocked a 1 s timeout took 27 s (T223).
+                let deadline = DispatchTime.now() + timeout
+                Thread {
+                    guard exited.wait(timeout: deadline) == .timedOut else { return }
                     state.withLock { s in
                         guard !s.ended else { return }
                         s.timedOut = true
                         kill(pid, SIGTERM)
                     }
-                }
+                }.start()
             }
         } catch {
             try? err.fileHandleForWriting.close()  // never launched: end the drain

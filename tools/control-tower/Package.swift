@@ -16,7 +16,8 @@ let package = Package(
         .target(name: "TowerCore", resources: [.copy("Resources")]),
         .executableTarget(name: "tower-cli", dependencies: ["TowerCore"]),
         .executableTarget(name: "TowerApp", dependencies: ["TowerCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
-        .testTarget(name: "TowerCoreTests", dependencies: ["TowerCore"], exclude: ["Fixtures"]),
-        .testTarget(name: "TowerAppTests", dependencies: ["TowerApp", "TowerCore"]),
+        .target(name: "TowerTestSupport", path: "Tests/TowerTestSupport"),
+        .testTarget(name: "TowerCoreTests", dependencies: ["TowerCore", "TowerTestSupport"], exclude: ["Fixtures"]),
+        .testTarget(name: "TowerAppTests", dependencies: ["TowerApp", "TowerCore", "TowerTestSupport"]),
     ]
 )

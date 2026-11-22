@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TowerCore
+import TowerTestSupport
 
 /// A stall (a full stderr pipe nobody drains) would hold the child until the timeout kills it: status 0 is the check.
 @Test func aLargeOutputIsReadWholeWithoutStalling() throws {
@@ -21,7 +22,7 @@ import Testing
 }
 
 /// Both block every GCD worker, so they must not overlap: run side by side, one's workers held the other's job past
-/// 30 s on a 3-core CI runner.
+/// 30 s on a 3-core CI runner. `blockEveryGCDWorker` also keeps them off TowerAppTests' (T223).
 @Suite(.serialized) struct EveryGCDWorkerBlocked {
     /// The timeout fires while every GCD worker is blocked (T130): it waits on a thread of its own. Here the workers are
     /// let go after 20 s; a killer on a global queue would have waited for that.
@@ -35,11 +36,8 @@ import Testing
 
     /// Every GCD worker held while `body` runs, and let go when it returns or throws (R51 L2); after 20 s regardless.
     private static func withEveryGCDWorkerBlocked<T>(_ body: () throws -> T) rethrows -> T {
-        let release = DispatchSemaphore(value: 0)
-        let workers = 100
-        for _ in 0..<workers { DispatchQueue.global().async { release.wait() } }
-        Thread { Thread.sleep(forTimeInterval: 20); for _ in 0..<workers { release.signal() } }.start()
-        defer { for _ in 0..<workers { release.signal() } }
+        let release = blockEveryGCDWorker()
+        defer { release() }
         return try body()
     }
 

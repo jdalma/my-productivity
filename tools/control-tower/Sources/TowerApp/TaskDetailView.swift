@@ -416,7 +416,7 @@ private struct TaskDetailBody: View {
                                 ToneTag(text: decisionTagText(d), color: d.open ? TaskColor.pink : TaskColor.gray)
                             }
                             .buttonStyle(.plain)
-                            .help(decisionQuestion(d))
+                            .help(decisionHeadline(d))
                             .accessibilityHint("결정 상세로 갑니다")
                         }
                     }

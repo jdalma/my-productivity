@@ -26,32 +26,31 @@ import TowerTestSupport
 @Suite(.serialized) struct EveryGCDWorkerBlocked {
     /// The timeout fires while every GCD worker is blocked (T130): it waits on a thread of its own. Here the workers are
     /// let go after 20 s; a killer on a global queue would have waited for that.
-    @Test func theTimeoutFiresWhileEveryGCDWorkerIsBlocked() throws {
+    @Test func theTimeoutFiresWhileEveryGCDWorkerIsBlocked() async throws {
         let start = Date()
-        let r = try Self.withEveryGCDWorkerBlocked { try runCommand(["/bin/sleep", "300"], timeout: 0.5) }
+        let r = try await Self.withEveryGCDWorkerBlocked { try runCommand(["/bin/sleep", "300"], timeout: 0.5) }
         let took = Date().timeIntervalSince(start)
         #expect(r.status == SIGTERM)
         #expect(took < 10, "returned after \(took) s")
     }
 
     /// Every GCD worker held while `body` runs, and let go when it returns or throws (R51 L2); after 20 s regardless.
-    private static func withEveryGCDWorkerBlocked<T>(_ body: () throws -> T) rethrows -> T {
-        let release = blockEveryGCDWorker()
+    private static func withEveryGCDWorkerBlocked<T>(_ body: () throws -> T) async rethrows -> T {
+        let release = await blockEveryGCDWorker()
         defer { release() }
         return try body()
     }
 
     /// R51 L2: a body that throws still lets the workers go: a job on a global queue runs soon after, not 20 s later.
-    @Test func blockedWorkersAreLetGoWhenTheBodyThrows() throws {
+    @Test func blockedWorkersAreLetGoWhenTheBodyThrows() async throws {
         struct Thrown: Error {}
         let start = Date()
-        #expect(throws: Thrown.self) { try Self.withEveryGCDWorkerBlocked { throw Thrown() } }
+        await #expect(throws: Thrown.self) { try await Self.withEveryGCDWorkerBlocked { throw Thrown() } }
         let thrown = Date().timeIntervalSince(start)
-        let ran = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async { ran.signal() }
-        let got = ran.wait(timeout: .now() + 30)
+        // no timeout needed: the workers go after 20 s regardless
+        await withCheckedContinuation { c in DispatchQueue.global().async { c.resume() } }
         let took = Date().timeIntervalSince(start) - thrown
-        #expect(got == .success && took < 10, "threw after \(thrown) s, the job ran after \(took) s (\(got))")
+        #expect(took < 10, "threw after \(thrown) s, the job ran after \(took) s")
     }
 }
 

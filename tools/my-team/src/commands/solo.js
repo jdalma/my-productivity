@@ -27,7 +27,7 @@ function devBrief(team) {
         '',
         'When the user asks for a change to code or documents:',
         `1. Before editing, write a short ticket file under ${docs} with the goal, numbered items to do, and how to check the result.`,
-        '2. Add it to the board with board-add: yourself (dev) as assignee, reviewer as reviewer, the ticket file as ticket, and the current HEAD commit as base (board-land refuses a task without one). Then start it with board-take.',
+        '2. Add it to the board with board-add: yourself (dev) as assignee, reviewer as reviewer, the ticket file as ticket, the current HEAD commit as base (board-land refuses a task without one), and "single":true (one request, one task; board-add refuses a task with no parent without it). Then start it with board-take.',
         '3. Each time you finish a numbered item, record it with board-progress.',
         `4. When the work is done, commit it, write a report under ${docs}, and submit it with board-land. The reviewer is told by the board.`,
         '5. A changes verdict: fix the findings, then board-take and board-land again with the fixed findings in closes.',

@@ -147,6 +147,7 @@ test('R1 L1, R1b S1: the solo reviewer copies the submitted commit with steps it
 
 test('R1 L2: the solo dev is told to do the work itself, not to delegate or spread it', () => {
     const { dev } = overlays(soloConfig({ cwd: tmpdir() }));
+    assert.match(dev, /Add it to the board with board-add[^\n]*"single":true/, 'T221: a task with no parent names its goal or single');
     assert.match(dev, /## Team Role: ORCHESTRATOR \(solo\)/);
     assert.match(dev, /you do the work yourself: there is no worker to hand tickets to/);
     assert.doesNotMatch(dev, /Delegation discipline|Spread the work|delegate work to your workers/);

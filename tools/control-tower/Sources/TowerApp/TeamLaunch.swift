@@ -123,7 +123,7 @@ let newTeamPrompt = """
 /// added or removed mid-run), each with the brief and settings its `~/teams` config gives it; with no manifest,
 /// the config alone. The manifest lacks the briefs, but a resumed worker has its own in its conversation.
 func teamBase(_ team: String, teams: String = teamsDir,
-              stateBase: String = homeDirectory() + "/.my-team/sessions") -> [String: Any]? {
+              stateBase: String = stateRootBase()) -> [String: Any]? {
     func read(_ path: String) -> [String: Any]? {
         FileManager.default.contents(atPath: path).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
     }
@@ -360,14 +360,14 @@ func runSessions(_ run: TeamRun, in history: [HistorySession]) -> [HistorySessio
 
 /// The config the resume of `run` starts (`Tower.resumeTeam` writes it): the team's base with each worker of the run.
 func resumeConfig(for run: TeamRun, history: [HistorySession], teams: String = teamsDir,
-                  stateBase: String = homeDirectory() + "/.my-team/sessions") -> [String: Any]? {
+                  stateBase: String = stateRootBase()) -> [String: Any]? {
     teamBase(run.team, teams: teams, stateBase: stateBase).map { resumeConfig($0, run: runSessions(run, in: history)) }
 }
 
 /// The worker count each 팀 실행 line shows: what picking it starts (T208 R5 S1). A team with a run in the history
 /// resumes that run's workers; one without starts its config's.
 func launchWorkerCounts(_ configs: [TeamConfig], history: [HistorySession], teams: String = teamsDir,
-                        stateBase: String = homeDirectory() + "/.my-team/sessions") -> [String: Int] {
+                        stateBase: String = stateRootBase()) -> [String: Int] {
     let last = lastRuns(history)
     return Dictionary(uniqueKeysWithValues: configs.map { c in
         let resumed = last[c.team].flatMap { resumeConfig(for: $0.run, history: history, teams: teams, stateBase: stateBase) }

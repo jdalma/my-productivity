@@ -474,3 +474,16 @@ private final class Stubs {
     let resumed = try #require(resumeConfig(for: run, history: history, teams: teams, stateBase: state))
     #expect((resumed["workers"] as? [Any])?.count == counts["shop"])
 }
+
+@Test func theDefaultStateBaseHonoursMyTeamStateRootBase() throws {
+    let root = NSTemporaryDirectory() + "launch-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: "\(root)/sessions/t", withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    try Data(#"{"team_name":"t","workers":[{"name":"pm","cwd":"/w","agent_type":"claude"}]}"#.utf8)
+        .write(to: URL(fileURLWithPath: "\(root)/sessions/t/manifest.json"))
+    let previous = getenv("MY_TEAM_STATE_ROOT_BASE").map { String(cString: $0) }
+    setenv("MY_TEAM_STATE_ROOT_BASE", "\(root)/sessions", 1)
+    defer { if let previous { setenv("MY_TEAM_STATE_ROOT_BASE", previous, 1) } else { unsetenv("MY_TEAM_STATE_ROOT_BASE") } }
+    let base = try #require(teamBase("t", teams: "\(root)/no-teams"))
+    #expect((base["workers"] as? [[String: Any]])?.count == 1)
+}

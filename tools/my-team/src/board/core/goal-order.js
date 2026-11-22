@@ -20,13 +20,14 @@ function parseRef(text) {
 }
 
 /**
- * The `## 순서` section as edges. Every non-blank line there is `- before -> after`, each side a comma list.
+ * The `## 순서` section as edges and listed refs. Every non-blank line there is `- before -> after`, each side a
+ * comma list, or `- T1, T2`: tasks of the goal with no order among them (T222), listed again or not elsewhere.
  * Headings inside ``` fences do not count. A section that is missing gives found: false.
- * @returns {{ found: boolean, edges: { from: object, to: object, line: number }[], invalid: { line: number, text: string, reason: string }[] }}
+ * @returns {{ found: boolean, edges: { from: object, to: object, line: number }[], listed: object[], invalid: { line: number, text: string, reason: string }[] }}
  */
 export function parseOrder(markdown) {
     const lines = markdown.split(/\r?\n/);
-    const edges = [], invalid = [];
+    const edges = [], listed = [], invalid = [];
     let found = false, inSection = false, fenced = false;
     lines.forEach((raw, i) => {
         const line = raw.trim();
@@ -40,15 +41,17 @@ export function parseOrder(markdown) {
         const bad = (reason) => invalid.push({ line: i + 1, text: raw, reason });
         if (fenced || line.startsWith('```')) return bad('code block inside the order section');
         const m = /^[-*]\s+(.*)$/.exec(line);
-        if (!m) return bad('expected "- before -> after"');
+        if (!m) return bad('expected "- before -> after" or "- T1, T2"');
         const sides = m[1].split('->');
-        if (sides.length !== 2) return bad('expected exactly one "->"');
-        const [from, to] = sides.map((s) => s.split(',').map((t) => parseRef(t.trim())));
-        const reason = [...from, ...to].find((r) => typeof r === 'string');
+        if (sides.length > 2) return bad('expected at most one "->"');
+        const refs = sides.map((s) => s.split(',').map((t) => parseRef(t.trim())));
+        const reason = refs.flat().find((r) => typeof r === 'string');
         if (reason) return bad(reason);
+        if (refs.length === 1) return void listed.push(...refs[0]);
+        const [from, to] = refs;
         for (const f of from) for (const t of to) edges.push({ from: f, to: t, line: i + 1 });
     });
-    return { found, edges, invalid };
+    return { found, edges, listed, invalid };
 }
 
 /**
@@ -56,10 +59,11 @@ export function parseOrder(markdown) {
  * A range node also gets what its body gets. A whole task on the before side leaves from its body and every
  * range node; an item ref there leaves from the range nodes covering its items, and from its body for items no
  * range covers (D#9, so an item-level deadlock is a cycle). When a ref counts as complete is annotate's.
+ * A listed ref (parseOrder's `listed`) is a node like an after-side ref, with no edge of its own (T222).
  * Kahn's algorithm: wave 1 is every node with nothing before it. A cycle gives cycle: [refs…, first ref] and no waves.
  * @returns {{ waves: { ref: string, task: string, items: number[]|null, after: object[] }[][], cycle: string[]|null }}
  */
-export function waves(edges) {
+export function waves(edges, listed = []) {
     const nodes = new Map();
     const node = (r) => {
         if (!nodes.has(r.ref)) nodes.set(r.ref, { ref: r.ref, task: r.task, items: r.items, after: new Map(), next: new Set() });
@@ -69,6 +73,10 @@ export function waves(edges) {
         node({ ref: from.task, task: from.task, items: null });
         node({ ref: to.task, task: to.task, items: null });
         if (to.items) node(to);
+    }
+    for (const r of listed) {
+        node({ ref: r.task, task: r.task, items: null });
+        if (r.items) node(r);
     }
     const all = [...nodes.values()];
     const rangesOf = (task) => all.filter((n) => n.task === task && n.items);

@@ -24,7 +24,7 @@ const fail = (message) => { throw new BoardError('invalid', message); };
 function requireGoal(team, { id, goal, single }) {
     const dir = goalsDir(team);
     const how = `A task with no parent needs exactly one of: "goal":"G<n>" with its "id", the id listed in the ## 순서 section `
-        + `of ${dir}/G<n>-<slug>.md (lines "- <before> -> <after>", each side a comma list of T… or T…:<items>); `
+        + `of ${dir}/G<n>-<slug>.md (lines "- <before> -> <after>", each side a comma list of T… or T…:<items>, or "- T1, T2" for tasks in no order); `
         + `or "single":true for a request that is this one task. Write the goal file and its order first, then add the tasks.`;
     if (single !== undefined && single !== true) fail(`single must be true. ${how}`);
     if ((goal === undefined) === (single === undefined)) fail(`${goal === undefined ? 'neither goal nor single given' : 'goal and single both given'}. ${how}`);
@@ -36,7 +36,7 @@ function requireGoal(team, { id, goal, single }) {
     if (files.length > 1) fail(`${goal} names ${files.length} files in ${dir} (${files.join(', ')}); give each goal its own number. ${how}`);
     const path = join(dir, files[0]);
     const order = parseOrder(readFileSync(path, 'utf-8'));
-    if (order.edges.some((e) => e.from.task === id || e.to.task === id)) return;
+    if (order.edges.some((e) => e.from.task === id || e.to.task === id) || order.listed.some((r) => r.task === id)) return;
     const bad = order.invalid.length ? ` (${order.invalid.length} line(s) there could not be read: ${order.invalid.map((l) => `line ${l.line} ${l.reason}`).join('; ')})` : '';
     fail(`${id} is not in the ## 순서 section of ${path}${order.found ? '' : ', which has none'}${bad}. ${how}`);
 }

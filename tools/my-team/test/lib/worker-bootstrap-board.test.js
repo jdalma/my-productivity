@@ -176,6 +176,7 @@ test('T159: every worker is told not to run another my-team version on a running
 test('pm of a board team: goal files with an order section, ready_now from goal-order with the team filled in', () => {
     const text = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
     assert.match(text, /goal file `~\/\.my-team\/docs\/demo\/goals\/G<n>-<slug>\.md`[^\n]*## 순서[^\n]*- <before> -> <after>/);
+    assert.match(text, /holds only lines `- <before> -> <after>`, and `- T1, T2` for tasks with no order among them/);
     assert.match(text, /first write a goal file[^\n]*names every task, then add the tasks with `"goal":"G<n>"`/);
     assert.match(text, /A task with no `parent`[^\n]*board-add refuses it[^\n]*`"single":true`/);
     assert.match(text, /read `ready_now`[^\n]*team api goal-order --input "\{\\"team_name\\":\\"demo\\"\}" --json/);

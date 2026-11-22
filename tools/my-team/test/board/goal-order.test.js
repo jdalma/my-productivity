@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { annotate, parseOrder, waves } from '../../src/board/core/goal-order.js';
 
 const order = (...lines) => `# G1 goal\n\n## 순서\n${lines.map((l) => `- ${l}`).join('\n')}\n`;
-const refsOf = (md) => waves(parseOrder(md).edges).waves.map((w) => w.map((n) => n.ref));
+const refsOf = (md) => { const o = parseOrder(md); return waves(o.edges, o.listed).waves.map((w) => w.map((n) => n.ref)); };
 const task = (id, state, done_items = []) => ({ id, title: `title ${id}`, state, progress_summary: { done_items } });
 const nodeOf = (result, ref) => result.waves.flat().find((n) => n.ref === ref);
 
@@ -30,6 +30,23 @@ test('a straight line gives one task per wave', () => {
 
 test('tasks with the same predecessors share a wave', () => {
     assert.deepEqual(refsOf(order('A -> B, C', 'B, C -> D')), [['A'], ['B', 'C'], ['D']]);
+});
+
+test('T222: a list line names tasks in no order, all in the first wave', () => {
+    const md = order('A, B', 'C');
+    assert.deepEqual(parseOrder(md).invalid, []);
+    assert.deepEqual(refsOf(md), [['A', 'B', 'C']]);
+});
+
+test('T222: list lines and order lines mix; a task listed again keeps its predecessors', () => {
+    const md = order('A -> B', 'C, D', 'B, A');
+    assert.deepEqual(parseOrder(md).invalid, []);
+    assert.deepEqual(refsOf(md), [['A', 'C', 'D'], ['B']]);
+    const o = parseOrder(md);
+    const r = annotate(waves(o.edges, o.listed).waves, [task('A', 'ready'), task('B', 'ready'), task('C', 'ready')]);
+    assert.deepEqual(r.ready_now, ['A', 'C']);
+    assert.equal(nodeOf(r, 'B').status, 'waiting');
+    assert.deepEqual(r.unregistered, ['D']);
 });
 
 test('success 1: the dashboard goal gives five waves, the item range a node of its own', () => {
@@ -98,7 +115,7 @@ test('a cancelled predecessor is not complete and shows in blocked_by; a cancell
 
 test('a goal without the order section is not computed', () => {
     const r = parseOrder('# G1\n\n## 요청\n- A -> B\n\n```\n## 순서\n- A -> B\n```\n');
-    assert.deepEqual(r, { found: false, edges: [], invalid: [] });
+    assert.deepEqual(r, { found: false, edges: [], listed: [], invalid: [] });
 });
 
 test('syntax errors carry their line numbers', () => {

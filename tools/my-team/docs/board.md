@@ -212,7 +212,8 @@ row says `"deliverable": "document"`; any other task says null and delivers comm
 
 **Goal of a task (T221).** A task with no `parent` says which request it serves. With `goal` `G<n>`, the
 team's goals folder (`docs/<team>/goals` next to the state base, `~/.my-team/docs/<team>/goals` by default) holds
-exactly one `G<n>-<slug>.md`, and its `## 순서` section names the task's `id` (`T7`, or by items `T7:2-3`). With
+exactly one `G<n>-<slug>.md`, and its `## 순서` section names the task's `id` (`T7`, or by items `T7:2-3`), on an
+order line or a list line. With
 `single` `true`, the request is this one task. Neither, both, no such file, two files of one number or an order
 that does not name the task: `invalid`, and the message gives the folder and the line format. So a request of
 two or more tasks gets its goal file and order before its tasks. `goal` and `single` are checked, not stored. A
@@ -280,8 +281,9 @@ of it left out. The rest of the file is free text for people; the command reads 
 - T177, T181 -> T192
 ```
 
-- Every non-blank line of the section is `- <before> -> <after>`, each side a comma list. Any other line is an
-  error with its line number. The section ends at the next `#` or `##` heading; a `## 순서` inside a code fence
+- Every non-blank line of the section is `- <before> -> <after>`, each side a comma list, or a list line
+  `- T201, T202`: tasks of the goal with no order among them (T222). A listed task with no order line is in the
+  first wave; one an order line names too keeps that order. Any other line is an error with its line number. The section ends at the next `#` or `##` heading; a `## 순서` inside a code fence
   does not count.
 - A reference is a whole task (`T177`) or numbered items of its ticket (`T181:1`, `T177:4-7`, items 1 to 1000).
 - A goal file without the section is listed with no waves.

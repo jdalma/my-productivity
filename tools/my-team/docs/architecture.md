@@ -98,7 +98,7 @@ events.jsonl에 append (audit log)
     │
     ▼
 [B] mailbox-list가 incoming-spool/<to>/*.json을 모두 mailbox.inbox로 흡수
-    │   (absorbIncomingSpool — spool 파일은 흡수 후 unlink)
+    │   (absorbIncomingSpool — mailbox.json write가 성공한 뒤에 spool 파일을 unlink)
     │   동시에 흡수된 메시지 중 reply_to가 자기 sent_pending에 있으면 그 항목 제거
 [C] mailbox.inbox에서 읽지 않은 메시지를 created_at 오름차순으로 반환
     │
@@ -112,7 +112,7 @@ events.jsonl에 append (audit log)
 | 항목 | 보장 | 메커니즘 |
 |------|------|----------|
 | 동시 송신 race-free | ✅ | spool은 파일당 unique `message_id` 이름 → 송신자끼리 충돌 불가 |
-| 수신자 mailbox 일관성 | ✅ | mailbox.json은 수신자(=소유자) 만 쓴다. 송신자는 spool에만 떨어뜨림 |
+| 수신자 mailbox 일관성 | ✅ | 송신자는 상대 mailbox를 건드리지 않고 spool에만 떨어뜨림. 소유 워커의 흡수·mark-delivered·sent_pending 기록은 `<mailbox>.lock` 아래에서 read-modify-write (`updateMailbox`) |
 | torn write 방지 | ✅ | mailbox.json은 `atomicWriteJson` (write-temp + rename) |
 | audit 보존 | ✅ | archive는 append-only jsonl + events.jsonl도 별도로 append |
 | 트리거 손실 복구 | ✅ | tmux trigger는 best-effort; mailbox-list 자가 폴링이 진짜 source of truth |
@@ -164,7 +164,7 @@ reply_to 해석 순서:
 }
 ```
 
-`incoming-spool/<to>/<msg_id>.json`은 위 `inbox[<id>]` 한 항목과 같은 shape의 단일 객체. mailbox-list가 흡수 후 unlink한다.
+`incoming-spool/<to>/<msg_id>.json`은 위 `inbox[<id>]` 한 항목과 같은 shape의 단일 객체. mailbox-list가 mailbox.json에 쓴 뒤 unlink한다.
 
 `archive/<who>.jsonl`은 한 줄에 하나의 객체:
 - `{ ...message, direction: "out" }` — 자기가 send-message 보낼 때 append
@@ -219,7 +219,8 @@ reply_to 해석 순서:
 |------|------|
 | 두 송신자가 동시에 같은 수신자에게 send-message | spool 파일명이 `message_id`로 unique → 충돌 불가 |
 | send-message 도중 sender 크래시 | step 1(sent_pending)을 먼저 → 송신자가 자기 발송을 안다. step 3 전이면 수신자는 모름 (re-send 필요) |
-| mailbox-list 도중 수신자 크래시 | spool 파일은 흡수 후 unlink. 중간 크래시 시 일부 spool 남음 → 다음 mailbox-list가 마저 흡수 |
+| mailbox-list 도중 수신자 크래시 또는 mailbox write 실패 | mailbox.json write가 끝난 뒤에 spool을 unlink → 중간에 멈추면 spool이 남고 다음 mailbox-list가 다시 흡수 (inbox가 `message_id` 키라 멱등). write와 unlink 사이 크래시면 같은 메시지가 한 번 더 보일 수 있다 (유실 대신 중복) |
+| 한 워커의 병렬 tool call (mailbox-list, mark-delivered, expects_reply 송신)이 같은 mailbox.json을 동시에 갱신 | 세 경로 모두 `tmux-comm.js`의 `<mailbox>.lock`(O_EXCL 생성, `pid:random` 토큰 기록)을 잡고 read-modify-write. holder pid가 죽었을 때만 회수하고, 살아 있으면 최대 10초 기다린 뒤 lock 경로와 pid를 담아 throw (느린 holder의 lock을 뺏지 않음). 회수·해제 모두 unlink 직전에 다시 읽은 내용이 기대한 토큰일 때만 지운다 |
 | 같은 message_id 중복 흡수 | mailbox.inbox는 객체 키이므로 동일 id면 덮어쓰기 (멱등) |
 | schema 변경 | schema_version mismatch는 throw — 운영자가 강제 셔다운 |
 | add-worker 도중 팀 shutdown | 페인 생성 후 manifest append 직전 manifest를 **reload** — 사라졌으면("team shut down mid-operation") 새 페인 kill + abort. 락은 없음(레포의 직렬-인간 모델) |

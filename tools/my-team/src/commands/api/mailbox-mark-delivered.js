@@ -17,8 +17,8 @@
  * line exists in the archive jsonl, returns `already_consumed: true` instead
  * of throwing — re-marking is a safe no-op.
  *
- * Writes use atomicWriteJson (write-temp + rename) so a torn write is
- * impossible.
+ * The read-modify-write runs under the mailbox lock (updateMailbox), so a
+ * concurrent mailbox-list or send cannot lose this removal or be lost by it.
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -26,9 +26,9 @@ import { dirname } from 'path';
 import { loadManifest } from '../_manifest.js';
 import { setStateRoot } from '../../lib/state-root.js';
 import { TeamPaths } from '../../lib/state-paths.js';
-import { atomicWriteJson, appendFileWithMode, ensureDirWithMode } from '../../lib/fs-utils.js';
-import { MAILBOX_SCHEMA_VERSION } from '../../lib/tmux-comm.js';
-import { requireTeamAndWorker, resolveTeamPath, assertMailboxSchemaVersion } from '../../lib/handler-guards.js';
+import { appendFileWithMode, ensureDirWithMode } from '../../lib/fs-utils.js';
+import { updateMailbox } from '../../lib/tmux-comm.js';
+import { requireTeamAndWorker, resolveTeamPath } from '../../lib/handler-guards.js';
 
 function archiveHasMessage(archiveFile, messageId) {
     if (!existsSync(archiveFile)) return null;
@@ -69,40 +69,25 @@ export function runApiMailboxMarkDelivered(input) {
         throw new Error(`mailbox not found at ${mailboxFile}`);
     }
 
-    let parsed;
-    try {
-        parsed = JSON.parse(readFileSync(mailboxFile, 'utf-8'));
-    } catch (err) {
-        throw new Error(`Mailbox at ${mailboxFile} is not valid JSON: ${err.message}`);
-    }
+    return updateMailbox(teamName, worker, parentDir, (mailbox) => {
+        const target = mailbox.inbox[messageId];
 
-    assertMailboxSchemaVersion(parsed, mailboxFile);
-
-    const inbox = parsed?.inbox && typeof parsed.inbox === 'object' ? parsed.inbox : {};
-    const target = inbox[messageId];
-
-    if (!target) {
-        // Already archived? Treat as idempotent re-mark.
-        const archived = archiveHasMessage(archiveFile, messageId);
-        if (archived) {
-            return { ok: true, message_id: messageId, already_consumed: true };
+        if (!target) {
+            // Already archived? Treat as idempotent re-mark.
+            const archived = archiveHasMessage(archiveFile, messageId);
+            if (archived) {
+                return { ok: true, message_id: messageId, already_consumed: true };
+            }
+            throw new Error(`message_id '${messageId}' not found in mailbox for worker '${worker}'`);
         }
-        throw new Error(`message_id '${messageId}' not found in mailbox for worker '${worker}'`);
-    }
 
-    const consumedAt = new Date().toISOString();
-    const archiveEntry = { ...target, consumed_at: consumedAt, direction: 'in' };
+        const consumedAt = new Date().toISOString();
+        const archiveEntry = { ...target, consumed_at: consumedAt, direction: 'in' };
 
-    ensureDirWithMode(dirname(archiveFile));
-    appendFileWithMode(archiveFile, JSON.stringify(archiveEntry) + '\n');
+        ensureDirWithMode(dirname(archiveFile));
+        appendFileWithMode(archiveFile, JSON.stringify(archiveEntry) + '\n');
 
-    delete inbox[messageId];
-    atomicWriteJson(mailboxFile, {
-        schema_version: MAILBOX_SCHEMA_VERSION,
-        worker,
-        inbox,
-        sent_pending: parsed?.sent_pending && typeof parsed.sent_pending === 'object' ? parsed.sent_pending : {},
+        delete mailbox.inbox[messageId];
+        return { ok: true, message_id: messageId };
     });
-
-    return { ok: true, message_id: messageId };
 }

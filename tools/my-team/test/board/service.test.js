@@ -55,6 +55,7 @@ async function setup({ roster = ROSTER } = {}, makeStore) {
         store: over.store ?? store, roster: () => roster, actor, now, git,
         notify: over.notify ?? (async (to, ref, action) => { sent.push({ to: [...to].sort(), ref, action }); return []; }),
         event: async (e) => { events.push(e); return true; },
+        ...(over.fileExists ? { fileExists: over.fileExists } : {}),
     });
     return { store, as, sent, events, ranges };
 }
@@ -1255,4 +1256,80 @@ both('a document task: its mark does not change while a report waits for its ver
     await b.as('core').take({ id: 'T1a' });
     const l = await b.as('core').land(land('T1a', H('1')));
     assert.deepEqual([l.landing.base_commit, l.landing.commits], [BASE, [H('1')]]);
+});
+
+// warnings: advice in `warnings`, the command goes through (E23, E24, E25)
+
+both('add: no reviewer, or pm as reviewer, is a warning; another worker as reviewer is none (E23)', async (setup) => {
+    const b = await setup();
+    const none = await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core' });
+    assert.match(none.warnings[0], /no reviewer: pm judges T1/);
+    const pm = await b.as('pm').add({ id: 'T2', title: 't', assignee: 'core', reviewer: 'pm' });
+    assert.match(pm.warnings[0], /reviewer pm is the team's pm/);
+    assert.equal((await b.store.get('task', 'T2')).reviewer, 'pm');
+    assert.equal((await b.as('pm').add({ id: 'T3', title: 't', assignee: 'app', reviewer: 'rv' })).warnings, undefined);
+});
+
+both('assign: changing the reviewer to pm or to none is a warning; changing only the assignee is none (E23)', async (setup) => {
+    const b = await setup();
+    await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
+    assert.match((await b.as('pm').assign({ id: 'T1', reviewer: 'pm' })).warnings[0], /reviewer pm is the team's pm/);
+    assert.match((await b.as('pm').assign({ id: 'T1', reviewer: null })).warnings[0], /no reviewer/);
+    assert.equal((await b.as('pm').assign({ id: 'T1', reviewer: 'rv' })).warnings, undefined);
+    assert.equal((await b.as('pm').assign({ id: 'T1', assignee: 'app' })).warnings, undefined);
+});
+
+both('a team with no roles has no independent reviewer to ask for: no reviewer warning (E23)', async (setup) => {
+    const b = await setup({ roster: [{ name: 'a' }, { name: 'b' }] });
+    assert.equal((await b.as('a').add({ id: 'T1', title: 't', assignee: 'b' })).warnings, undefined);
+});
+
+both('ask: a question over 120 characters or a context over 1000 is a warning; the decision is made (E24)', async (setup) => {
+    const b = await setup();
+    assert.equal((await b.as('core').ask(ask(undefined, 'x'.repeat(120)))).warnings, undefined);
+    const r = await b.as('core').ask(ask(undefined, 'x'.repeat(121), { context: 'c'.repeat(1001) }));
+    assert.deepEqual(r.warnings.map((w) => w.slice(0, 21)), ['question is 121 chars', 'context is 1001 chars']);
+    assert.equal((await b.store.get('decision', r.decision.id)).state, 'open');
+});
+
+both('ask and wait: a fourth open decision of one asker is a warning; others\' and answered ones do not count (E24)', async (setup) => {
+    const b = await setup();
+    for (let i = 0; i < 3; i++) assert.equal((await b.as('core').ask(ask())).warnings, undefined);
+    assert.equal((await b.as('app').ask(ask())).warnings, undefined, 'another asker');
+    const r = await b.as('core').ask(ask());
+    assert.match(r.warnings[0], /core now has 4 open decisions, more than 3/);
+    assert.match(r.warnings[0], /keep them all on the board.*lead with the one that blocks work.*one at a time/, 'agrees with the worker protocol');
+    await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
+    assert.match((await b.as('core').wait(ask('T1'))).warnings[0], /core now has 5 open decisions/);
+    await b.as('pm').answer({ id: 'D#1', chosen: 'A', answer: 'a' });
+    await b.as('pm').add({ id: 'T2', title: 't', assignee: 'core', reviewer: 'rv' });
+    assert.match((await b.as('core').wait(ask('T2'))).warnings[0], /core now has 5 open decisions/, 'D#1 answered, T1 still waits');
+});
+
+both('add and edit: a ticket path that is relative or missing is a warning, and it is stored all the same (E25)', async (setup) => {
+    const b = await setup();
+    const missing = (p) => ({ fileExists: (f) => f !== p });
+    const rel = await b.as('pm').add({ id: 'T1', title: 't', reviewer: 'rv', ticket: 'docs/T1.md' });
+    assert.match(rel.warnings[0], /ticket docs\/T1.md is not an absolute path.*~\/\.my-team\/docs\/<team>\//);
+    assert.equal(rel.task.ticket_path, 'docs/T1.md');
+    const gone = await b.as('pm', missing('/d/T2.md')).add({ id: 'T2', title: 't', reviewer: 'rv', ticket: '/d/T2.md' });
+    assert.match(gone.warnings[0], /ticket \/d\/T2.md does not exist/);
+    assert.equal((await b.as('pm').add({ id: 'T3', title: 't', reviewer: 'rv', ticket: '/d/T3.md' })).warnings, undefined);
+    assert.match((await b.as('pm', missing('/d/E.md')).edit({ id: 'T3', ticket: '/d/E.md' })).warnings[0], /does not exist/);
+    assert.equal((await b.as('pm', missing('/d/E.md')).edit({ id: 'T3', title: 'new' })).warnings, undefined, 'no ticket in the edit');
+});
+
+both('add: a ticket that is not text keeps the store\'s own error, not a TypeError from the path warning', async (setup) => {
+    const b = await setup();
+    await assert.rejects(b.as('pm').add({ id: 'T1', title: 't', reviewer: 'rv', ticket: 5 }), { name: 'InvalidRow', message: /'ticket_path' must be text/ });
+});
+
+both('land: a report path that is relative or missing is a warning; the landing is made (E25)', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'doing');
+    const rel = await b.as('core').land(land('T1', H('1'), { report: 'r/c.md' }));
+    assert.match(rel.warnings[0], /report r\/c.md is not an absolute path/);
+    const gone = await b.as('core', { fileExists: () => false }).land(land('T1', H('2')));
+    assert.match(gone.warnings[0], /report \/r\/c.md does not exist/);
+    assert.equal((await b.as('core').land(land('T1', H('3')))).warnings, undefined);
 });

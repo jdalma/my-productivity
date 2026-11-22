@@ -14,13 +14,14 @@
  *   actor     the worker acting (resolved from MY_TEAM_WORKER by compose)
  *   now       () => ISO time
  *   git       { range(repo, base, commit) => {ancestor, commits} } — land's checks (T63e implements it)
+ *   fileExists (path) => boolean, for the ticket and report path warnings (default: every path exists)
  *   event     (fields) => Promise<boolean>, after the change is applied
  *   notify    (to[], ref, action) => Promise<string[] warnings>, after the event
  */
 
 import {
     BoardError, COMMIT, DELIVERABLES, FINDING_CODE, FINDING_MOVES, FIXABLE, IN_HAND, SETTLED, SEVERITIES, TASK_ID, TERMINAL, VERDICTS,
-    fail, isDocument, loadWarning, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
+    briefWarnings, fail, isDocument, loadWarning, pathWarning, move, nextDerived, nextNumbered, nextVerdictId, pmsOf,
 } from './rules.js';
 import { pendingBacklogCloses, waitId } from './queries.js';
 
@@ -102,12 +103,21 @@ const BRIEF_FIELDS = ['question', 'context', 'options', 'recommendation', 'impac
 const asInput = (stored) => ({ ...stored, options: stored.options?.map((o) => ({ ...o, detail: o.detail || null })) });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-export function createBoard({ store, roster, actor, now, git, notify = async () => [], event = async () => true }) {
+export function createBoard({ store, roster, actor, now, git, notify = async () => [], event = async () => true, fileExists = () => true }) {
     const team = () => roster();
     const names = () => team().map((w) => w.name);
     const pms = () => pmsOf(team());
     const isPm = (name) => pms().includes(name);
     const member = (name, what) => (names().includes(name) ? name : fail('invalid', `${what} '${name}' is not in the team`));
+    /** The line when the reviewer is pm or missing, so pm judges its own work; a team with no roles has no one else to ask. */
+    const reviewerWarning = (reviewer, id) => {
+        if (pms().length === names().length) return null;
+        if (!reviewer) return `no reviewer: pm judges ${id}; name a worker other than pm`;
+        return pms().includes(reviewer) ? `reviewer ${reviewer} is the team's pm, who also plans the work; name a worker other than pm` : null;
+    };
+    /** Open decisions `name` asked: board-ask's open ones and the tasks waiting on a board-wait. */
+    const openAsked = async (name) => (await store.list('decision', {})).filter((d) => d.state === 'open' && d.created_by === name).length
+        + (await store.list('task', {})).filter((t) => t.state === 'waiting' && t.waiting?.asked_by === name).length;
     const needPm = () => { if (!isPm(actor)) fail('forbidden', `${actor} is not the team's pm`); };
 
     async function attempt(build) {
@@ -137,7 +147,12 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
         if (to.length) {
             try { warnings.push(...(await notify(to, plan.ref, plan.action))); } catch (err) { warnings.push(`notify: ${err.message}`); }
         }
-        return { ok: true, ...plan.result(applied), notified: to, ...(warnings.length ? { warning: warnings.join('; ') } : {}) };
+        // `warning` is what went wrong after the write; `warnings` is advice on the input (E23 to E25), one line each
+        const advice = (plan.warnings ?? []).filter(Boolean);
+        return {
+            ok: true, ...plan.result(applied), notified: to,
+            ...(warnings.length ? { warning: warnings.join('; ') } : {}), ...(advice.length ? { warnings: advice } : {}),
+        };
     }
 
     /** The user's choice: one of the options' labels, 기타, or 철회 where it may close the question. */
@@ -247,6 +262,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 changes: { creates: [{ kind: 'task', row }], updates, log: [log('add', 'task', id, { state_to: state })] },
                 notify: [assignee],
                 warning: assignee && loadWarning([...tasks, row], team(), assignee),
+                warnings: [reviewerWarning(reviewer, id), row.ticket_path && pathWarning('ticket', row.ticket_path, fileExists)],
                 result: () => ({ task: { ...row, version: 1 } }),
             };
         }),
@@ -284,6 +300,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 action: 'edit', kind: 'task', ref: task.id,
                 changes: { updates: [{ kind: 'task', key: task.id, expect_version: task.version, patch }], log: [log('edit', 'task', task.id, { detail: { changed } })] },
                 notify: [task.assignee, ...(task.state === 'review' || task.waiting?.resume_state === 'review' ? judgesOf(task) : [])],
+                warnings: ['ticket_path' in patch && pathWarning('ticket', patch.ticket_path, fileExists)],
                 result: () => ({ task: { ...task, ...patch, version: task.version + 1 } }),
             };
         }),
@@ -316,6 +333,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             return {
                 action: 'assign', kind: 'task', ref: task.id, states,
                 warning: addsLoad && loadWarning((await store.list('task', {})).map(after), team(), assignee),
+                warnings: [input.reviewer !== undefined && reviewerWarning(reviewer, task.id)],
                 changes: { updates: [touch('task', task, patch)], log: [log('assign', 'task', task.id, { ...states, detail: { form, assignee, reviewer, was: task.assignee } })] },
                 notify,
                 result: () => ({ task: { ...task, ...patch, ...stamp(), version: task.version + 1 } }),
@@ -339,6 +357,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 action: 'wait', kind: 'task', ref: task.id, states,
                 changes: { updates: [touch('task', task, { state: 'waiting', waiting })], log: [log('wait', 'task', task.id, { at, ...states, detail: { question } })] },
                 notify: [...pms(), task.assignee, task.reviewer],
+                warnings: briefWarnings(waiting, actor, (await openAsked(actor)) + 1),
                 result: () => ({ task: { ...task, state: 'waiting', waiting, ...stamp(), version: task.version + 1 } }),
             };
         }),
@@ -484,6 +503,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 changes: { creates: [{ kind: 'landing', row }], updates, log: [log('land', 'landing', id, { ...states, detail: { task: task.id, superseded: previous?.id ?? null } })] },
                 // the judge only: pm hears of a reviewed task at its verdict (R70 L2); and the families it fixes for
                 notify: [...judgesOf(task), ...toldOutside],
+                warnings: [pathWarning('report', report, fileExists)],
                 result: () => ({ task: { ...task, state }, landing: { ...row, superseded_by: null, version: 1 }, fixed }),
             };
         }),
@@ -684,6 +704,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 action: 'ask', kind: 'decision', ref: id,
                 changes: { creates: [{ kind: 'decision', row }], log: logs },
                 notify: answer ? [] : pms(),
+                warnings: answer ? [] : briefWarnings(asked, actor, (await openAsked(actor)) + 1),
                 result: () => ({ decision: { ...row, updated_at: null, updated_by: null, version: 1 } }),
             };
         }),

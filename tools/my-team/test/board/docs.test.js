@@ -74,3 +74,24 @@ test('the cycle in docs/board.md runs as written and ends where the doc says', {
     const notices = (w) => (existsSync(join(root, 'incoming-spool', w)) ? readdirSync(join(root, 'incoming-spool', w)).length : 0);
     assert.deepEqual({ pm: notices('pm'), dev: notices('dev'), rv: notices('rv') }, { pm: 2, dev: 3, rv: 2 });
 });
+
+test('without --json a warning is a stderr line, with --json it is in the result (docs/board.md, Warnings)', { skip: hasSqlite ? false : 'node:sqlite needs Node >= 22.13' }, (t) => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'mt-warn-state-')));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const root = join(base, 'demo');
+    mkdirSync(root);
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({
+        team_name: 'demo', state_root: root, session_name: 'none:0', board: { store: 'sqlite' },
+        workers: ['pm', 'dev'].map((name, i) => ({ name, role: i ? 'worker' : 'orchestrator', agent_type: 'claude', pane_id: `%${910 + i}`, cwd: base })),
+    }));
+    const env = { ...process.env, MY_TEAM_STATE_ROOT_BASE: base, MY_TEAM_WORKER: 'demo/pm' };
+    for (const k of ['OMC_TEAM_WORKER', 'MY_TEAM_STATE_ROOT', 'TMUX', 'TMUX_PANE']) delete env[k];
+    const add = (id, ...flags) => spawnSync(process.execPath, [MY_TEAM, 'api', 'board-add', '--input', JSON.stringify({ team_name: 'demo', id, title: 't', reviewer: 'dev', ticket: 'T.md', single: true }), ...flags], { env, encoding: 'utf-8' });
+    const plain = add('T1');
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.match(plain.stderr, /\[my-team\] warning: ticket T\.md is not an absolute path/);
+    const json = add('T2', '--json');
+    assert.equal(json.status, 0, json.stderr);
+    assert.match(JSON.parse(json.stdout).warnings[0], /ticket T\.md is not an absolute path/);
+    assert.doesNotMatch(json.stderr, /warning:/);
+});

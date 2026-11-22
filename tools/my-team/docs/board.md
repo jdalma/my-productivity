@@ -238,6 +238,26 @@ releases a `held` one to the same assignee, add a `warning` to their result when
   take tasks, which the board cannot tell. That line then names it in place of `add a worker for it`: `give it
   to app (no task yet) if that worker is there to take tasks, or add a worker for it`.
 
+**Input warnings.** Some commands judge the input and let it through. The result then carries `warnings`, a
+list of lines (left out when empty); without `--json` each line is also printed on stderr as
+`[my-team] warning: <line>`. `warning` (singular, above) stays what went wrong after the write: load, notices and
+the event log. None of these refuses a command; a relative path is a warning too, because the board checks no
+other input for its form and many boards already hold relative paths.
+
+| Command | Warns when |
+|---|---|
+| `board-add`, `board-assign` that changes the reviewer | `reviewer` is missing, so pm judges, or is a pm. A team that declares no roles is exempt: every worker is pm there |
+| `board-ask`, `board-wait` | `question` is over 120 characters, `context` is over 1000, or the asker then has more than 3 open decisions (its `board-ask` decisions in `open`, plus its `board-wait` tasks in `waiting`). The line tells the asker to keep them all on the board, and when raising them with the user to lead with the one that blocks work and present them one at a time, as the worker protocol says |
+| `board-add`, `board-edit` (with `ticket`) | the `ticket` path is not absolute, or the file does not exist |
+| `board-land` | the `report` path is not absolute, or the file does not exist |
+
+- The bounds come from the boards of 6 teams (87 briefs): the question's p95 is 120 characters and its maximum 139;
+  the context's median is 207, its p95 about 1000 and its maximum 2988. Askers held 1 open decision at most,
+  except three who put 4, 8 and 13 on the board at once. Change the bounds in `core/rules.js`.
+- Keep documents in `~/.my-team/docs/<team>/`: tickets, reports and review reports, by their absolute path.
+  `~` is no part of a path the board reads, so write it out (`/Users/<you>/.my-team/docs/<team>/T1.md`).
+- `review_report` is a suggestion for a file the reviewer writes later, so it is not checked.
+
 **Notices.** A write that concerns other workers sends each of them one mailbox line,
 `[board] <ref> <action>`. The line carries no state: the reader runs `board-inbox`. The pane trigger is typed
 only while the recipient's pane in the manifest is still that worker's pane in the team's session; otherwise

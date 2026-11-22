@@ -174,7 +174,7 @@ struct PaneTmuxTests {
     @MainActor @Test func aPaneStreamShowsThePaneThenItsOutputAndSendsTypedBytes() async throws {
         let server = ScratchServer()
         // the pane echoes nothing and prints the bytes it reads in hex, so what was typed shows exactly
-        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "printf 'before\\n'; stty raw -echo; od -An -tx1 -v")
+        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "printf 'before\\n'; stty raw -echo; exec od -An -tx1 -v")
         let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
         var seen: [UInt8] = []
         var size: (cols: Int, rows: Int)?
@@ -215,7 +215,7 @@ struct PaneTmuxTests {
 
     @MainActor @Test func aPasteIsBracketedOnlyWhenThePaneAskedForIt() async throws {
         let server = ScratchServer()
-        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; printf '\\033[?2004h'; od -An -tx1 -v")
+        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; printf '\\033[?2004h'; exec od -An -tx1 -v")
         let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
         let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
         stream.start()
@@ -355,7 +355,7 @@ struct PaneTmuxTests {
         let server = ScratchServer()
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("ct-stop-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: file) }
-        server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10", "stty raw -echo; cat > '\(file.path)'")
+        server.run("new-session", "-d", "-s", "w", "-x", "80", "-y", "10", "stty raw -echo; exec cat > '\(file.path)'")
         let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
         var screens = 0
         let stream = PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux)
@@ -377,7 +377,7 @@ struct PaneTmuxTests {
     /// Shift+Enter both send CR. The key events go straight to the view object; nothing is posted to the system.
     @MainActor @Test func optionEnterReachesThePaneAsEscapeReturn() async throws {
         let server = ScratchServer()
-        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")
+        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; exec od -An -tx1 -v")
         let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
         let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))
         view.attach(PaneStream(ref: TmuxRef(session: "w", window: "0", pane: pane), tmux: server.tmux), link: PaneLink())
@@ -395,7 +395,7 @@ struct PaneTmuxTests {
 
     @MainActor @Test func theTerminalViewTakesThePaneSizeAndSendsWhatIsTyped() async throws {
         let server = ScratchServer()
-        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")
+        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; exec od -An -tx1 -v")
         let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
         let link = PaneLink()
         let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))
@@ -603,7 +603,7 @@ struct PaneTmuxTests {
 
     @MainActor @Test func whatTheUserTypesAndCommitsThroughTheInputMethodStillReachesThePane() async throws {
         let server = ScratchServer()
-        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; od -An -tx1 -v")
+        server.run("new-session", "-d", "-s", "w", "-x", "70", "-y", "12", "stty raw -echo; exec od -An -tx1 -v")
         let pane = server.run("list-panes", "-t", "w", "-F", "#{pane_id}")
         let link = PaneLink()
         let view = PaneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: 12, weight: .regular))

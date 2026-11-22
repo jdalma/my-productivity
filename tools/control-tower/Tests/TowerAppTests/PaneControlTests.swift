@@ -455,6 +455,9 @@ struct PaneTmuxTests {
         server.run("new-window", "-d", "-t", "w:", "printf '%s\\n' $(seq 1 60); exec cat")
         let panes = server.run("list-panes", "-s", "-t", "w", "-F", "#{pane_id}").split(separator: "\n").map(String.init)
         try #require(panes.count == 2)
+        // the cursor is read once, at attach: attach after the programs have printed, not while they still start (T224)
+        let cursorY = { (p: String) in server.run("display-message", "-p", "-t", p, "#{cursor_y}") }
+        try #require(await until { cursorY(panes[0]) == "1" && cursorY(panes[1]) == "39" })
         let window = Density(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: .borderless,
                              backing: .buffered, defer: true)
         func shown(_ pane: String) async throws -> (PaneTerminalView, PaneScrollView) {

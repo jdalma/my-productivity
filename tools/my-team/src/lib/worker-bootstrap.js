@@ -346,10 +346,12 @@ and \`[board]\` notices.
   \`roster\` is the team's current members, authoritative over the list above;
   \`sent_pending\` is your questions (\`expects_reply: true\`) still unanswered.
 - An answer carries \`reply_to\` = your question's id and clears it from
-  \`sent_pending\`. A \`reply_to\` you cannot place there: \`archive-lookup\`; no
-  hit, take the body on its own merits.
+  \`sent_pending\`. A \`reply_to\` you cannot place there: \`archive-lookup\`
+  ("direction: out" is a message you sent, "in" one you received); no hit, say so
+  in this pane (a peer bug) and take the body on its own merits.
 - Answer a message that has \`expects_reply: true\` with \`reply_to\` set to its
-  \`message_id\`. There is no broadcast: to ask several peers, message each.
+  \`message_id\`; \`expects_reply: false\` is a notice: act on it, no reply. There
+  is no broadcast: to ask several peers, message each.
 - If \`sent_pending\` stays non-empty too long, say so in this pane and keep working.
 
 ` : `### All worker-to-worker messaging is ASYNCHRONOUS
@@ -434,7 +436,7 @@ with \`expects_reply: true\`, so each answer resolves its own \`message_id\`.
 
 `}## Rules
 - Do NOT edit files outside the scope described in your \`## Role Context\` brief
-- Touch the *team* only through \`${teamApiCommand} ... --json\`, \`add-worker\` and \`remove-worker\` (below). Never type into another worker's pane: the mailbox is the only peer channel (the tmux shim on your PATH refuses \`send-keys\`, pane and session creation; \`my-team msg\` no longer exists). Never boot a nested team (\`my-team start\`, \`${teamCommand} ...\`).
+- Touch the *team* only through \`${teamApiCommand} ... --json\`, \`add-worker\` and \`remove-worker\` (below). Never create tmux panes or sessions, not even with a tmux the shim does not cover (an absolute path). Never type into another worker's pane: the mailbox is the only peer channel (the tmux shim on your PATH refuses \`send-keys\`, pane and session creation; \`my-team msg\` no longer exists). Never boot a nested team (\`my-team start\`, \`${teamCommand} ...\`).
 - Your own CLI's sub-agents and workflows are fine: they run inside this session and are not team members.
 - **Parallel work on one repo**: when a task splits into independent parts, add a peer on its own git worktree instead of doing them serially:
   \`my-team add-worker --team ${teamName} --name <new-name> --agent-type ${agentType} --cwd <repo-root> --worktree <branch> --description "<one line: what it owns>" --extra-prompt "<the brief below>"\`

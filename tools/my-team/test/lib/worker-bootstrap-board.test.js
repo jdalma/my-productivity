@@ -184,3 +184,22 @@ test('pm of a board team: goal files with an order section, ready_now from goal-
     assert.doesNotMatch(text, /<team>/, 'the team name is filled in, not left as a placeholder');
     assert.doesNotMatch(overlay('dev', 'worker', { board: { store: 'sqlite' } }), /goal-order/, 'pm guidance only');
 });
+
+test('T226: every render forbids creating tmux panes or sessions; a board team\'s mailbox says how to read reply_to and expects_reply', () => {
+    const board = { store: 'sqlite' };
+    const renders = {
+        'orchestrator+board': overlay('pm', 'orchestrator', { board }),
+        'worker+board': overlay('dev', 'worker', { board }),
+        'solo dev': overlay('pm', 'orchestrator', { board, solo: true }),
+    };
+    for (const [w, role] of [['pm', 'orchestrator'], ['dev', 'worker'], ['solo', null]]) renders[`${w} no board`] = overlay(w, role);
+    for (const [name, text] of Object.entries(renders)) {
+        assert.match(text, /Never create tmux panes or sessions, not even with a tmux the shim does not cover/, name);
+    }
+    for (const name of ['orchestrator+board', 'worker+board', 'solo dev']) {
+        const mailbox = renders[name].split('### Mailbox: questions and notices only')[1].split('## Rules')[0];
+        assert.match(mailbox, /"direction: out" is a message you sent, "in" one you received/, name);
+        assert.match(mailbox, /no hit, say so\s+in this pane/, name);
+        assert.match(mailbox, /`expects_reply: false` is a notice: act on it, no reply/, name);
+    }
+});

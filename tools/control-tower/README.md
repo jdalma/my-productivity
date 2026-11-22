@@ -182,7 +182,8 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   keeps its title unread.
   Task boards open as tabs of one window, titled by team, whatever the system's tab preference; opening a team
   already there selects its tab. Other windows, diff windows too, never join them. The tab bar's + opens nothing.
-  A decision's detail has its brief, the answer, and its tasks; a task's detail has its decisions. A waiting decision
+  A decision's line shows its number (`D#6`) where a task line shows its id, then the question; its tooltip and
+  VoiceOver begin with `D#6, ` and the question. A decision's detail has its brief, the answer, and its tasks; a task's detail has its decisions. A waiting decision
   is your turn too: it is in the menu bar count and the dropdown, and a new one sends a notification that opens it.
   A task's detail reads as a document: where it is (`shop 작업판 › 진행 중 › T5`), the title, a decision that waits
   for you on a pink ground, then its properties in two columns (state and whose move it is, assignee, reviewer, the

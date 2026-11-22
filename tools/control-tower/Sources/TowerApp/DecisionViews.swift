@@ -12,6 +12,11 @@ func decisionTasksText(_ d: BoardDecision, tasks: [TaskBoardTask], team: String)
     }.joined(separator: ", ")
 }
 
+/// `D#6, 질문…`: what a decision's tooltip and VoiceOver label begin with, so the user can name it (T219).
+func decisionHeadline(_ d: BoardDecision) -> String {
+    "\(d.id), \(decisionQuestion(d))"
+}
+
 /// The question, or what stands for it when the board kept none (a waiting task without a brief, R4 S1).
 func decisionQuestion(_ d: BoardDecision) -> String {
     d.brief.question.nonEmptyText ?? d.taskId.map { "\($0)의 결정 (질문이 기록되지 않음)" } ?? "질문이 기록되지 않은 결정"
@@ -37,7 +42,7 @@ func decisionAccessibilityValue(_ d: BoardDecision, tasks: [TaskBoardTask], team
     return [state, decisionTasksText(d, tasks: tasks, team: team), askedLine(d.brief, now: now)].compactMap { $0 }.joined(separator: ", ")
 }
 
-/// A decision's list row: the question, then its tasks and who asked (an open one) or what was chosen (a past one).
+/// A decision's list row: its id, the question, then its tasks and who asked (an open one) or what was chosen (a past one).
 struct DecisionRow: View {
     let decision: BoardDecision
     let tasks: [TaskBoardTask]
@@ -52,6 +57,8 @@ struct DecisionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: d.open ? "person.fill.questionmark" : "checkmark.bubble")
                     .foregroundStyle(d.open ? TaskColor.pink : TaskColor.gray).accessibilityHidden(true)
+                // where a task line shows its id (T219)
+                Text(d.id).scaledFont(.callout, design: .monospaced).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                 Text(decisionQuestion(d)).scaledFont(.body, weight: d.open ? .semibold : .regular)
                     .lineLimit(2).truncationMode(.tail)
                 Spacer(minLength: 8)
@@ -66,11 +73,10 @@ struct DecisionRow: View {
             .padding(.leading, 22 * scale)
         }
         .padding(.vertical, 3)
-        .help([d.brief.question, taskText, d.open ? nil : decisionAnswerText(d)].compactMap { $0 }.joined(separator: "\n"))
+        .help([decisionHeadline(d), taskText, d.open ? nil : decisionAnswerText(d)].compactMap { $0 }.joined(separator: "\n"))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(decisionQuestion(d))
+        .accessibilityLabel(decisionHeadline(d))
         .accessibilityValue(decisionAccessibilityValue(d, tasks: tasks, team: team, now: now))
-        .accessibilityCustomContent("id", d.id)
     }
 
     /// The tasks with their ids monospaced, as the task rows show ids; `작업 없음` when there is none.

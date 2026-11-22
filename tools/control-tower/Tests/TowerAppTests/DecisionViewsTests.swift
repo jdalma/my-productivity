@@ -127,6 +127,14 @@ private let A = "2026-11-16T07:00:00.000Z", B = "2026-11-16T07:01:00.000Z", C = 
     #expect(decisionQuestion(openDecisions(bare)[0]) == "T7의 결정 (질문이 기록되지 않음)")
 }
 
+@Test func aDecisionIsNamedByItsNumberFirst() throws {
+    let s = try status(decisions: "[\(decision("D#6", at: A))]", tasks: task("T7", "waiting"))
+    #expect(decisionHeadline(openDecisions(s)[0]) == "D#6, question D#6", "tooltip and VoiceOver label (T219)")
+    let bare = try status(decisions: nil, tasks: task("T7", "waiting"))
+    let d = openDecisions(bare)[0]
+    #expect(decisionHeadline(d) == "\(d.id), T7의 결정 (질문이 기록되지 않음)")
+}
+
 @Test func aPickedDecisionReadsNoTaskFamily() {
     var picks = TaskBoardPicks()
     _ = picks.open("alpha", task: "D#1")

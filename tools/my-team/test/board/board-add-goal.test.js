@@ -83,6 +83,17 @@ test('a task its goal orders, as a whole or by items, and a single task are adde
     assert.match(r.out, /"id": ?"T2"/);
 });
 
+test('T222: a task on a list line of its goal is added, mixed with order lines or alone', needsSqlite, (t) => {
+    const { goal, add } = team(t);
+    goal('G5-mixed.md', '# G5\n\n## 순서\n- T1 -> T2\n- T3, T4\n');
+    goal('G6-list.md', '# G6\n\n## 순서\n- T7, T8\n');
+    for (const [id, g] of [['T3', 'G5'], ['T4', 'G5'], ['T1', 'G5'], ['T7', 'G6']]) {
+        const r = add('pm', { id, title: id, goal: g });
+        assert.equal(r.code, 0, r.out);
+    }
+    refused(add('pm', { id: 'T9', title: 't', goal: 'G6' }), 'T9 is not in', '"- T1, T2"');
+});
+
 test('a derived task needs neither; a worker who is not pm is refused as before', needsSqlite, (t) => {
     const { add } = team(t);
     assert.equal(add('pm', { id: 'T1', title: 't', single: true }).code, 0);

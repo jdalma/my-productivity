@@ -48,7 +48,7 @@ function goalOf(path, id, tasks) {
     const order = parseOrder(text);
     const errors = order.invalid;
     if (!order.found || errors.length) return { id, title, path, ...empty, errors };
-    const sorted = waves(order.edges);
+    const sorted = waves(order.edges, order.listed);
     if (sorted.cycle) return { id, title, path, ...empty, cycle: sorted.cycle, errors };
     return { id, title, path, ...annotate(sorted.waves, tasks), cycle: null, errors };
 }

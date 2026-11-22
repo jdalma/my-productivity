@@ -125,7 +125,7 @@ my-team은 기본이 **peer-to-peer 모델**이다 (task lifecycle 없음). 채�
 { "team_name": "shop", "board": { "store": "sqlite" }, "workers": [ … ] }
 ```
 
-- pm: `api board-add`로 작업을 올린다(티켓 경로, 제약, base 커밋, reviewer; 제약이 없으면 "없음"). 리뷰 요청과 수정 지시는 메시지로 중계하지 않는다. 사용자에게 묻는 결정은 화면에 묻기 전에 작업판에 먼저 올린다. 그 결정이 쓰일 작업에 이어서 올리는데, 작업이 멈춰야 하면 `board-wait`, 아니면 `board-ask`(`tasks`)를 쓴다. 답은 `board-answer`로 기록하고, 묻지 않았는데 사용자가 먼저 정한 것은 `board-ask`의 `answered`로 기록한다. `board-announce`는 공지에만 쓴다. 대화 압축 뒤에는 `board-status`로 복구한다.
+- pm: `api board-add`로 작업을 올린다(티켓 경로, 제약, base 커밋, reviewer; 제약이 없으면 "없음"). 부모 없는 작업은 `"goal":"G<n>"`(id와 함께, 그 목표 파일 `## 순서`에 id가 있어야 함)이나 `"single":true`(요청이 이 작업 하나) 중 하나를 꼭 넣는다. 없으면 board-add가 거부한다. 작업이 둘 이상인 요청은 목표 파일과 `## 순서`(`- 앞 -> 뒤`, 순서 없는 작업은 `- T1, T2`)를 먼저 쓰고 작업을 올린다. 리뷰 요청과 수정 지시는 메시지로 중계하지 않는다. 사용자에게 묻는 결정은 화면에 묻기 전에 작업판에 먼저 올린다. 그 결정이 쓰일 작업에 이어서 올리는데, 작업이 멈춰야 하면 `board-wait`, 아니면 `board-ask`(`tasks`)를 쓴다. 답은 `board-answer`로 기록하고, 묻지 않았는데 사용자가 먼저 정한 것은 `board-ask`의 `answered`로 기록한다. `board-announce`는 공지에만 쓴다. 대화 압축 뒤에는 `board-status`로 복구한다.
 - 담당: `board-take`로 시작한다. 끝나면 `board-land`(커밋, 확인 명령과 결과, 리뷰 중점, 닫는 지적)로 기록한다. `changes` 판정이 오면 pm을 기다리지 않고 `board-take`로 다시 착수한다.
 - reviewer: `board-review-queue`에서 가져와 `board-verdict`로 판정한다. 지적마다 code, 심각도, 재현 명령을 적는다.
 - 변경마다 관계된 워커에게 메일박스 알림 한 줄(`[board] <ref> <action>`)이 간다. 받은 워커는 `board-inbox`를 읽는다. 질문과 결정 요청은 지금처럼 `send-message`로 한다.

@@ -112,6 +112,16 @@ test('a cycle gives its path and no waves; syntax errors give their lines and no
     assert.deepEqual([typo.cycle, typo.waves, typo.errors.map((e) => e.line)], [null, [], [4]]);
 });
 
+test('T222: a goal of listed tasks in no order is one wave, all ready_now', needsSqlite, async (t) => {
+    const { base, root, goal } = team(t, 'g5');
+    await dashboardBoard(root);
+    goal('G7-parallel.md', '# G7 parallel\n## 순서\n- T181, T177\n');
+    const r = goalOrder(base, { team_name: 'g5' });
+    assert.equal(r.code, 0, r.err);
+    const [g] = r.json.goals;
+    assert.deepEqual([g.waves.map((w) => w.map((n) => n.ref)), g.ready_now, g.errors], [[['T181', 'T177']], ['T181', 'T177'], []]);
+});
+
 test('a team without a board gets every node unregistered', (t) => {
     const { base, goal } = team(t, 'g3', { board: null });
     goal('G1-x.md', '# G1 x\n## 순서\n- A -> B\n');

@@ -10,7 +10,8 @@ let teamsDir = homeDirectory() + "/teams"
 /// The config that starts one run of a team again: its workers as that run had them, each with what `base` (the
 /// team's config) gives it, else its agent and folder; each claude worker resuming its last ended session with
 /// `--resume <id>`, which my-team uses for that one launch and keeps out of the team's manifest. Codex workers start
-/// afresh: my-team passes launch args to codex as options, and its resume is a subcommand.
+/// afresh: my-team passes launch args to codex as options, and its resume is a subcommand. A worker whose folder is
+/// gone (`folderIsGone`) is left out.
 func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any] {
     var newest: [String: HistorySession] = [:]
     for h in run {
@@ -24,7 +25,7 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any]
         ["name": name, "agent_type": newest[name]!.agent.rawValue, "cwd": newest[name]!.workspace]
     }
     var config = base
-    config["workers"] = (configured + added).map { worker in
+    config["workers"] = (configured + added).filter { !folderIsGone($0["cwd"]) }.map { worker in
         guard worker["agent_type"] as? String == "claude", let name = worker["name"] as? String,
               let last = newest[name], !last.live, last.agent == .claude else { return worker }
         var args = worker["launch_args"] as? [String] ?? []
@@ -34,6 +35,16 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any]
         return w
     }
     return config
+}
+
+/// A worker folder my-team would accept the form of (absolute, `~` or `~/…`, `~` being `$HOME` as in my-team's
+/// config/parser.js) but that is no longer a directory: a removed worktree. my-team start refuses a config naming
+/// one, so the resume leaves that worker out. Any other cwd is kept for my-team to judge and report.
+func folderIsGone(_ cwd: Any?, home: String = homeDirectory()) -> Bool {
+    guard let cwd = cwd as? String, cwd == "~" || cwd.hasPrefix("~/") || cwd.hasPrefix("/") else { return false }
+    let path = cwd == "~" ? home : cwd.hasPrefix("~/") ? home + cwd.dropFirst() : cwd
+    var isDir: ObjCBool = false
+    return !(FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue)
 }
 
 /// The config in `dir` that names `team`: the one 팀 실행 lists for it (`teamConfigs`), so 팀 실행 and the resume of

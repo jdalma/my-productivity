@@ -20,37 +20,41 @@ import Testing
     #expect(Date().timeIntervalSince(start) < 30)
 }
 
-/// The timeout fires while every GCD worker is blocked (T130): it waits on a thread of its own. Here the workers are
-/// let go after 20 s; a killer on a global queue would have waited for that.
-@Test func theTimeoutFiresWhileEveryGCDWorkerIsBlocked() throws {
-    let start = Date()
-    let r = try withEveryGCDWorkerBlocked { try runCommand(["/bin/sleep", "300"], timeout: 0.5) }
-    let took = Date().timeIntervalSince(start)
-    #expect(r.status == SIGTERM)
-    #expect(took < 10, "returned after \(took) s")
-}
+/// Both block every GCD worker, so they must not overlap: run side by side, one's workers held the other's job past
+/// 30 s on a 3-core CI runner.
+@Suite(.serialized) struct EveryGCDWorkerBlocked {
+    /// The timeout fires while every GCD worker is blocked (T130): it waits on a thread of its own. Here the workers are
+    /// let go after 20 s; a killer on a global queue would have waited for that.
+    @Test func theTimeoutFiresWhileEveryGCDWorkerIsBlocked() throws {
+        let start = Date()
+        let r = try Self.withEveryGCDWorkerBlocked { try runCommand(["/bin/sleep", "300"], timeout: 0.5) }
+        let took = Date().timeIntervalSince(start)
+        #expect(r.status == SIGTERM)
+        #expect(took < 10, "returned after \(took) s")
+    }
 
-/// Every GCD worker held while `body` runs, and let go when it returns or throws (R51 L2); after 20 s regardless.
-private func withEveryGCDWorkerBlocked<T>(_ body: () throws -> T) rethrows -> T {
-    let release = DispatchSemaphore(value: 0)
-    let workers = 100
-    for _ in 0..<workers { DispatchQueue.global().async { release.wait() } }
-    Thread { Thread.sleep(forTimeInterval: 20); for _ in 0..<workers { release.signal() } }.start()
-    defer { for _ in 0..<workers { release.signal() } }
-    return try body()
-}
+    /// Every GCD worker held while `body` runs, and let go when it returns or throws (R51 L2); after 20 s regardless.
+    private static func withEveryGCDWorkerBlocked<T>(_ body: () throws -> T) rethrows -> T {
+        let release = DispatchSemaphore(value: 0)
+        let workers = 100
+        for _ in 0..<workers { DispatchQueue.global().async { release.wait() } }
+        Thread { Thread.sleep(forTimeInterval: 20); for _ in 0..<workers { release.signal() } }.start()
+        defer { for _ in 0..<workers { release.signal() } }
+        return try body()
+    }
 
-/// R51 L2: a body that throws still lets the workers go: a job on a global queue runs soon after, not 20 s later.
-@Test func blockedWorkersAreLetGoWhenTheBodyThrows() throws {
-    struct Thrown: Error {}
-    let start = Date()
-    #expect(throws: Thrown.self) { try withEveryGCDWorkerBlocked { throw Thrown() } }
-    let thrown = Date().timeIntervalSince(start)
-    let ran = DispatchSemaphore(value: 0)
-    DispatchQueue.global().async { ran.signal() }
-    let got = ran.wait(timeout: .now() + 30)
-    let took = Date().timeIntervalSince(start) - thrown
-    #expect(got == .success && took < 10, "threw after \(thrown) s, the job ran after \(took) s (\(got))")
+    /// R51 L2: a body that throws still lets the workers go: a job on a global queue runs soon after, not 20 s later.
+    @Test func blockedWorkersAreLetGoWhenTheBodyThrows() throws {
+        struct Thrown: Error {}
+        let start = Date()
+        #expect(throws: Thrown.self) { try Self.withEveryGCDWorkerBlocked { throw Thrown() } }
+        let thrown = Date().timeIntervalSince(start)
+        let ran = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { ran.signal() }
+        let got = ran.wait(timeout: .now() + 30)
+        let took = Date().timeIntervalSince(start) - thrown
+        #expect(got == .success && took < 10, "threw after \(thrown) s, the job ran after \(took) s (\(got))")
+    }
 }
 
 /// R51 L1: the timeout counts from before the killer's thread exists, so a thread that starts late kills on time, not

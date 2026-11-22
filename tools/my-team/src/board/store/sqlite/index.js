@@ -3,7 +3,8 @@
  * one file per team (<state_root>/board.db). Each my-team call opens, does its work and closes.
  *
  * - busy_timeout is set before journal_mode: switching a new file to WAL takes a lock, and without the
- *   timeout a process that meets it fails at once instead of waiting (reports/T63-pragma-order).
+ *   timeout a process that meets it fails at once instead of waiting (reports/T63-pragma-order). Two processes
+ *   switching it at the same instant still get BUSY at once, so the switch is retried (T227, toWal).
  * - Every transaction is BEGIN IMMEDIATE. The migration reads user_version and then writes; two processes
  *   holding a read lock that both ask to write make SQLite fail one at once, without waiting. apply()
  *   matches an update's expected version in its WHERE clause.
@@ -134,6 +135,24 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
         }
     }
 
+    /**
+     * Switching a file that is not in WAL yet rewrites its header from inside a read, and SQLite answers that
+     * upgrade with BUSY at once, busy_timeout or not (T227): processes opening a new file together meet it. So the
+     * switch itself is tried again until BUSY_MS.
+     */
+    async function toWal() {
+        const until = Date.now() + BUSY_MS;
+        for (;;) {
+            try {
+                exec('PRAGMA journal_mode = WAL');
+                return;
+            } catch (err) {
+                if (!(storeError(err) instanceof Busy) || Date.now() >= until) throw err;
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+        }
+    }
+
     function migrate() {
         const behind = versionNow();
         if (behind === SCHEMA_VERSION) return;
@@ -196,7 +215,7 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
                 closeSync(openSync(file, 'a', 0o600));
                 db = new Database(file);
                 exec(`PRAGMA busy_timeout = ${BUSY_MS}`);
-                exec('PRAGMA journal_mode = WAL');
+                await toWal();
                 migrate();
             } catch (err) {
                 try { db?.close(); } catch { /* already closed */ }

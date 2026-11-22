@@ -96,6 +96,21 @@ test('[sqlite] 8 processes opening a new file at once all migrate it and write',
     assert.equal((await store.list('note', {})).length, 8);
 });
 
+/**
+ * T227: switching a new file to WAL rewrites its header from inside a read, and SQLite gets BUSY at once for that
+ * upgrade, busy_timeout or not. Here the 8 processes load node:sqlite, then wait for one instant and open together.
+ */
+test('[sqlite] T227: 8 processes switching a new file to WAL at the same instant all open it and write', needsSqlite, async (t) => {
+    const file = tempFile(t);
+    const at = Date.now() + 2000;
+    const load = `{ load: async () => { const m = await import('node:sqlite'); while (Date.now() < ${at}); return m; } }`;
+    const runs = await Promise.all(Array.from({ length: 8 }, (_, i) => child(file, `
+        await store.apply({ creates: [{ kind: 'note', row: { body: 'n${i}', created_at: '${AT}', created_by: 'w' } }] });
+        console.log('ok');
+    `, load)));
+    assert.deepEqual(runs.map((r) => r.out), Array(8).fill('ok'), runs.map((r) => r.err).join(''));
+});
+
 test('[sqlite] busy_timeout is set before journal_mode, and every transaction begins IMMEDIATE, so a first open waits instead of failing', needsSqlite, async (t) => {
     const trace = [];
     const store = createSqliteStore(tempFile(t), { trace: (sql) => trace.push(sql) });

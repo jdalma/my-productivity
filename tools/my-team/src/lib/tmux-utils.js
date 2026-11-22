@@ -53,14 +53,6 @@ function resolveEnv(opts) {
     return opts?.stripTmux ? tmuxEnv() : process.env;
 }
 
-function isUnixLikeOnWindows() {
-    return process.platform === 'win32' && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
-}
-
-export function isNativeWindowsShell() {
-    return process.platform === 'win32' && !isUnixLikeOnWindows();
-}
-
 function quoteForCmd(arg) {
     if (arg.length === 0) return '""';
     if (!/[\s"%^&|<>()]/.test(arg)) return arg;
@@ -120,15 +112,6 @@ export async function tmuxShellAsync(command, opts) {
     });
 }
 
-export function tmuxSpawn(args, opts) {
-    assertTestIsolation();
-    const { stripTmux: _, ...spawnOpts } = opts ?? {};
-    const invocation = resolveTmuxInvocation(args);
-    return spawnSync(invocation.command, invocation.args, {
-        encoding: 'utf-8', ...spawnOpts, env: resolveEnv(opts),
-    });
-}
-
 export async function tmuxCmdAsync(args, opts) {
     if (args.some((a) => a.includes('#{'))) {
         const escaped = args.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
@@ -152,25 +135,6 @@ function resolveTmuxBinaryPath() {
         // fall through
     }
     return 'tmux';
-}
-
-export function isTmuxAvailable() {
-    try {
-        const resolvedBinary = resolveTmuxBinaryPath();
-        if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
-            const comspec = process.env.COMSPEC || 'cmd.exe';
-            const result = spawnSync(comspec, ['/d', '/s', '/c', `"${resolvedBinary}" -V`], { timeout: 5000 });
-            return result.status === 0;
-        }
-        if (process.platform === 'win32') {
-            const result = spawnSync(resolvedBinary, ['-V'], { timeout: 5000, shell: true });
-            return result.status === 0;
-        }
-        tmuxExec(['-V'], { stripTmux: true, stdio: 'ignore' });
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 export function quoteShellArg(value) {

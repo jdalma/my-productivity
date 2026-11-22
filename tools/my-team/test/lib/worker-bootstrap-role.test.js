@@ -15,7 +15,7 @@ const roster = [
 function overlayFor(workerName, workerRole) {
     return generateWorkerOverlay({
         teamName: 'demo', workerName, agentType: 'claude',
-        workerRole, teamRoster: roster, bootstrapInstructions: '',
+        workerRole, teamRoster: roster, bootstrapInstructions: '', instructionStateRoot: '/s/demo',
     });
 }
 
@@ -75,7 +75,7 @@ test('legacy overlay (no role) keeps the peer-symmetric text and no role section
     const text = generateWorkerOverlay({
         teamName: 'demo', workerName: 'a', agentType: 'claude',
         teamRoster: [{ name: 'a', agentType: 'claude', role: '' }],
-        bootstrapInstructions: '',
+        bootstrapInstructions: '', instructionStateRoot: '/s/demo',
     });
     assert.match(text, /every worker \(including you\) is a peer/);
     assert.doesNotMatch(text, /## Team Role:/);
@@ -151,7 +151,7 @@ test('the worktree recipe does not ask peers to coordinate file edits', () => {
 test('a roleless peer team keeps the old peer-initiation wording', () => {
     const text = generateWorkerOverlay({
         teamName: 'demo', workerName: 'solo', agentType: 'claude',
-        workerRole: null, teamRoster: [], bootstrapInstructions: '',
+        workerRole: null, teamRoster: [], bootstrapInstructions: '', instructionStateRoot: '/s/demo',
     });
     assert.match(text, /send that peer a message instead of solving it/);
     assert.doesNotMatch(text, /Do not police file overlap/);

@@ -40,7 +40,3 @@ export const TeamPaths = {
 export function absPath(cwd, relativePath) {
     return isAbsolute(relativePath) ? relativePath : join(cwd, relativePath);
 }
-
-export function teamStateRoot(cwd, teamName) {
-    return absPath(cwd, TeamPaths.root(teamName));
-}

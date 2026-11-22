@@ -58,15 +58,17 @@ my-team start --config my-team.json
 | `## Liveness` | `status.json` 갱신 안내 (`my-team status`가 읽는다) |
 | `## Message Protocol` | **hard rule**: peer 통신은 오직 `api send-message`. `tmux send-keys` 금지, `my-team msg` 금지 |
 | `## Message Protocol > Talk to other workers via CLI API` | 6개 명령 한 줄씩 (send-message 1-way / send-message expects_reply / 답장 / mailbox-list / mark-delivered / archive-lookup) |
-| `### All worker-to-worker messaging is ASYNCHRONOUS` | 절대 블로킹하지 말라는 원칙 |
-| `### Message correlation` | message_id / reply_to / sent_pending 메커니즘 설명 |
-| `### MANDATORY — Mailbox self-poll discipline` | 사이클 끝마다 + new-message 트리거 받을 때 mailbox-list, 처리 후 mark-delivered |
-| `### Handling a received message — reply_to resolution order` | sent_pending hit → archive-lookup 순서 |
-| `### When you send a message that needs an answer` | expects_reply=true 후 다른 일 계속 |
-| `### Broadcast caveat` | 1:1만 지원 |
+| `### Messaging a worker in ANOTHER team (cross-team)` | 다른 팀 워커에게 보내는 방법. orchestrator와 역할 없는 peer 팀에만 있고, WORKER에는 없다 |
+| `### All worker-to-worker messaging is ASYNCHRONOUS` | 절대 블로킹하지 말라는 원칙 — **작업판이 없는 팀만** |
+| `### Message correlation` | message_id / reply_to / sent_pending 메커니즘 설명 — 작업판이 없는 팀만 |
+| `### MANDATORY — Mailbox self-poll discipline` | 사이클 끝마다 + new-message 트리거 받을 때 mailbox-list, 처리 후 mark-delivered — 작업판이 없는 팀만 |
+| `### Handling a received message — reply_to resolution order` | sent_pending hit → archive-lookup 순서 — 작업판이 없는 팀만 |
+| `### Asking several peers` | broadcast는 없다. 여럿에게 물으려면 각자에게 `expects_reply`로 보낸다 — 작업판이 없는 팀만 |
+| `### Mailbox: questions and notices only` | 위 네 절(비동기, correlation, self-poll, reply_to 해석)과 여럿에게 묻기를 불릿으로 압축한 절 — **작업판 팀만** |
 | `## Team Role: ORCHESTRATOR` | 위임 규율 + cross-team 게이트웨이 + **Team changes**(합류 보고 1통을 받아 사용자에게 stdout으로 알림, 파일 겹침은 관리하지 않음) — `workerRole`이 non-null일 때만 |
+| `## Team Board` | 작업판 사용법. config `board`가 있는 팀에만 |
 | `## Team Role: WORKER` | 오케스트레이터에게만 blocked/done 보고, 파일 조율 없음(워크트리가 워킹 트리를 분리하므로 피어에게 편집 중인 파일을 묻지 않음), 합류 시 자기소개 금지 — `workerRole`이 non-null일 때만 |
-| `## Rules` | 6가지 금지 룰 (아래) |
+| `## Rules` | 파일 범위, 팀 접근 제한, 병렬 작업(add-worker), 피어 제거, 교대, closeout, blocked 보고 (아래) |
 | Agent-type guidance | claude/codex/gemini/cursor 별 추가 룰 |
 | `## Role Context` | config의 `extra_prompt`가 그대로 들어감 (없으면 생략) |
 
@@ -77,33 +79,22 @@ add-worker Spawn protocol이 메시지 대신 작업판을 가리키는 문장�
 
 ### 규칙 (`## Rules`)
 
-워커가 *자기 작업*에 무엇을 쓰는지(sub-agent·dynamic workflow 허용)와 *팀*을 어떻게
-건드리는지(tmux 토폴로지·peer 채널 잠금)를 분리한다. 잠금은 후자에만 적용된다.
+`## Rules`의 불릿은 다음과 같다 (정확한 문구는 `generateWorkerOverlay`의 렌더로 확인한다).
 
-```
-- Do NOT edit files outside the scope described in your ## Role Context brief
-- You MAY use your own CLI's sub-agents and dynamic workflows for your own work.
-  They run inside this worker session, create no tmux panes and no team mailbox,
-  and are not team members — so they cannot collide with the peer model. The team
-  rules below constrain only how you touch the *team*, not what you run to do your
-  own task.
-- Do NOT create tmux panes/sessions.
-- Do NOT type into another worker's pane via tmux send-keys / tmux send-text /
-  any pane-targeting tmux command. The mailbox is the ONLY peer channel.
-- Do NOT call `my-team msg` — that command was removed. user→worker is the user
-  typing directly into your pane; worker→worker is `my-team api send-message`.
-- Do NOT boot a nested my-team team (`my-team start` etc.). Spawning another team
-  inside a worker overlaps tmux topology and state. (Only my-team restriction —
-  your own CLI's sub-agents/workflows are fine, per the rule above.)
-- For touching the *team*, `my-team api ... --json` is your only peer channel —
-  do not reach for other my-team subcommands. (Does not restrict your own CLI's
-  sub-agents or dynamic workflows.)
-- Trust asynchrony: when you need an answer from a peer, send with
-  expects_reply=true and continue your own work. Never invent a "faster path"
-  that pushes text directly into a peer's pane.
-```
+- `## Role Context` 브리프 밖의 파일을 고치지 않는다.
+- *팀*은 `my-team api ... --json`, `add-worker`, `remove-worker`로만 건드린다. 다른 워커의 pane에 타이핑하지 않는다
+  (mailbox가 유일한 peer 채널이며 PATH의 tmux shim이 `send-keys`와 pane·session 생성을 거부한다. `my-team msg`는 없다).
+  중첩 팀(`my-team start` 등)을 띄우지 않는다.
+- 자기 CLI의 sub-agent와 workflow는 써도 된다. 같은 세션 안에서 돌고 팀원이 아니다.
+- **Parallel work on one repo**: 독립적으로 나뉘는 일은 `add-worker --worktree <branch>`로 별도 worktree의 peer에게 맡긴다.
+  `--allow-shared-cwd`는 사용자가 정할 일이다. 스폰 규약(`--extra-prompt`에 반드시 넣을 문구, orchestrator에게 1통 보고, ticket 구성)이 따른다.
+  작업판 팀에서는 일을 메시지 대신 pm이 작업판 task로 올려 그 peer에게 배정한다.
+- **Retiring a peer you spawned**: 일이 끝나고 머지된 peer는 `remove-worker`로 내보낸다. 작업 중인 peer나 자기 자신은 제거하지 않는다.
+- **Succession**: 사용자가 교대를 지시하면 `my-team` 스킬의 Worker succession 절차를 따른다.
+- **Closeout**: 사용자가 마무리를 지시하면 `my-team-closeout` 스킬로 증거 기반 최종 보고를 보낸다. 작업판 팀은 `board-land`와 verdict를 먼저 거친다.
+- 막히면 status 파일에 `{"state": "blocked", "reason": "..."}`를 쓰고 pane stdout에 알린다.
 
-이 가드 두 줄(`tmux send-keys 금지` + `my-team msg 금지`)은 **실제 사고 대응이다** — 워커 LLM이 두 우회 경로를 모두 사용한 사례가 있었다.
+`tmux send-keys` 금지와 `my-team msg` 금지는 실제 사고 대응이다. 워커 LLM이 두 우회 경로를 모두 쓴 사례가 있었다.
 
 ### 에이전트 타입별 가이드 (요약)
 
@@ -211,7 +202,7 @@ claude 워커는 `--settings <state_root>/workers/<name>/guard-settings.json`으
 ## 10. 변경 시 체크리스트
 
 - AGENTS.md overlay 섹션 추가/제거 → §2 표 업데이트
-- 새 금지 룰 → §2 "금지 목록" 갱신 + 사고 사례 출처 추가 (LLM이 룰의 *이유*를 알면 더 잘 지킨다)
+- 새 금지 룰 → §2 `## Rules` 불릿 목록 갱신 + 사고 사례 출처 추가 (LLM이 룰의 *이유*를 알면 더 잘 지킨다)
 - 에이전트별 가이드 변경 → §2 "에이전트 타입별 가이드" 표
 - start.js의 시작 안내 문구 변경 → §6
 - env 변수 추가/변경 → §4

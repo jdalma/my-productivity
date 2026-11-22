@@ -1,7 +1,6 @@
 ---
 name: my-team
 description: Multi-project tmux worker orchestration. Spawn N CLI workers in tmux panes, each at its own project cwd, with shared mailbox for collaboration. Use when several distinct projects need to be edited and discussed by separate workers in one coordinated session.
-aliases: []
 ---
 
 # my-team Skill

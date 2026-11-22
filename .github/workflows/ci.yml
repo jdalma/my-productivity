@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install tmux
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.x
+      - name: git identity
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.invalid"
+      - name: CLI stubs
+        run: |
+          stubs="$RUNNER_TEMP/stubs"
+          mkdir -p "$stubs"
+          for cli in claude codex gemini cursor-agent; do
+            printf '#!/bin/sh\nexec sleep 3600\n' > "$stubs/$cli"
+            chmod +x "$stubs/$cli"
+          done
+          echo "$stubs" >> "$GITHUB_PATH"
+      - name: my-team
+        working-directory: tools/my-team
+        run: |
+          npm ci
+          npm test
+      - name: scripts
+        run: |
+          sh scripts/public-scan.test.sh
+          sh scripts/push-gate.test.sh
+      - name: workflow skill scripts
+        run: |
+          for t in plugins/workflow/skills/*/scripts/test_*.py; do
+            (cd "$(dirname "$t")" && python3 "$(basename "$t")")
+          done
+      - name: control-tower
+        working-directory: tools/control-tower
+        run: |
+          swift build
+          swift test

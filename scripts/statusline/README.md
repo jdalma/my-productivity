@@ -3,7 +3,7 @@
 Claude Code 하단 상태 라인 + 설치 부트스트랩.
 
 ```
-~/IdeaProjects/my-claude-plugin  feat/cli-neutral ✱  Opus 4.8  $0.42  8%
+~/IdeaProjects/my-productivity  feat/cli-neutral ✱  Opus 4.8  $0.42  8%
 ```
 
 세그먼트는 데이터가 있을 때만 표시된다:

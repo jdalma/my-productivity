@@ -1,6 +1,6 @@
 # `my-team add-worker` 최종 실행 체크리스트 (EXECUTION CHECKLIST)
 
-설계 출처: `/Users/me/IdeaProjects/my-claude-plugin/tools/my-team/docs/add-worker-implementation-plan.md` (§0 사용자 결정 확정). 위→아래로 따라가면 재설계 없이 구현 완료되도록 작성. 경로는 `tools/my-team/` 기준.
+설계 출처: `/Users/me/IdeaProjects/my-productivity/tools/my-team/docs/add-worker-implementation-plan.md` (§0 사용자 결정 확정). 위→아래로 따라가면 재설계 없이 구현 완료되도록 작성. 경로는 `tools/my-team/` 기준.
 
 ---
 

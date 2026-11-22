@@ -14,7 +14,7 @@ description: my-team 팀을 새로 만들거나, 실행 중인 팀에 워커를 
 실행 중인 워커의 plugin·extra_prompt는 바꿀 수 없다 (my-team에 변경 명령이 없고, 워커 CLI는 부팅 때 로드한다). 바꿔야 하면 추가 모드로 새 설정의 후임을 띄우고 my-team 스킬의 "Worker succession" 절차로 교대한다.
 
 경로 표기:
-- `$STACK` = `$HOME/IdeaProjects/my-claude-plugin/stack`. config·명령에는 **펼친 절대경로**로 쓴다 (my-team은 `launch_args`를 셸 인용해 넘기므로 `~`·`$HOME`이 확장되지 않고, 틀린 `--plugin-dir`은 에러 없이 무시된다).
+- `$STACK` = `$HOME/IdeaProjects/my-productivity/stack`. config·명령에는 **펼친 절대경로**로 쓴다 (my-team은 `launch_args`를 셸 인용해 넘기므로 `~`·`$HOME`이 확장되지 않고, 틀린 `--plugin-dir`은 에러 없이 무시된다).
 - `<skill-dir>` = 이 SKILL.md가 있는 디렉토리.
 
 ## 진행 원칙
@@ -244,7 +244,7 @@ N이면 워커가 첫 permission prompt에서 멈추고, 그 pane에서 직접 �
 2. `launch_args` = (y면) agent_type별 권한 플래그 + Step 4의 plugin마다 `"--plugin-dir", "<절대경로>"` 쌍.
 
 ```json
-"launch_args": ["--dangerously-skip-permissions", "--plugin-dir", "/Users/me/IdeaProjects/my-claude-plugin/stack/pstack-claude/plugins/pstack"]
+"launch_args": ["--dangerously-skip-permissions", "--plugin-dir", "/Users/me/IdeaProjects/my-productivity/stack/pstack-claude/plugins/pstack"]
 ```
 
 ## Step 6a — 지식 문서 (`knowledge`·`## Worker Knowledge`, 생성·수정 모드)

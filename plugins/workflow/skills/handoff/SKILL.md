@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: 사용자가 명시적으로 "/handoff" 슬래시 커맨드를 호출하거나 "/handoff 실행", "/handoff 작성" 같이 스킬 이름을 직접 지명할 때만 사용한다. 현재 세션의 작업 내용·결정·함정·미완료 작업을 다음 세션으로 넘길 handoff 문서로 작성한다. features/<feature-name>/task-index.md가 이미 있으면 그 TODO 섹션 갱신 후보도 제안한다. 사용자가 단순히 "오늘 작업 정리해줘", "이거 다음에 이어서 하자" 등 의도만 표현하고 스킬을 지명하지 않았다면 절대 자동 호출하지 마라. 자동 제안·자동 트리거 금지.
+description: 현재 세션의 작업 내용·결정·함정·미완료 작업을 다음 세션으로 넘길 handoff 문서로 작성한다. features/<feature-name>/task-index.md가 이미 있으면 그 TODO 섹션 갱신 후보도 제안한다. 사용자가 /handoff로 직접 호출할 때만 쓴다.
 disable-model-invocation: true
 ---
 

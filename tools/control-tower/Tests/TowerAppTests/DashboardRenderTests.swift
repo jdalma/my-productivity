@@ -114,6 +114,37 @@ enum DashboardSamples {
                       progress: UsageProgress(filesTotal: 40, filesRead: 40))
     }()
 
+    /// Running workers for the 실행 중인 워커 group (T232): two teams, a low rate, few responses and every reason
+    /// for no numbers.
+    static let teams: [Team] = {
+        func worker(_ name: String, _ agent: AgentKind = .claude, transcript: Bool = true) -> Worker {
+            Worker(session: Session(handle: "pane:t:%\(name)", agent: agent, pid: 1, cwd: "/sample", startedAt: nil, status: .wait,
+                                    myTurn: false, since: nil, permissionPrompt: false, title: "", tmux: nil,
+                                    transcript: transcript ? "/sample/\(name).jsonl" : nil, lastUser: "", lastAssistant: "", termProgram: nil),
+                   workerName: name, role: nil, description: "", paneId: "%1", alive: true, spool: 0, inbox: 0, sentPending: 0,
+                   oldestPendingAt: nil, stateFile: nil)
+        }
+        let first = ["pm", "core", "reviewer", "designer", "mac-ux", "fresh"].map { worker($0) }
+            + [worker("codex-w", .codex), worker("lost", transcript: false)]
+        return [Team(name: "sample-team", sessionName: "sample-team", startedAt: nil, attached: true, workers: first),
+                Team(name: "other-team", sessionName: "other-team", startedAt: nil, attached: true, workers: [worker("lead")])]
+    }()
+
+    static let workerTotals: [String: UsageSessionTotals] = {
+        func t(_ read: Int, _ creation: Int, _ input: Int, _ responses: Int) -> UsageTokens {
+            UsageTokens(output: 0, cacheRead: read, cacheCreation: creation, input: input, responses: responses)
+        }
+        return [
+            "/sample/pm.jsonl": UsageSessionTotals(main: t(104_100_000, 2_500_000, 12_000, 525)),
+            "/sample/core.jsonl": UsageSessionTotals(main: t(81_600_000, 1_600_000, 4_200, 450), subagent: t(12_300_000, 812_000, 1_100, 96),
+                                                     compactions: 2, rewrittenCache: 310_000),
+            "/sample/reviewer.jsonl": UsageSessionTotals(main: t(20_300_000, 2_660_000, 1_000, 132)),
+            "/sample/designer.jsonl": UsageSessionTotals(main: t(6_800_000, 540_000, 310, 54)),
+            "/sample/mac-ux.jsonl": UsageSessionTotals(main: t(418_000, 79_600, 12, 11)),
+            "/sample/lead.jsonl": UsageSessionTotals(main: t(12_000_000, 503_000, 800, 88)),
+        ]
+    }()
+
     static let none = report(.week, buckets: [], usual: nil, totals: UsageTokens(), activeDays: 0, progress: UsageProgress())
 
     static let reading: UsageReport = {
@@ -135,7 +166,8 @@ enum DashboardSamples {
          scrolled: DashboardBlock? = nil) {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.set(report.period.rawValue, forKey: UsageDashboard.periodKey)
-        let usage = UsageDashboard(defaults: defaults, read: {}, answer: { $0 == .month ? month ?? report : report })
+        let usage = UsageDashboard(defaults: defaults, read: {}, answer: { $0 == .month ? month ?? report : report },
+                                   totals: { _ in DashboardSamples.workerTotals })
         usage.scrolled = scrolled
         self.usage = usage
         // the day's run is off, so a page is drawn the same whenever it is drawn
@@ -143,7 +175,7 @@ enum DashboardSamples {
         let advisor = UsageAdvisor(defaults: defaults, store: UsageAdviceStore(path: NSTemporaryDirectory() + suite + "/advice.json"),
                                    run: { _ in .failure(UsageAdviceFailure(reason: "a render test ran the analysis")) })
         self.advisor = advisor
-        let view = DashboardView(usage: usage, advisor: advisor, openProject: { _ in }, openSession: { $0.hasSuffix("s2.jsonl") ? nil : {} },
+        let view = DashboardView(usage: usage, advisor: advisor, teams: DashboardSamples.teams, openProject: { _ in }, openSession: { $0.hasSuffix("s2.jsonl") ? nil : {} },
                                  sessionTitle: { $0.hasSuffix("s1.jsonl") ? "parser 속도 개선" : nil })
             .environment(\.boardFontScale, scale)
             .frame(width: width, height: height)
@@ -273,7 +305,7 @@ private let cases: [ShotCase] = {
     let dir = ProcessInfo.processInfo.environment["CT_DASHBOARD_SHOTS"].map { URL(fileURLWithPath: $0) }
     if let dir { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
     for c in cases {
-        let shot = Shot(c.report, month: c.month, width: c.width, height: c.width < 600 ? 2800 : 1400, scale: c.scale, dark: c.dark)
+        let shot = Shot(c.report, month: c.month, width: c.width, height: c.width < 600 ? 3400 : 1800, scale: c.scale, dark: c.dark)
         try await shot.settle()
         if c.selectFirstRows {
             shot.tables().forEach { $0.selectRowIndexes([0], byExtendingSelection: false) }

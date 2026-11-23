@@ -273,3 +273,70 @@ private func ranks(_ outputs: [Int]) -> [UsageRank] {
     #expect(rankSearchText("", rows: rows, by: .projects) == nil)
     #expect(rows.map(rankTooltip) == ["/", "작업 폴더가 기록되지 않은 세션", "/Users/me/notes-app"])
 }
+
+// T232: the 실행 중인 워커 group.
+
+@Test func workerLinesAreTeamsByNameInRosterOrderWithoutClosedPanesAndEachStateHasItsCells() {
+    var teams = S.teams
+    teams[0].workers[1].alive = false
+    let lines = workerCacheTeams(teams, totals: S.workerTotals)
+    #expect(lines.map(\.name) == ["other-team", "sample-team"])
+    #expect(lines[1].lines.map(\.name) == ["pm", "reviewer", "designer", "mac-ux", "fresh", "codex-w", "lost"])
+    #expect(workerTranscripts(teams) == Set(["pm", "reviewer", "designer", "mac-ux", "fresh"].map { "/sample/\($0).jsonl" } + ["/sample/lead.jsonl"]),
+            "claude workers with a transcript, live only")
+    #expect(workerCacheTeams([Team(name: "t", sessionName: "t", startedAt: nil, attached: true, workers: [])], totals: [:]).isEmpty)
+
+    let state = { (name: String) in lines[1].lines.first { $0.name == name }!.state }
+    let reviewer = workerCacheCells(state("reviewer"))
+    #expect(reviewer == WorkerCacheCells(rate: "88.4%", rateLow: true, rateFew: false, cacheRead: "20.3M", cacheCreation: "2.7M",
+                                         input: "1K", responses: "132", subagent: "없음", subagentLow: false))
+    let macUX = workerCacheCells(state("mac-ux"))
+    #expect(macUX.rate == "84.0%" && !macUX.rateLow && macUX.rateFew, "11 responses: secondary, not low")
+    #expect(workerCacheCells(state("pm")).responses == "525")
+    for name in ["fresh", "codex-w", "lost"] {
+        #expect(workerCacheCells(state(name)).rate == "—")
+        #expect(workerCacheCells(state(name)).subagent == "—")
+    }
+    #expect(state("fresh") == .noResponses)
+    #expect(state("codex-w") == .codex)
+    #expect(state("lost") == .noSession)
+}
+
+@Test func aWorkerLinesTooltipAndVoiceOverLabelCarryEveryValueOrTheReasonForNone() {
+    let lines = workerCacheTeams(S.teams, totals: S.workerTotals)[1].lines
+    let line = { (name: String) in lines.first { $0.name == name }! }
+    #expect(workerCacheTooltip(line("core")) == """
+        core · sample-team
+        히트율 98.1% = cache 읽기 ÷ (입력 + cache 생성 + cache 읽기)
+        cache 읽기 81.6M · cache 생성 1.6M · 입력 4.2K · 응답 450
+        sub-agent: 히트율 93.8% · cache 읽기 12.3M · cache 생성 812K · 입력 1.1K · 응답 96
+        압축 2회 · 쉰 뒤 다시 쓴 cache 310K
+        """)
+    #expect(workerCacheTooltip(line("mac-ux")).hasSuffix("sub-agent: 없음\n응답이 적어 첫 cache 생성 비중이 큽니다."))
+    #expect(workerCacheTooltip(line("codex-w")) == "codex-w · sample-team\ncodex 워커는 Claude 사용 기록이 없어 세지 않습니다.")
+    #expect(workerCacheAccessibilityLabel(line("core"))
+        == "core, 히트율 98.1%, cache 읽기 81.6M, cache 생성 1.6M, 입력 4.2K, 응답 450, sub-agent 히트율 93.8%")
+    #expect(workerCacheAccessibilityLabel(line("reviewer")).hasPrefix("reviewer, 히트율 88.4% 낮음, "))
+    #expect(workerCacheAccessibilityLabel(line("reviewer")).hasSuffix(", sub-agent 없음"))
+    #expect(workerCacheAccessibilityLabel(line("fresh")) == "fresh, 집계 안 함, 아직 응답이 없습니다. 방금 시작했거나 다음 집계 전입니다.")
+    #expect(workerCacheAccessibilityLabel(line("lost")).hasPrefix("lost, 집계 안 함, 이 워커의 Claude 세션을 찾지 못했습니다."))
+}
+
+@MainActor @Test func workerTotalsAreAnsweredForANewSetAtOnceAndAgainAtTheEndOfEachReading() async {
+    let asked = OSAllocatedUnfairLock(initialState: [Set<String>]())
+    let value = OSAllocatedUnfairLock(initialState: 1)
+    let usage = UsageDashboard(defaults: TestDefaults().defaults, read: {}, answer: { _ in S.week }, totals: { set in
+        asked.withLock { $0.append(set) }
+        let n = value.withLock { $0 }
+        return Dictionary(uniqueKeysWithValues: set.map { ($0, UsageSessionTotals(main: UsageTokens(cacheRead: n, responses: 1))) })
+    })
+    await usage.refresh()
+    #expect(asked.withLock { $0 }.isEmpty, "no worker, no question")
+    usage.workerTranscripts = ["/a.jsonl"]
+    #expect(usage.workerTotals["/a.jsonl"]?.main.cacheRead == 1)
+    usage.workerTranscripts = ["/a.jsonl"]
+    #expect(asked.withLock { $0.count } == 1, "the same set is not asked again")
+    value.withLock { $0 = 2 }
+    await usage.refresh()
+    #expect(usage.workerTotals["/a.jsonl"]?.main.cacheRead == 2)
+}

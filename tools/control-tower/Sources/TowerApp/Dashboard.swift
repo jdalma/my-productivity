@@ -49,17 +49,26 @@ final class UsageDashboard {
     /// The chart's bar under the pointer, by its start, so a refresh keeps it (R4).
     var hoveredBar: Date?
     private(set) var lastRefresh: Date?
+    /// The running workers' transcripts the 실행 중인 워커 group shows. A new set is answered at once from what is read.
+    var workerTranscripts: Set<String> = [] {
+        didSet { if workerTranscripts != oldValue { workerTotals = answerTotals() } }
+    }
+    /// Each of `workerTranscripts`' whole-session sums, answered again at the end of each reading (T232).
+    private(set) var workerTotals: [String: UsageSessionTotals] = [:]
 
     private let defaults: UserDefaults
     private let read: @Sendable () async -> Void
     private let answer: @Sendable (UsagePeriod) -> UsageReport
+    private let totals: @Sendable (Set<String>) -> [String: UsageSessionTotals]
 
     init(defaults: UserDefaults = .standard,
          read: @escaping @Sendable () async -> Void = { await UsageLedger.shared.refresh() },
-         answer: @escaping @Sendable (UsagePeriod) -> UsageReport = { UsageLedger.shared.report($0) }) {
+         answer: @escaping @Sendable (UsagePeriod) -> UsageReport = { UsageLedger.shared.report($0) },
+         totals: @escaping @Sendable (Set<String>) -> [String: UsageSessionTotals] = { UsageLedger.shared.sessionTotals($0) }) {
         self.defaults = defaults
         self.read = read
         self.answer = answer
+        self.totals = totals
         let period = defaults.string(forKey: Self.periodKey).flatMap(UsagePeriod.init(rawValue:)) ?? .week
         self.period = period
         let report = answer(period)
@@ -69,6 +78,10 @@ final class UsageDashboard {
 
     private static func hasRecords(_ report: UsageReport, _ answer: (UsagePeriod) -> UsageReport) -> Bool {
         report.totals.responses > 0 || (report.period != .month && answer(.month).totals.responses > 0)
+    }
+
+    private func answerTotals() -> [String: UsageSessionTotals] {
+        workerTranscripts.isEmpty ? [:] : totals(workerTranscripts)
     }
 
     /// Reads what is new, then answers again. While a reading runs, a second call does nothing.
@@ -92,6 +105,7 @@ final class UsageDashboard {
             await reading.value
         }
         report = answer(period)
+        workerTotals = answerTotals()
         lastRefresh = Date()
         refreshing = false
     }
@@ -327,4 +341,101 @@ func dashboardTimeText(_ date: Date, locale: Locale = .current) -> String {
     f.locale = locale
     f.setLocalizedDateFormatFromTemplate("HHmm")
     return f.string(from: date)
+}
+
+// 실행 중인 워커 (T232, design worker-cache-hit-rate.md): each running worker's prompt cache hit rate.
+
+/// A line of the 실행 중인 워커 group.
+struct WorkerCacheLine: Hashable {
+    var team: String
+    var name: String
+    var transcript: String?
+    var state: WorkerCacheState
+}
+
+struct WorkerCacheTeam: Hashable {
+    var name: String
+    var lines: [WorkerCacheLine]
+}
+
+/// The running workers' transcripts, for `UsageDashboard.workerTranscripts`.
+func workerTranscripts(_ teams: [Team]) -> Set<String> {
+    Set(teams.flatMap(\.workers).filter { $0.alive && $0.session.agent == .claude }.compactMap(\.session.transcript))
+}
+
+/// Teams by name, each with its live workers in roster order; a team without one is left out.
+func workerCacheTeams(_ teams: [Team], totals: [String: UsageSessionTotals]) -> [WorkerCacheTeam] {
+    teams.sorted { $0.name < $1.name }.compactMap { team in
+        let lines = team.workers.filter(\.alive).map {
+            WorkerCacheLine(team: team.name, name: $0.workerName, transcript: $0.session.transcript,
+                            state: workerCacheState($0, totals: totals))
+        }
+        return lines.isEmpty ? nil : WorkerCacheTeam(name: team.name, lines: lines)
+    }
+}
+
+/// Why a line has no numbers; nil when it has them.
+func workerCacheReason(_ state: WorkerCacheState) -> String? {
+    switch state {
+    case .counted: nil
+    case .codex: "codex 워커는 Claude 사용 기록이 없어 세지 않습니다."
+    case .noSession: "이 워커의 Claude 세션을 찾지 못했습니다. ~/.claude/sessions에 이 pane의 프로세스 기록이 없습니다."
+    case .noResponses: "아직 응답이 없습니다. 방금 시작했거나 다음 집계 전입니다."
+    }
+}
+
+/// The line's cells, every one "—" without numbers.
+struct WorkerCacheCells: Equatable {
+    var rate: String
+    var rateLow: Bool
+    /// Too few responses for the rate to mean much: shown secondary.
+    var rateFew: Bool
+    var cacheRead: String
+    var cacheCreation: String
+    var input: String
+    var responses: String
+    var subagent: String
+    var subagentLow: Bool
+}
+
+func workerCacheCells(_ state: WorkerCacheState) -> WorkerCacheCells {
+    guard case .counted(let t) = state else {
+        return WorkerCacheCells(rate: "—", rateLow: false, rateFew: false, cacheRead: "—", cacheCreation: "—", input: "—",
+                                responses: "—", subagent: "—", subagentLow: false)
+    }
+    return WorkerCacheCells(
+        rate: cacheHitRateText(t.main), rateLow: cacheHitIsLow(t.main), rateFew: t.main.responses < cacheHitMinResponses,
+        cacheRead: usageTokenText(t.main.cacheRead), cacheCreation: usageTokenText(t.main.cacheCreation),
+        input: usageTokenText(t.main.input), responses: koreanCount(t.main.responses),
+        subagent: t.subagent.responses == 0 ? "없음" : cacheHitRateText(t.subagent), subagentLow: cacheHitIsLow(t.subagent))
+}
+
+private func koreanCount(_ n: Int) -> String { n.formatted(.number.locale(Locale(identifier: "ko_KR"))) }
+
+private func tokenFacts(_ t: UsageTokens) -> String {
+    "cache 읽기 \(usageTokenText(t.cacheRead)) · cache 생성 \(usageTokenText(t.cacheCreation)) · 입력 \(usageTokenText(t.input)) · 응답 \(koreanCount(t.responses))"
+}
+
+/// The tooltip of every cell of a line: all seven values, so a narrow grid hides none of them.
+func workerCacheTooltip(_ line: WorkerCacheLine) -> String {
+    let head = "\(line.name) · \(line.team)"
+    guard case .counted(let t) = line.state else { return [head, workerCacheReason(line.state) ?? ""].joined(separator: "\n") }
+    let leaks = (t.compactions > 0 ? ["압축 \(t.compactions)회"] : [])
+        + (t.rewrittenCache > 0 ? ["쉰 뒤 다시 쓴 cache \(usageTokenText(t.rewrittenCache))"] : [])
+    return ([head,
+             "히트율 \(cacheHitRateText(t.main)) = cache 읽기 ÷ (입력 + cache 생성 + cache 읽기)",
+             tokenFacts(t.main),
+             t.subagent.responses == 0 ? "sub-agent: 없음" : "sub-agent: 히트율 \(cacheHitRateText(t.subagent)) · \(tokenFacts(t.subagent))"]
+            + (leaks.isEmpty ? [] : [leaks.joined(separator: " · ")])
+            + (t.main.responses < cacheHitMinResponses ? ["응답이 적어 첫 cache 생성 비중이 큽니다."] : []))
+        .joined(separator: "\n")
+}
+
+/// What VoiceOver reads for the line: its one element, the name, carries every value.
+func workerCacheAccessibilityLabel(_ line: WorkerCacheLine) -> String {
+    guard case .counted = line.state else { return "\(line.name), 집계 안 함, \(workerCacheReason(line.state) ?? "")" }
+    let c = workerCacheCells(line.state)
+    let subagent = c.subagent == "없음" ? "sub-agent 없음" : "sub-agent 히트율 \(c.subagent)\(c.subagentLow ? " 낮음" : "")"
+    return "\(line.name), 히트율 \(c.rate)\(c.rateLow ? " 낮음" : ""), cache 읽기 \(c.cacheRead), cache 생성 \(c.cacheCreation), "
+        + "입력 \(c.input), 응답 \(c.responses), \(subagent)"
 }

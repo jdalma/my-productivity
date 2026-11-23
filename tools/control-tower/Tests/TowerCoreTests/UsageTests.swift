@@ -594,3 +594,62 @@ private func unlock(_ path: String, _ mode: Int = 0o644) { try? FileManager.defa
     let today = short.report(.today, now: now, calendar: calendar()).baseline
     #expect([today.spanDays, today.coveredDays] as [Int] == [7, 7])
 }
+
+// T232: a running worker's cache hit rate, from the ledger's rows only.
+
+@Test func sessionTotalsSumAWholeSessionSplittingItsSubagentsAndReadingNoFile() async throws {
+    let t = try Transcripts()
+    try t.add(t.session("w1"), [
+        response("m1", "2026-03-08T10:00:00Z", input: 10, cacheRead: 0, cacheCreation: 1000),
+        response("m2", "2026-03-10T10:00:00Z", input: 5, cacheRead: 9000, cacheCreation: 100),
+        compaction("c1", "2026-03-10T10:30:00Z"),
+    ], created: "2026-03-08T10:00:00Z")
+    try t.add(t.subagent("w1", "agent-1"), [response("m3", "2026-03-10T10:05:00Z", input: 1, cacheRead: 300, cacheCreation: 99)],
+              created: "2026-03-10T10:05:00Z")
+    try t.add(t.session("other"), [response("m4", "2026-03-10T11:00:00Z", cacheRead: 7)], created: "2026-03-10T11:00:00Z")
+    let ledger = t.ledger()
+    await ledger.refresh(now: now)
+    // a line written after the reading is not counted until the next one: sessionTotals reads no transcript
+    try t.add(t.session("w1"), [response("m5", "2026-03-10T12:10:00Z", cacheRead: 1_000_000)])
+
+    let totals = ledger.sessionTotals([t.session("w1"), t.session("gone")])
+    #expect(Set(totals.keys) == [t.session("w1")])
+    let w1 = try #require(totals[t.session("w1")])
+    // both days, whatever period the dashboard shows
+    #expect(w1.main == UsageTokens(cacheRead: 9000, cacheCreation: 1100, input: 15, responses: 2))
+    #expect(w1.subagent == UsageTokens(cacheRead: 300, cacheCreation: 99, input: 1, responses: 1))
+    #expect(w1.compactions == 1)
+    #expect(cacheHitRateText(w1.main) == "89.0%")
+    #expect(cacheHitRateText(w1.subagent) == "75.0%")
+}
+
+@Test func aHitRateHasOneDecimalNeverShowsAHundredShortOfAllAndIsLowOnlyWithEnoughResponses() {
+    #expect(cacheHitRate(UsageTokens()) == nil)
+    #expect(cacheHitRateText(UsageTokens()) == "—")
+    #expect(cacheHitRateText(UsageTokens(cacheRead: 976, cacheCreation: 20, input: 4)) == "97.6%")
+    #expect(cacheHitRateText(UsageTokens(cacheRead: 99_999, input: 1)) == "99.9%")
+    #expect(cacheHitRateText(UsageTokens(cacheRead: 5)) == "100.0%")
+    #expect(cacheHitRateText(UsageTokens(cacheCreation: 5)) == "0.0%")
+
+    let low = UsageTokens(cacheRead: 884, cacheCreation: 116, responses: cacheHitMinResponses)
+    #expect(cacheHitIsLow(low))
+    #expect(!cacheHitIsLow(UsageTokens(cacheRead: 884, cacheCreation: 116, responses: cacheHitMinResponses - 1)))
+    #expect(!cacheHitIsLow(UsageTokens(cacheRead: 900, cacheCreation: 100, responses: 500)))
+    #expect(!cacheHitIsLow(UsageTokens(responses: 500)))
+}
+
+@Test func aWorkersCacheStateTellsCodexAMissingSessionAndNoResponsesYetApart() {
+    func worker(_ agent: AgentKind, transcript: String?) -> Worker {
+        Worker(session: Session(handle: "pane:t:%1", agent: agent, pid: 1, cwd: "", startedAt: nil, status: .wait, myTurn: false,
+                                since: nil, permissionPrompt: false, title: "", tmux: nil, transcript: transcript, lastUser: "",
+                                lastAssistant: "", termProgram: nil),
+               workerName: "w", role: nil, description: "", paneId: "%1", alive: true, spool: 0, inbox: 0, sentPending: 0,
+               oldestPendingAt: nil, stateFile: nil)
+    }
+    let counted = UsageSessionTotals(main: UsageTokens(cacheRead: 1, responses: 1))
+    let totals = ["/p/a.jsonl": counted]
+    #expect(workerCacheState(worker(.claude, transcript: "/p/a.jsonl"), totals: totals) == .counted(counted))
+    #expect(workerCacheState(worker(.claude, transcript: "/p/b.jsonl"), totals: totals) == .noResponses)
+    #expect(workerCacheState(worker(.claude, transcript: nil), totals: totals) == .noSession)
+    #expect(workerCacheState(worker(.codex, transcript: "/p/a.jsonl"), totals: totals) == .codex)
+}

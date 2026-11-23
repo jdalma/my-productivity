@@ -307,6 +307,10 @@ of it left out. The rest of the file is free text for people; the command reads 
   does not count.
 - A reference is a whole task (`T177`) or numbered items of its ticket (`T181:1`, `T177:4-7`, items 1 to 1000).
 - A goal file without the section is listed with no waves.
+- Only regular files count (a link to one too): a directory named `G<n>-x.md` is skipped.
+- One G number in two or more files is one entry: `path` the first by name, `title` null, no waves, and in
+  `errors` one `{line: null, text: <path>, reason}` per file. Which file is meant is for a person to fix; the
+  command reads no order from any of them, as board-add refuses that goal.
 
 **What starts when.** Every task is one start unit; an item range on the after side is a unit of its own,
 waiting on what its task waits on as well. A whole task before waits for the task and all its ranges. Items

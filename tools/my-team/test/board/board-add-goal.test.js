@@ -70,9 +70,10 @@ test('a goal with no file, a task its order does not name, or a G number of two 
 });
 
 test('a task its goal orders, as a whole or by items, and a single task are added', needsSqlite, (t) => {
-    const { goal, add } = team(t);
+    const { goals, goal, add } = team(t);
     goal('G3-dash.md', ORDER);
     goal('G30-later.md', '# G30\n\n## 순서\n- T500 -> T501\n');
+    mkdirSync(join(goals, 'G3-dir.md')); // R7 L2: a directory is not a second G3 file
     for (const id of ['T178', 'T179', 'T181']) {
         const r = add('pm', { id, title: id, goal: 'G3' });
         assert.equal(r.code, 0, r.out);

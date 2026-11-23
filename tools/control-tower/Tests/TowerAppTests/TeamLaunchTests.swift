@@ -10,7 +10,7 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
                    member: team.map { TeamWorker(team: $0, worker: worker) })
 }
 
-@Test func aRunResumesItsWorkersEachInItsLastClaudeSession() throws {
+@Test func aRunStartsItsWorkersAgainEachInANewConversation() throws {
     // one run's sessions; a worker that left the config since keeps its place, as the run had it
     let run = [
         session("pm-new", team: "t", worker: "pm", at: "2026-11-02T00:00:00.000Z"),
@@ -32,10 +32,17 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     #expect(config["note"] as? String == "kept")
     #expect(workers.map { $0["name"] as? String } == ["pm", "cx", "core"])
     #expect(workers[0]["extra_prompt"] as? String == "brief")
-    #expect(workers[0]["launch_args"] as? [String] == ["--plugin-dir", "/p", "--resume", "pm-new"])
-    #expect(workers[1]["launch_args"] as? [String] == ["-m", "x"])  // codex starts afresh
+    #expect(workers[0]["launch_args"] as? [String] == ["--plugin-dir", "/p"])  // a stale --resume is taken out
+    #expect(workers[1]["launch_args"] as? [String] == ["-m", "x"])
     #expect(workers[2]["agent_type"] as? String == "claude" && workers[2]["cwd"] as? String == "/")
-    #expect(workers[2]["launch_args"] as? [String] == ["--resume", "core"])
+    #expect(workers[2]["launch_args"] == nil)  // no session id added
+}
+
+@Test func everyArgThatCarriesAClaudeConversationOverIsTakenOut() {
+    #expect(withoutResume(["--resume", "id", "-m", "x"]) == ["-m", "x"])
+    #expect(withoutResume(["--resume", "--model", "x"]) == ["--model", "x"])  // a flag after it is not its id
+    #expect(withoutResume(["-r", "id", "--resume=id2", "--continue", "-c", "--plugin-dir", "/p"]) == ["--plugin-dir", "/p"])
+    #expect(withoutResume(["--resume"]) == [])
 }
 
 @Test func aWorkerWhoseFolderIsGoneIsLeftOutOfTheResume() throws {
@@ -330,7 +337,7 @@ private final class Stubs {
     let now = Date()
     let ran = TeamLastRun(run: TeamRun(team: "shop", start: nil), updatedAt: now.addingTimeInterval(-3 * 3600).formatted(.iso8601))
     #expect(launchItemTooltip(c, last: ran, running: false, home: "/h", now: now)
-        == "~/teams/shop.json\n마지막 실행 \(relativeTime(ran.updatedAt, now: now))\n실행: 작업판을 이어 가고, 워커마다 마지막 대화를 resume합니다")
+        == "~/teams/shop.json\n마지막 실행 \(relativeTime(ran.updatedAt, now: now))\n실행: 작업판을 이어 가고, 워커는 새 대화에서 작업판·마지막 handoff로 이어갑니다")
     #expect(launchItemTooltip(c, last: nil, running: false, home: "/h", now: now)
         == "~/teams/shop.json\n실행: 작업판을 이어 가고, 워커는 새 대화로 시작합니다")
     c.others = ["shop-old.json"]

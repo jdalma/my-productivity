@@ -35,7 +35,7 @@ import { atomicWriteJson } from '../lib/fs-utils.js';
 import { guardLaunch } from '../lib/worker-guard.js';
 import { protocolReloadHook } from '../lib/protocol-reload.js';
 import { listPanes, runningByManifest } from '../lib/team-liveness.js';
-import { sendStartupNotices, startupNotice } from '../lib/startup-notice.js';
+import { lastHandoff, sendStartupNotices, startupNotice } from '../lib/startup-notice.js';
 import { mailAndState } from './status.js';
 import { decisionsOf } from '../board/core/queries.js';
 import { TERMINAL } from '../board/core/rules.js';
@@ -281,6 +281,10 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
     }
 
     await prepareStateRoot(config.state_root, { keep: Boolean(opts.continue) });
+    // when the last run started: a handoff made since then is that run's, and a worker in a new conversation reads it
+    const lastStart = opts.continue
+        ? await readFile(join(config.state_root, 'manifest.json'), 'utf-8').then((t) => JSON.parse(t).started_at).catch(() => null)
+        : null;
 
     // Build worker specs (name + cwd) for createTeamSession
     const workerSpecs = config.workers.map((w) => ({ name: w.name, cwd: w.cwd }));
@@ -435,6 +439,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
         const notice = startupNotice({
             overlayPath: `${config.state_root}/workers/${w.name}/AGENTS.md`, keep: Boolean(opts.continue), previous, current,
             agentType: w.agent_type, launchArgs: cfg?.launch_args ?? [], mail: await mailAndState(config.team_name, w.name),
+            board: Boolean(config.board), handoff: lastHandoff(config.team_name, w.name, lastStart),
         });
         if (notice === null) console.log(`[my-team] '${w.name}' resumes with the same AGENTS.md and no mail: no startup notice.`);
         notices.push({ name: w.name, pane_id: w.pane_id, notice });

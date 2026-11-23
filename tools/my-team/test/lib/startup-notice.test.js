@@ -1,17 +1,17 @@
 /**
- * The notice `my-team start` types into each worker's pane (T66). A new team, or a worker that does not carry
- * its conversation over, gets the full notice. A worker that resumes its conversation under `--continue` and
+ * The notice `my-team start` types into each worker's pane (T66). A new team gets the full notice; a worker that
+ * starts a new conversation under `--continue` is told to pick up the last run. A worker that resumes its conversation under `--continue` and
  * finds its AGENTS.md unchanged gets nothing, or one line about waiting mail; one whose AGENTS.md changed gets
  * one line naming the sections that changed. Panes on a tmux server of this file's own.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { continuesConversation, sectionChanges, sendStartupNotices, startupNotice } from '../../src/lib/startup-notice.js';
+import { continuesConversation, lastHandoff, sectionChanges, sendStartupNotices, startupNotice } from '../../src/lib/startup-notice.js';
 import { tmuxExec } from '../../src/lib/tmux-utils.js';
 
 if (process.env.MY_TEAM_TEST_TMUX) {
@@ -62,10 +62,39 @@ test('(e) a start without --continue: the full notice', () => {
     assert.equal(full(notice({ keep: false })), true);
 });
 
-test('(f) a worker that does not carry its conversation over gets the full notice, even with --continue', () => {
-    assert.equal(full(notice({ launchArgs: ['--dangerously-skip-permissions'] })), true, 'claude without --resume');
-    assert.equal(full(notice({ agentType: 'codex', launchArgs: ['resume', 'abc'] })), true, 'codex: cannot tell, so the full notice');
-    assert.equal(full(notice({ previous: OVERLAY + '\n## New\n', launchArgs: [] })), true, 'changed and not resumed: it reads it whole');
+const recover = (s) => /^Team is live again in a new conversation\. Follow \/s\/team\/workers\/core\/AGENTS\.md for the peer protocol/.test(s ?? '');
+
+test('(f) --continue and a new conversation: the protocol, then the last run picked up', () => {
+    assert.equal(recover(notice({ launchArgs: ['--dangerously-skip-permissions'] })), true, 'claude without --resume');
+    assert.equal(recover(notice({ agentType: 'codex', launchArgs: ['resume', 'abc'] })), true, 'codex: cannot tell, so a new conversation');
+    assert.equal(recover(notice({ previous: OVERLAY + '\n## New\n', launchArgs: [] })), true, 'changed and not resumed: it reads it whole');
+    const plain = notice({ launchArgs: [] });
+    assert.match(plain, /mailbox-list/);
+    assert.doesNotMatch(plain, /board-status|handoff/, 'no board, no handoff: only the mailbox');
+    const both = notice({ launchArgs: [], board: true, handoff: '/h/team/2026-11-23-210000/workers/core.md' });
+    assert.match(both, /board-status with "open":true; read \/h\/team\/2026-11-23-210000\/workers\/core\.md .*; run mailbox-list\.$/);
+    assert.doesNotMatch(both, /\n/);
+    assert.equal(full(notice({ launchArgs: [], handoff: `/${'h'.repeat(480)}.md` })), true, 'too long to send: the full notice');
+});
+
+test('lastHandoff: the worker file of the newest bundle made since the last run started, else its team.md', (t) => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'mt-handoff-')));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const bundle = (name, at, files) => {
+        const dir = join(base, 'team', name);
+        mkdirSync(join(dir, 'workers'), { recursive: true });
+        for (const f of files) writeFileSync(join(dir, f), 'x');
+        utimesSync(dir, at, at);
+        return dir;
+    };
+    const old = bundle('2026-11-01-200000', new Date('2026-11-01T11:00:00Z'), ['team.md', 'workers/core.md']);
+    assert.equal(lastHandoff('team', 'core', '2026-11-02T00:00:00Z', base), null, 'the only bundle is older than the last run');
+    assert.equal(lastHandoff('team', 'core', '2026-10-31T00:00:00Z', base), join(old, 'workers', 'core.md'));
+    const now = bundle('2026-11-22-210000', new Date('2026-11-22T12:00:00Z'), ['team.md', 'workers/core.md']);
+    assert.equal(lastHandoff('team', 'core', '2026-11-22T00:00:00Z', base), join(now, 'workers', 'core.md'), 'the newest bundle');
+    assert.equal(lastHandoff('team', 'pm', '2026-11-22T00:00:00Z', base), join(now, 'team.md'), 'no file of its own: team.md');
+    assert.equal(lastHandoff('team', 'core', null, base), null, 'no last run');
+    assert.equal(lastHandoff('other', 'core', '2026-11-22T00:00:00Z', base), null, 'no bundle for the team');
 });
 
 test('which launches carry a claude conversation over', () => {

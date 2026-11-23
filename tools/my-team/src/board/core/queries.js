@@ -253,7 +253,7 @@ export async function approvedCommits(store, repos) {
  * The whole board (the app's view, D1·D2), or with `task` that task's family in full. `workers` counts work
  * only; whether a worker is alive is status.json's and tmux's to say.
  */
-export async function status(store, roster, { task } = {}) {
+export async function status(store, roster, { task, open = false } = {}) {
     const approved = await approvedLandings(store);
     if (task) {
         const row = (await store.get('task', task)) ?? (() => { throw new BoardError('not-found', `no task ${task}`); })();
@@ -302,7 +302,9 @@ export async function status(store, roster, { task } = {}) {
     const findings = await store.list('finding', { state: ['open', 'fixed'] });
     return {
         store: await store.describe(),
-        tasks,
+        // `open`: only what is not finished, so a worker in a new conversation reads the work at
+        // hand and not the board's whole past
+        tasks: open ? live : tasks,
         workers: roster.map((w) => ({
             name: w.name,
             role: w.role ?? null,
@@ -315,6 +317,6 @@ export async function status(store, roster, { task } = {}) {
         recent: log.filter((e) => e.action !== 'progress').slice(-RECENT),
         announcements: (await store.list('announcement', {})).slice(-ANNOUNCEMENTS),
         // every decision asked of the user, oldest first (T146)
-        decisions: decisionsOf(log, tasks, await store.list('decision', {})).map(listed),
+        decisions: decisionsOf(log, tasks, await store.list('decision', {})).filter((d) => !open || d.state === 'open').map(listed),
     };
 }

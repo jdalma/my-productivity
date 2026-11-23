@@ -475,7 +475,12 @@ the next `start` does with it is the caller's choice:
   that resumes its conversation (`--resume` or `--continue` in its launch args)
   gets nothing when its `AGENTS.md` is unchanged, one line when mail waits, and
   one line naming the changed `## ` sections when it changed. Any other worker
-  gets the full notice, as a new team does.
+  starts a new conversation and is told to read its `AGENTS.md`, then pick up the
+  last run: the board's open work (`board-status` with `"open":true`, for a board
+  team), its file in the newest handoff made since the last run started
+  (`~/.my-team/handoffs/<team>/`, by the `my-team-handoff` skill), and its mailbox.
+  Starting a new conversation keeps the prompt cache cost of a restart to that,
+  instead of writing the whole old conversation again.
 - Killing the tmux session directly (`tmux kill-session`) leaves the same state
   behind as `shutdown`.
 - **Known limitation:** `<state_root>.<timestamp>.bak` for a team you never re-run lingers

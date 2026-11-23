@@ -7,6 +7,8 @@ description: /my-team-handoff로 저장한 팀 handoff 묶음(~/.my-team/handoff
 
 `/my-team-handoff`가 shutdown 전에 남긴 묶음을 받아, **PM이 분석하고 워커에게 나눠준다.** 워커가 각자 묶음을 뒤지지 않는다. PM은 팀 전체의 의존과 결정을 보고 있으므로, 결정이 정리된 뒤 워커별로 필요한 것만 전달하는 편이 충돌이 적다.
 
+`start --continue`로 새 대화를 시작한 워커는 시작 안내에 따라 이미 작업판의 열린 항목과 이 묶음의 자기 파일을 읽고 이어간다. takeover는 그 위에 PM이 git 대조, 결정 정리, 워커 간 의존 재배분이 필요할 때 실행한다. PM이 보낸 브리프는 워커가 스스로 추정한 것보다 우선한다.
+
 묶음은 hypothesis다. shutdown과 start 사이에 사용자가 커밋·rebase·머지했을 수 있다. git과 대조하기 전에는 아무것도 워커에게 보내지 않는다.
 
 ## 0. 공통 — 정체 확인
@@ -35,7 +37,7 @@ ls -td "$HOME/.my-team/handoffs/$TEAM"/*/ 2>/dev/null | head -5
 
 ### A2. 읽기
 
-`team.md`와 `workers/*.md` 전부를 읽는다. `compacted: true`인 워커 파일은 라인 번호·함정의 정확도를 낮게 본다.
+작업판 팀이면 먼저 `my-team api board-status --input '{"team_name":"<team>","open":true}' --json`로 열린 task와 미결 결정을 읽는다. 작업판이 기준(source of truth)이다. 묶음의 서술이 작업판과 어긋나면 작업판을 따르고 어긋남을 보고한다. 그다음 `team.md`와 `workers/*.md` 전부를 읽는다. `compacted: true`인 워커 파일은 라인 번호·함정의 정확도를 낮게 본다.
 
 ### A3. 로스터 대조
 

@@ -1,11 +1,16 @@
 /**
  * The notice `my-team start` types into each worker's pane (T66). Each notice costs the worker a turn, so a
  * worker that already knows its instructions is not told them again:
- *   - a new team, a worker with no AGENTS.md before, or one that does not carry its conversation over: the
- *     full notice, as always;
+ *   - a new team, or a worker with no AGENTS.md before: the full notice, as always;
+ *   - `--continue` and a new conversation: the protocol, then where the last run left off (the board, the
+ *     worker's file in the last handoff, its mailbox) before anything new;
  *   - `--continue` and a resumed conversation with the same AGENTS.md: nothing, or one line about mail waiting;
  *   - `--continue` and a resumed conversation with a changed AGENTS.md: one line naming the changed sections.
  */
+
+import { existsSync, readdirSync, statSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 import { sendToWorker } from './tmux-session.js';
 
@@ -58,8 +63,9 @@ export function sectionChanges(before, after) {
  * The notice for one worker, or null for none. previous is its AGENTS.md before this start wrote the new one
  * (null when there was none); mail is {spool, unread} from its mailbox.
  */
-export function startupNotice({ overlayPath, keep, previous, current, agentType, launchArgs, mail }) {
-    if (!keep || previous === null || !continuesConversation(agentType, launchArgs)) return fullNotice(overlayPath);
+export function startupNotice({ overlayPath, keep, previous, current, agentType, launchArgs, mail, board = false, handoff = null }) {
+    if (!keep || previous === null) return fullNotice(overlayPath);
+    if (!continuesConversation(agentType, launchArgs)) return recoverNotice(overlayPath, { board, handoff });
     const waiting = (mail?.spool ?? 0) + (mail?.unread ?? 0);
     const mailLine = waiting ? ` You have ${waiting} waiting message(s): run your mailbox-list.` : '';
     if (previous === current) return mailLine ? `Team is live again; your AGENTS.md is unchanged.${mailLine}` : null;
@@ -75,6 +81,42 @@ export function startupNotice({ overlayPath, keep, previous, current, agentType,
         if (line.length <= SEND_LIMIT) return line;
     }
     return fullNotice(overlayPath);
+}
+
+/**
+ * The notice of a worker that starts a new conversation in a continued team: it reads its protocol, then picks up
+ * the last run from the board (when the team has one), its file in the last handoff (when there is one) and its
+ * mailbox. Too long to send: the full notice.
+ */
+export function recoverNotice(overlayPath, { board = false, handoff = null } = {}) {
+    const steps = [
+        board && 'run board-status with "open":true',
+        handoff && `read ${handoff} (the last handoff; the board and git win over it)`,
+        'run mailbox-list',
+    ].filter(Boolean);
+    const line = `Team is live again in a new conversation. Follow ${overlayPath} for the peer protocol, then pick up the last run before anything new: ${steps.join('; ')}.`;
+    return line.length <= SEND_LIMIT ? line : fullNotice(overlayPath);
+}
+
+/**
+ * The worker's file in the team's newest handoff bundle (`<base>/<team>/<bundle>/`, made by the my-team-handoff
+ * skill): `workers/<worker>.md`, else the bundle's `team.md` (the orchestrator writes its own state there, and
+ * names a worker that did not answer). Only a bundle made after `since` (the last run's start) counts: an older
+ * one belongs to an earlier run. null when there is none.
+ */
+export function lastHandoff(team, worker, since, base = join(homedir(), '.my-team', 'handoffs')) {
+    const dir = join(base, team);
+    const start = Date.parse(since ?? '');
+    if (!existsSync(dir) || Number.isNaN(start)) return null;
+    // a missing handoff is no reason to stop a start: an entry that cannot be read is skipped
+    const bundles = readdirSync(dir).flatMap((name) => {
+        try {
+            const st = statSync(join(dir, name));
+            return st.isDirectory() && st.mtimeMs >= start ? [{ path: join(dir, name), at: st.mtimeMs }] : [];
+        } catch { return []; }
+    }).sort((a, b) => b.at - a.at);
+    if (!bundles.length) return null;
+    return [join(bundles[0].path, 'workers', `${worker}.md`), join(bundles[0].path, 'team.md')].find((f) => existsSync(f)) ?? null;
 }
 
 /** Types each worker's notice into its pane, skipping those with none; returns the names not delivered. */

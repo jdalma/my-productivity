@@ -7,6 +7,7 @@ description: my-team 팀 전체를 shutdown하기 전에 PM(orchestrator)이 모
 
 `my-team shutdown`은 모든 워커의 컨텍스트를 날린다(state_root는 남지만, `--continue` 없이 다시 start하면 `.bak`으로 치워진다). 코드와 git은 디스크에 남지만 **"무엇을 하던 중이었고, 무엇이 막혔고, 누가 무엇을 결정해야 하는가"는 워커의 머릿속에만 있다.** 이 스킬은 shutdown 전에 그것을 파일로 꺼내 둔다.
 
+- **재기동은 `my-team start --continue`다** (Control Tower의 '팀 실행'도 같다). 작업판(board.db)과 메일은 state_root에 있어서, `--continue` 없이 start하면 `.bak`으로 옮겨지고 작업판이 빈 채로 시작한다. 워커 `launch_args`에 `--resume`을 넣지 않는다. 새 대화로 시작한 워커는 시작 안내에 따라 작업판의 열린 항목(`board-status` `"open":true`), 이 묶음의 자기 파일, 메일박스를 읽고 이어간다. 대화를 resume하면 지난 대화 전체를 prompt cache에 다시 쓰게 되므로, 몇 시간 이상 쉴 때는 resume 대신 이 handoff를 쓴다.
 - **config는 건드리지 않는다.** `my-team.json`은 워커의 거시적 역할·워크스페이스를 담는 재사용 정의다. 작업 상태는 config가 아니라 이 스킬이 만드는 묶음(bundle)에만 들어간다.
 - **상태는 워커가 직접 쓴다.** 실패한 시도·암묵적 결정·미커밋 변경의 의도는 그 워커만 안다. PM은 요청하고, 취합하고, 교차 확인한다.
 - **문서는 hypothesis다.** 재기동 후 `/my-team-takeover`가 git과 대조해 검증한다. 그래서 git 기준점(`head_commit`)과 라인 번호를 반드시 남긴다.
@@ -78,7 +79,7 @@ pane에 출력한다:
 팀 handoff 완료: <bundle>/team.md
 - 워커 <N>명 (회신 <k>, 미응답 <m>)
 - 결정 필요 <d>건, 워커 간 불일치 <x>건
-- 재기동: my-team shutdown --team <team>  →  my-team start --config <기존 config>  →  PM pane에서 /my-team-takeover
+- 재기동: my-team shutdown --team <team>  →  my-team start --continue --config <기존 config> (또는 Control Tower '팀 실행')  →  워커는 시작 안내로 각자 이어감. git 대조·결정 정리가 필요하면 PM pane에서 /my-team-takeover
 ```
 
 **shutdown은 실행하지 않는다.** PM이 자기 팀을 내리면 자기 pane도 죽고, 시점은 사용자가 고른다.
@@ -100,6 +101,7 @@ my-team api mailbox-list --input '{"team_name":"<team>","worker":"<me>"}' --json
 
 메시지가 지정한 경로에 아래 「워커 상태 파일 템플릿」으로 쓴다. 원칙:
 
+- **작업판 팀이면 작업판에 있는 것은 다시 적지 않는다.** task 상태·진행(`board-progress`)·결정은 task id(`T7`)와 결정 id(`D#3`)로만 가리킨다. 재기동한 워커는 작업판을 따로 읽는다. 이 파일은 작업판에 없는 것(가설, 함정, 미커밋 변경의 의도, 다음 한 수)을 위한 것이다. 이력은 쓰지 않고 지금 상태만 쓴다. 그래야 handoff를 반복해도 파일이 커지지 않는다.
 - **미완료는 상태 서술형.** "X를 구현한다" ❌ → "X 미구현. Y까지 됨" ✅. 재기동 후 워커가 검증 없이 실행하지 않게 하기 위해서다.
 - **파일은 라인까지.** `Foo.kt` ❌ → `Foo.kt:L45-L72` ✅. 최대 8개.
 - **함정은 비우지 않는다.** 실패가 없었으면 "없음"이라고 쓴다.

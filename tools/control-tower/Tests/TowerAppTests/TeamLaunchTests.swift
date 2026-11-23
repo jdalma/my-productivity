@@ -74,6 +74,11 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     #expect(headless.failure.title == "“t” 팀을 이어서 띄우지 못함")
     #expect(headless.failure.reason.hasPrefix("orchestrator의 작업 폴더가 없어") && headless.failure.reason.hasSuffix("pm (\(gone))"))
 
+    // R15 L3 (T229 sub-1 L1): only the orchestrator declares a role; the rest would start as peers without it
+    let onlyPM = resumeConfig(["workers": [["name": "pm", "agent_type": "claude", "cwd": gone, "role": "orchestrator"],
+                                           ["name": "dev", "agent_type": "claude", "cwd": "/"]]], run: run)
+    #expect(onlyPM.problem(team: "t")?.stops == true)
+
     // a peer team (no roles) that lost a worker still starts
     let peers = resumeConfig(["workers": [["name": "pm", "agent_type": "claude", "cwd": gone],
                                           ["name": "dev", "agent_type": "claude", "cwd": "/"]]], run: run)

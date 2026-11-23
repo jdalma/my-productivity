@@ -162,7 +162,7 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
         ...decisionGuidance(api),
         `- Leave progress on the board each time you finish one of the ticket's numbered items, and when you have been on one item for more than 30 minutes or are stuck: \`${api('board-progress', { id: '<task>', item: 1, note: '<what you did, what is left>', done: false })}\`. item is the item's number in the ticket's What list (0 for work outside it). Write the note as sentences a person can follow, not only a commit hash or a path.`,
         '- Never run a my-team of another version than the installed one (a branch you work on or review) on a running team\'s board: one command of a newer schema migrates the board file, and the installed my-team then refuses it for every worker. Try it on a copy in a temporary folder: set `MY_TEAM_STATE_ROOT_BASE` to that folder AND change `state_root` in the copied manifest.json to the copy\'s own folder (it is an absolute path, so a copied manifest still names the running board).',
-            ];
+    ];
     if (!(solo && workerRole === 'orchestrator')) lines.push(
         '',
         'As a reviewer (the board names you on a task):',

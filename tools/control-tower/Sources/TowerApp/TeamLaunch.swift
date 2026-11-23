@@ -37,7 +37,7 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> ResumeConfig 
     }
     let gone = all.filter { folderIsGone($0["cwd"]) }
         .map { GoneWorker(name: $0["name"] as? String ?? "", cwd: $0["cwd"] as? String ?? "") }
-    return ResumeConfig(config: config, gone: gone)
+    return ResumeConfig(config: config, gone: gone, roles: all.contains { $0["role"] is String })
 }
 
 /// A worker the resume left out: its folder is gone.
@@ -50,12 +50,15 @@ struct GoneWorker: Equatable {
 struct ResumeConfig {
     var config: [String: Any]
     var gone: [GoneWorker] = []
+    /// A worker of the run, left out or not, declares a role: my-team then needs an orchestrator among the rest.
+    var roles = false
 
     var workers: [[String: Any]] { config["workers"] as? [[String: Any]] ?? [] }
 
     /// What the user is told before the resume starts (T229, R15): nil when no worker was left out. `stops` when
     /// my-team start would refuse what is left: no worker (parser.js `workers must be a non-empty array`), or a
-    /// role team whose every orchestrator was left out (parser.js `no 'orchestrator'`); neither names the folder.
+    /// role team whose every orchestrator was left out (parser.js `no 'orchestrator'`; without it the team would come
+    /// up as peers when only the orchestrator declared a role); neither names the folder.
     func problem(team: String) -> (stops: Bool, failure: Failure)? {
         guard !gone.isEmpty else { return nil }
         let list = gone.map { "\($0.name) (\($0.cwd))" }.joined(separator: ", ")
@@ -64,7 +67,7 @@ struct ResumeConfig {
             return (true, Failure(title: "“\(team)” 팀을 이어서 띄우지 못함",
                                   reason: "모든 워커의 작업 폴더가 없습니다: \(list)"))
         }
-        if workers.contains(where: { $0["role"] is String }) && !workers.contains(where: isOrchestrator) {
+        if roles && !workers.contains(where: isOrchestrator) {
             return (true, Failure(title: "“\(team)” 팀을 이어서 띄우지 못함",
                                   reason: "orchestrator의 작업 폴더가 없어 역할 팀을 띄울 수 없습니다. 작업 폴더가 없는 워커: \(list)"))
         }

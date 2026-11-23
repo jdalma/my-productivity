@@ -21,7 +21,7 @@ function setup() {
         mkdirSync(join(stateRoot, d), { recursive: true });
     }
     writeFileSync(join(stateRoot, 'manifest.json'), JSON.stringify({
-        team_name: 'demo', state_root: stateRoot, session_name: 'my-team-demo-x:0',
+        team_name: 'demo', group: 'nudake', state_root: stateRoot, session_name: 'my-team-demo-x:0',
         session_mode: 'detached-session', started_at: '2026-01-01T00:00:00Z',
         workers: [
             { name: 'pm', pane_id: '%1', cwd: '/tmp/a', agent_type: 'claude' },
@@ -56,6 +56,7 @@ test('status --json reports self-reported state and stuck mail per worker', asyn
     const base = setup();
     try {
         const out = await statusJson();
+        assert.equal(out.group, 'nudake', 'the group the manifest keeps');
         const pm = out.workers.find((w) => w.name === 'pm');
         const dev = out.workers.find((w) => w.name === 'dev');
 

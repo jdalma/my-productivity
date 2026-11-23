@@ -2,7 +2,7 @@
  * Config parser and validator for my-team.
  *
  * Schema (TeamConfig):
- *   { team_name, state_root?, new_window?, detached?, board?, solo?, workers: WorkerConfig[] }
+ *   { team_name, group?, state_root?, new_window?, detached?, board?, solo?, workers: WorkerConfig[] }
  *
  * Implements AC-1, AC-19, AC-20, AC-24, AC-26, AC-27 from PLAN.md.
  */
@@ -119,7 +119,7 @@ export function validateConfig(cfg, { configPath } = {}) {
         throw new Error('Config must be a JSON object');
     }
 
-    const { team_name, state_root, new_window, detached, board, knowledge, solo, workers } = cfg;
+    const { team_name, group, state_root, new_window, detached, board, knowledge, solo, workers } = cfg;
     // solo (optional, T143): the orchestrator does the work itself; my-team solo sets it
     if (solo !== undefined && typeof solo !== 'boolean') {
         throw new Error(`solo must be true or false. Got: ${JSON.stringify(solo)}`);
@@ -129,6 +129,11 @@ export function validateConfig(cfg, { configPath } = {}) {
         throw new Error('team_name is required (string)');
     }
     validateTeamName(team_name);
+    // group (optional): the team several feature teams belong to, e.g. "nudake" for nudake-payment and nudake-ecs.
+    // Kept in the manifest, so status and Control Tower can tell a team's group; same characters as a team name.
+    if (group !== undefined && (typeof group !== 'string' || !/^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$/.test(group))) {
+        throw new Error(`group must match /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$/ (like a team name). Got: ${JSON.stringify(group)}`);
+    }
 
     // AC-24: state_root must be absolute or ~
     let resolvedStateRoot;
@@ -169,6 +174,7 @@ export function validateConfig(cfg, { configPath } = {}) {
 
     return {
         team_name,
+        group: group ?? null,
         state_root: resolvedStateRoot,
         board: boardOf(board),
         knowledge: knowledgeOf(knowledge),

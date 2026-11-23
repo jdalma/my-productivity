@@ -141,13 +141,14 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     try FileManager.default.createDirectory(atPath: teams, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(atPath: root) }
     try Data(#"""
-        {"team_name":"t","session_name":"my-team-t-x:0","workers":[
+        {"team_name":"t","group":"nudake","session_name":"my-team-t-x:0","workers":[
           {"name":"pm","pane_id":"%1","cwd":"/w","agent_type":"claude","role":"orchestrator","description":"d",
            "launch_args":["--plugin-dir","/p"],"overlay_path":"/s/AGENTS.md"}]}
         """#.utf8).write(to: URL(fileURLWithPath: "\(state)/t/manifest.json"))
     let base = try #require(teamBase("t", teams: teams, stateBase: state))
     let worker = try #require((base["workers"] as? [[String: Any]])?.first)
     #expect(base["team_name"] as? String == "t")
+    #expect(base["group"] as? String == "nudake")  // with no config, the group comes from the manifest
     #expect(Set(worker.keys) == ["name", "role", "agent_type", "cwd", "description", "launch_args"])  // no pane or path of the old run
     #expect(teamBase("gone", teams: teams, stateBase: state) == nil)
 }
@@ -283,7 +284,7 @@ private final class Stubs {
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: path)
     }
     let w = #""workers":[{"name":"pm"},{"name":"core"}]"#
-    try write("b.json", #"{"team_name":"b",\#(w)}"#)
+    try write("b.json", #"{"team_name":"b","group":"nudake",\#(w)}"#)
     try write("a-old.json", #"{"team_name":"a",\#(w)}"#, age: 100)
     try write("a-new.json", #"{"team_name":"a",\#(w)}"#, age: 10)       // same team twice: the newest
     try write("a.resume.json", #"{"team_name":"a",\#(w)}"#)             // the board's resume config
@@ -301,6 +302,7 @@ private final class Stubs {
     #expect(list.configs.map { [$0.team, $0.file] } == [["a", "a-new.json"], ["b", "b.json"]])
     #expect(list.configs.map(\.workers) == [2, 2])
     #expect(list.configs.map(\.others) == [["a-old.json"], []])
+    #expect(list.configs.map(\.group) == [nil, "nudake"])  // the config's group, none when it names none
     #expect(list.unreadable == [
         UnreadableConfig(file: "broken.json", reason: .notJSON),
         UnreadableConfig(file: "empty.json", reason: .noWorkers),
@@ -328,6 +330,7 @@ private final class Stubs {
     let real = Date()
     #expect(launchItemSubtitle(workers: 3, last: ran, running: false, launching: false, now: real) == "\(lastRunTime(ran.updatedAt, now: real)!) · 워커 3")
     #expect(launchItemSubtitle(workers: 3, last: nil, running: false, launching: false, now: real) == "기록 없음 · 워커 3")
+    #expect(launchItemSubtitle(workers: 3, last: nil, running: false, launching: false, now: real, group: "nudake") == "nudake · 기록 없음 · 워커 3")
     #expect(launchItemSubtitle(workers: 3, last: ran, running: true, launching: false, now: real) == "실행 중 · 워커 3")
     #expect(launchItemSubtitle(workers: 3, last: ran, running: false, launching: true, now: real) == "띄우는 중 · 워커 3")
 }
@@ -340,6 +343,10 @@ private final class Stubs {
         == "~/teams/shop.json\n마지막 실행 \(relativeTime(ran.updatedAt, now: now))\n실행: 작업판을 이어 가고, 워커는 새 대화에서 작업판·마지막 handoff로 이어갑니다")
     #expect(launchItemTooltip(c, last: nil, running: false, home: "/h", now: now)
         == "~/teams/shop.json\n실행: 작업판을 이어 가고, 워커는 새 대화로 시작합니다")
+    c.group = "nudake"
+    #expect(launchItemTooltip(c, last: nil, running: false, home: "/h", now: now)
+        == "~/teams/shop.json\n그룹 nudake\n실행: 작업판을 이어 가고, 워커는 새 대화로 시작합니다")
+    c.group = nil
     c.others = ["shop-old.json"]
     #expect(launchItemTooltip(c, last: ran, running: true, home: "/h", now: now)
         == "~/teams/shop.json\n이 팀은 지금 실행 중입니다\n같은 팀 config: shop-old.json (가장 최근 수정 파일로 띄움)")

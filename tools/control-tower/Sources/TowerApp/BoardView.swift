@@ -338,7 +338,7 @@ struct BoardView: View {
                 Button { tower.launchTeam(c) } label: {
                     Text(c.team)
                     Text(tower.historyRead ? launchItemSubtitle(workers: tower.launchWorkers[c.team] ?? c.workers, last: last[c.team], running: running.contains(c.team),
-                                                                launching: launching, now: now)
+                                                                launching: launching, now: now, group: c.group)
                                            : "기록 읽는 중 · 워커 \(c.workers)")
                 }
                 // before the first history read every team would look never run, and start without its conversations

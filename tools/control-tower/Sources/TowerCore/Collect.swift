@@ -132,6 +132,7 @@ func join(teams: [TeamSeed], panes: [Pane], claude: [ClaudeRecord], codex: [Code
                                sentPending: w.sentPending, oldestPendingAt: w.oldestPendingAt, stateFile: w.stateFile)
              })
         t.hasTaskBoard = team.hasTaskBoard
+        t.group = team.group
         return t
     }, loose: loose)
 }

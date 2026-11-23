@@ -306,6 +306,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
         session_mode: session.sessionMode,
         leader_pane: session.leaderPaneId,
         started_at: new Date().toISOString(),
+        ...(config.group ? { group: config.group } : {}),
         ...(config.board ? { board: config.board } : {}),
         ...(config.knowledge ? { knowledge: config.knowledge } : {}),
         workers: [],

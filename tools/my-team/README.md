@@ -387,6 +387,22 @@ The team name is `solo-` and the folder name in lower case, with every run of ot
 hyphen. A folder name with no letter or digit in it needs `--name`. A team of that name that still runs is
 refused, as with `start`. `--continue`, `--dry-run`, `--new-window` and `--detached` work as for `start`.
 
+## Team group
+
+A team made for one feature can name the team it belongs to with `group` (optional, the characters of a team
+name):
+
+```json
+{ "team_name": "nudake-payment", "group": "nudake", "workers": [ … ] }
+```
+
+- `start` keeps it in the manifest; `status --json` (and `--all --json`) reports it per team as `group` (null
+  when the config names none).
+- Control Tower shows it on the team's 팀 실행 line and in its running team's tooltip, and a search for it finds
+  the team.
+- Each feature team keeps its own `team_name`, and so its own board, goals and handoffs. Two configs with one
+  `team_name` share one state_root: give each feature its own name and put what they share in `group`.
+
 ## Team knowledge
 
 A team config may list documents every worker should know, such as how to look things up in the team's cloud

@@ -64,6 +64,7 @@ async function teamStatus(manifest, panes) {
     })));
     return {
         team_name: manifest.team_name,
+        group: manifest.group ?? null,
         state_root: manifest.state_root,
         session: manifest.session_name,
         session_mode: manifest.session_mode,

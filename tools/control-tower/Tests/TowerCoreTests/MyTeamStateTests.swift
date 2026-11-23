@@ -160,3 +160,19 @@ private func pane(_ session: String, _ id: String, _ worker: String?) -> Pane {
     #expect(!gone.teamAlive)
     #expect(gone.workers.map(\.alive) == [false, false, false, false])
 }
+
+@Test func theManifestsGroupReachesTheTeamAndABlankOneIsNone() throws {
+    let base = NSTemporaryDirectory() + "mt-group-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: base) }
+    try writeTeam(base, "plain")
+    for (dir, group) in [("grouped", "nudake"), ("blank", "  ")] {
+        try write("\(base)/\(dir)/manifest.json", """
+            {"team_name":"\(dir)","group":"\(group)","state_root":"\(base)/\(dir)","session_name":"s:0","session_mode":"detached-session",
+             "workers":[{"name":"w","pane_id":"%1","cwd":"/c","agent_type":"claude"}]}
+            """)
+    }
+    let teams = try loadTeams(base: base, panes: [])
+    let groups = Dictionary(uniqueKeysWithValues: teams.map { ($0.teamName, $0.group) })
+    #expect(groups == ["plain": nil, "grouped": "nudake", "blank": nil])
+    #expect(toTeam(teams.first { $0.teamName == "grouped" }!, clients: []).group == "nudake")
+}

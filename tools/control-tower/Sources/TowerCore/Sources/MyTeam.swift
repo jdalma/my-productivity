@@ -18,6 +18,8 @@ struct Manifest: Decodable {
     var stateRoot: String
     var sessionName: String
     var startedAt: String?
+    /// The team's group (config `group`, my-team writes it): the team several feature teams belong to.
+    var group: String?
     /// Present when the team keeps a task board (`my-team start` writes it, T63); its value is not needed.
     var board: Present?
     var workers: [ManifestWorker]
@@ -43,6 +45,7 @@ struct RawTeam {
     var session: String
     var startedAt: String?
     var teamAlive: Bool
+    var group: String? = nil
     var hasTaskBoard = false
     var workers: [RawWorker]
 }
@@ -72,6 +75,8 @@ struct TeamSeed: Decodable, Hashable {
     var attached: Bool
     /// Not in the fixtures' JSON form: the manifest gives it, `toTeam` copies it.
     var hasTaskBoard = false
+    /// Not in the fixtures' JSON form either: the manifest's `group`.
+    var group: String? = nil
     var workers: [WorkerSeed]
 
     enum CodingKeys: String, CodingKey { case name, sessionName, startedAt, attached, workers }
@@ -138,6 +143,7 @@ func teamStatus(_ m: Manifest, panes: [Pane]) -> RawTeam {
         session: m.sessionName,
         startedAt: m.startedAt,
         teamAlive: false,
+        group: m.group?.trimmed.nonEmpty,
         hasTaskBoard: m.board != nil,
         workers: m.workers.map { w in
             var r = RawWorker(
@@ -204,6 +210,7 @@ func toTeam(_ t: RawTeam, clients: [TmuxClient]) -> TeamSeed {
         startedAt: t.startedAt,
         attached: clients.contains { $0.session == sessionName },
         hasTaskBoard: t.hasTaskBoard,
+        group: t.group,
         workers: t.workers.map { w in
             WorkerSeed(
                 handle: "pane:\(sessionName):\(w.paneId)",

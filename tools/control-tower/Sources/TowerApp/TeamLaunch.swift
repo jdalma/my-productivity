@@ -163,8 +163,8 @@ func newTeamCommand(teams: String, claude: String) -> [String] {
 
 /// What Claude is asked first in a new-team terminal.
 let newTeamPrompt = """
-    ~/teams 에 my-team 팀을 새로 만들고 띄운다. 먼저 나에게 팀의 목적, 필요한 워커(이름·역할·작업 폴더·할 일)를 묻는다. \
-    답을 들으면 my-team 스킬의 config 형식으로 ~/teams/<team_name>.json 을 쓴다. 기존 ~/teams/*.json 을 참고하되 \
+    ~/teams 에 my-team 팀을 새로 만들고 띄운다. 먼저 나에게 팀의 목적, 어느 팀(group, 예: nudake)의 피처인지, 필요한 워커(이름·역할·작업 폴더·할 일)를 묻는다. \
+    답을 들으면 my-team 스킬의 config 형식으로 ~/teams/<team_name>.json 을 쓰고, 팀을 알려 줬으면 그 값을 "group" 에 넣는다. 기존 ~/teams/*.json 을 참고하되 \
     보드가 이어 띄우기용으로 쓴 *.resume.json 은 옛 세션 id가 들어 있으니 참고하지 않고, \
     같은 git 저장소를 고치는 워커가 둘 이상이면 워커마다 `git worktree add <저장소>/.worktrees/<워커> -b <team>/<워커>` 로 \
     worktree를 만들어 그 폴더를 cwd로 쓴다(읽기만 하는 워커는 원래 폴더를 써도 된다). \
@@ -189,6 +189,8 @@ func teamBase(_ team: String, teams: String = teamsDir,
     let keys: Set = ["name", "role", "agent_type", "cwd", "description", "launch_args"]
     var base = config ?? [:]
     base["team_name"] = team
+    // the group the last run had, when the config does not name one: a team started from its manifest keeps it
+    if base["group"] == nil, let group = manifest["group"] as? String, !group.isEmpty { base["group"] = group }
     base["workers"] = (manifest["workers"] as? [[String: Any]] ?? []).map { ran in
         let name = ran["name"] as? String ?? ""
         return (configured[name] ?? [:]).merging(ran.filter { keys.contains($0.key) }) { _, last in last }
@@ -216,6 +218,8 @@ struct TeamConfig: Equatable {
     let modified: Date
     /// The other files in `~/teams` that name the team; the newest, `path`, is the one started (T209 R3 S1).
     var others: [String] = []
+    /// The config's `group`: the team this feature team belongs to, shown on its menu line.
+    var group: String? = nil
 
     var file: String { (path as NSString).lastPathComponent }
 }
@@ -256,7 +260,8 @@ func teamConfigs(in dir: String) -> TeamConfigList {
         guard let workers = json["workers"] as? [Any], !workers.isEmpty else {
             unreadable.append(UnreadableConfig(file: name, reason: .noWorkers)); continue
         }
-        found[team, default: []].append(TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path)))
+        found[team, default: []].append(TeamConfig(team: team, path: path, workers: workers.count, modified: modified(path),
+                                                   group: (json["group"] as? String).flatMap { $0.isEmpty ? nil : $0 }))
     }
     let configs = found.values.map { files -> TeamConfig in
         // newest first; on the same time, the first by name
@@ -401,10 +406,11 @@ func lastRunTime(_ iso: String, now: Date, calendar: Calendar = .current) -> Str
     return format("yyyy-MM-dd")
 }
 
-/// A 팀 실행 menu line's second line: when the team last ran, or that it runs or is being started, then its size.
-func launchItemSubtitle(workers: Int, last: TeamLastRun?, running: Bool, launching: Bool, now: Date) -> String {
+/// A 팀 실행 menu line's second line: its group when the config names one, when the team last ran, or that it runs
+/// or is being started, then its size.
+func launchItemSubtitle(workers: Int, last: TeamLastRun?, running: Bool, launching: Bool, now: Date, group: String? = nil) -> String {
     let when = running ? "실행 중" : launching ? "띄우는 중" : last.flatMap { lastRunTime($0.updatedAt, now: now) } ?? "기록 없음"
-    return "\(when) · 워커 \(workers)"
+    return ((group.map { [$0] } ?? []) + [when, "워커 \(workers)"]).joined(separator: " · ")
 }
 
 /// The sessions of one run in the history.
@@ -432,7 +438,7 @@ func launchWorkerCounts(_ configs: [TeamConfig], history: [HistorySession], team
 
 /// A 팀 실행 menu line's tooltip: its file, when it last ran, and what picking it does; the team's other files.
 func launchItemTooltip(_ config: TeamConfig, last: TeamLastRun?, running: Bool, home: String, now: Date) -> String {
-    var lines = [abbreviate(config.path, home: home)]
+    var lines = [abbreviate(config.path, home: home)] + (config.group.map { ["그룹 \($0)"] } ?? [])
     if running {
         lines.append("이 팀은 지금 실행 중입니다")
     } else if let last {

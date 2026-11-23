@@ -49,6 +49,14 @@ private func model(_ board: Board, history: [HistorySession] = [], query: String
     #expect(g.rows.map(\.title) == ["b", "a", "c"])
 }
 
+@Test func aTeamsGroupLeadsItsTooltipAndASearchForItFindsTheTeam() {
+    var t = team("nudake-payment", [worker("a", session: session("pane:t:%1", status: .busy))])
+    t.group = "nudake"
+    let board = Board(at: at, teams: [t, team("other", [worker("b", session: session("pane:o:%1", status: .busy))])], loose: [])
+    #expect(teamLineTooltip(model(board).teams[0]) == "그룹 nudake · 워커 1 · 작업 중 1")
+    #expect(model(board, query: "nudake").teams.map(\.name) == ["nudake-payment"])
+}
+
 @Test func summaryOmitsEmptySegments() {
     let board = Board(at: at, teams: [team("t", [worker("a", session: session("pane:t:%1", status: .busy))])], loose: [])
     #expect(teamLineTooltip(model(board).teams[0]) == "워커 1 · 작업 중 1")

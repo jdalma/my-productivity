@@ -86,6 +86,8 @@ struct TeamGroup: Equatable {
     /// The team keeps a task board: its line has the button that opens it, with counts in its tooltip once read.
     var hasTaskBoard = false
     var taskCounts: TaskCounts?
+    /// The team's group (manifest `group`), shown in its line's tooltip.
+    var group: String? = nil
 }
 
 /// The task board button's counts (v4 §7.5 S2): the decisions waiting for the user, then each panel's tasks but the
@@ -300,12 +302,12 @@ func sidebarModel(board: Board, history: [HistorySession], query: String, filter
         }
         listed.formUnion(rows.compactMap(\.session.transcript))
         all += rows
-        let teamHit = hit([team.name])
+        let teamHit = hit([team.name, team.group])
         let shown = rows.filter { teamHit || matches($0) }
         if q.isEmpty || !shown.isEmpty {
             teams.append(TeamGroup(name: team.name, myTurn: rows.filter(\.session.myTurn).count,
                                    rows: shown, stopped: team.workers.count - rows.count, hasTaskBoard: team.hasTaskBoard,
-                                   taskCounts: team.hasTaskBoard ? taskBoards[team.name].map(TaskCounts.init) : nil))
+                                   taskCounts: team.hasTaskBoard ? taskBoards[team.name].map(TaskCounts.init) : nil, group: team.group))
         }
     }
 
@@ -540,7 +542,9 @@ func teamLineWords(_ team: TeamGroup) -> [String] {
 /// What VoiceOver reads for a team's line: the name, then the line in words.
 func teamLineLabel(_ team: TeamGroup) -> String { ([team.name] + teamLineWords(team)).joined(separator: ", ") }
 
-func teamLineTooltip(_ team: TeamGroup) -> String { teamLineWords(team).joined(separator: " · ") }
+func teamLineTooltip(_ team: TeamGroup) -> String {
+    ((team.group.map { ["그룹 \($0)"] } ?? []) + teamLineWords(team)).joined(separator: " · ")
+}
 
 /// The team an arrow key folds or unfolds in the running list (R11 L5): the selected worker's own, and with none to
 /// unfold there, → takes the first folded team down the list.

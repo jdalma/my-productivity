@@ -223,6 +223,8 @@ public struct Team: Codable, Hashable, Sendable {
     public var attached: Bool
     /// The manifest names a task board (`my-team api board-status` reads it, T70). Not in the JSON form.
     public var hasTaskBoard = false
+    /// The manifest's `group`: the team several feature teams belong to. Not in the JSON form.
+    public var group: String? = nil
     public var workers: [Worker]
 
     public init(name: String, sessionName: String, startedAt: String?, attached: Bool, workers: [Worker]) {

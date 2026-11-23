@@ -285,11 +285,12 @@ N이면 워커가 첫 permission prompt에서 멈추고, 그 pane에서 직접 �
 
 ## Step 7 — 최종 JSON preview + 저장 + dry-run (생성·수정 모드)
 
-최종 JSON을 코드블록으로 보여준다. 바로 위에 `최종 config — <team_name> (워커 N명)` 헤더를 붙이고, "저장할까요? (y/N)"로 1회 확인한다. 키 순서는 `team_name`, `board`(작업판을 쓸 때), `knowledge`(있을 때), `workers[].{name, cwd, agent_type, role, launch_args, deny, description, extra_prompt}` 고정 (`role`은 팀이 role을 쓸 때만, `deny`는 리뷰 역할 워커만). JSON 바로 아래에 한 줄을 붙인다. 작업판을 켰으면 `작업판: 켜짐 (빼려면 "작업판 빼줘")`, Step 2에서 뺐으면 `작업판: 없음 (<이유>)`이라고 쓴다.
+최종 JSON을 코드블록으로 보여준다. 바로 위에 `최종 config — <team_name> (워커 N명)` 헤더를 붙이고, "저장할까요? (y/N)"로 1회 확인한다. 키 순서는 `team_name`, `group`(피처 단위 팀이 속한 팀, 예: `nudake`. 있을 때), `board`(작업판을 쓸 때), `knowledge`(있을 때), `workers[].{name, cwd, agent_type, role, launch_args, deny, description, extra_prompt}` 고정 (`role`은 팀이 role을 쓸 때만, `deny`는 리뷰 역할 워커만). JSON 바로 아래에 한 줄을 붙인다. 작업판을 켰으면 `작업판: 켜짐 (빼려면 "작업판 빼줘")`, Step 2에서 뺐으면 `작업판: 없음 (<이유>)`이라고 쓴다.
 
 ```json
 {
   "team_name": "order-cache-poc",
+  "group": "order",
   "board": {"store": "sqlite"},
   "workers": [
     {"name": "pm", "cwd": "/Users/me/work/api", "agent_type": "claude", "role": "orchestrator", "launch_args": [], "description": "범위 결정·티켓 분배 (orchestrator)", "extra_prompt": "…"},

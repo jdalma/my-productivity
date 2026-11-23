@@ -2,16 +2,16 @@ import Foundation
 import TowerCore
 
 // Starting a my-team team from the board, in a new Ghostty window: a new team that Claude writes with the user,
-// or a stopped one (after a reboot, say) with each worker back in its last session.
+// or a stopped one (after a reboot, say) with the workers its last run had, each in a new conversation.
 // The board itself writes no file: the terminal it opens does, in front of the user.
 
 let teamsDir = homeDirectory() + "/teams"
 
 /// The config that starts one run of a team again: its workers as that run had them, each with what `base` (the
-/// team's config) gives it, else its agent and folder; each claude worker resuming its last ended session with
-/// `--resume <id>`, which my-team uses for that one launch and keeps out of the team's manifest. Codex workers start
-/// afresh: my-team passes launch args to codex as options, and its resume is a subcommand. A worker whose folder is
-/// gone (`folderIsGone`) is left out, and named in `gone`.
+/// team's config) gives it, else its agent and folder. Every worker starts a new conversation, a `--resume` in its
+/// launch args taken out: resuming would write each worker's whole last conversation to the prompt cache again,
+/// while my-team's startup notice has a new conversation pick up the last run from the board's open work, the last
+/// handoff and its mailbox. A worker whose folder is gone (`folderIsGone`) is left out, and named in `gone`.
 func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> ResumeConfig {
     var newest: [String: HistorySession] = [:]
     for h in run {
@@ -27,17 +27,31 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> ResumeConfig 
     let all = configured + added
     var config = base
     config["workers"] = all.filter { !folderIsGone($0["cwd"]) }.map { worker in
-        guard worker["agent_type"] as? String == "claude", let name = worker["name"] as? String,
-              let last = newest[name], !last.live, last.agent == .claude else { return worker }
-        var args = worker["launch_args"] as? [String] ?? []
-        if let i = args.firstIndex(of: "--resume") { args.removeSubrange(i...min(i + 1, args.count - 1)) }
+        guard worker["agent_type"] as? String == "claude", let args = worker["launch_args"] as? [String] else { return worker }
         var w = worker
-        w["launch_args"] = args + ["--resume", last.id]
+        w["launch_args"] = withoutResume(args)
         return w
     }
     let gone = all.filter { folderIsGone($0["cwd"]) }
         .map { GoneWorker(name: $0["name"] as? String ?? "", cwd: $0["cwd"] as? String ?? "") }
     return ResumeConfig(config: config, gone: gone, roles: all.contains { $0["role"] is String })
+}
+
+/// Claude's args without the ones that carry a conversation over (what my-team's `continuesConversation` counts):
+/// `--resume`/`-r` with the id after it (a following flag is not an id), `--resume=<id>`, `--continue`, `-c`.
+func withoutResume(_ args: [String]) -> [String] {
+    var out: [String] = []
+    var i = 0
+    while i < args.count {
+        let a = args[i]
+        if a == "--resume" || a == "-r" {
+            i += (i + 1 < args.count && !args[i + 1].hasPrefix("-")) ? 2 : 1
+            continue
+        }
+        if !(a.hasPrefix("--resume=") || a == "--continue" || a == "-c") { out.append(a) }
+        i += 1
+    }
+    return out
 }
 
 /// A worker the resume left out: its folder is gone.
@@ -160,7 +174,8 @@ let newTeamPrompt = """
 
 /// The config a stopped team starts from. Its workers are the ones its last run had (the manifest keeps workers
 /// added or removed mid-run), each with the brief and settings its `~/teams` config gives it; with no manifest,
-/// the config alone. The manifest lacks the briefs, but a resumed worker has its own in its conversation.
+/// the config alone. The manifest lacks the briefs: a worker added mid-run comes back without one, and picks up its
+/// work from the board and the last handoff.
 func teamBase(_ team: String, teams: String = teamsDir,
               stateBase: String = stateRootBase()) -> [String: Any]? {
     func read(_ path: String) -> [String: Any]? {
@@ -320,7 +335,8 @@ let shutdownTimeout: TimeInterval = 30
 /// The 팀 종료 dialog's message (T206 §1): what ends at once and what stays.
 func shutdownMessage(workers: Int) -> String {
     "워커 \(workers)개와 tmux 세션이 바로 끝나고, 응답 중인 워커는 중간에 멈춥니다. "
-        + "작업판·메일·manifest는 남아 있어, ‘팀 실행’으로 다시 띄우면 워커마다 마지막 대화를 이어갑니다."
+        + "작업판·메일·manifest는 남아 있어, ‘팀 실행’으로 다시 띄우면 워커마다 새 대화에서 작업판·마지막 handoff·메일로 이어갑니다. "
+        + "오래 쉴 예정이면 종료 전에 PM에서 /my-team-handoff를 실행하세요."
 }
 
 /// A team's newest run in the history: the run its newest session belongs to, and when that session last changed.
@@ -353,7 +369,7 @@ func launchOrder(_ configs: [TeamConfig], last: [String: TeamLastRun]) -> [TeamC
     }
 }
 
-/// How 팀 실행 starts a team: a stopped run in the history comes back with each worker resuming its last
+/// How 팀 실행 starts a team: a stopped run in the history comes back with that run's workers, each in a new
 /// conversation (`Tower.resumeTeam`); a team with none starts from its config with `--continue`.
 enum TeamLaunchPlan: Equatable {
     case resume(TeamRun)
@@ -420,7 +436,7 @@ func launchItemTooltip(_ config: TeamConfig, last: TeamLastRun?, running: Bool, 
     if running {
         lines.append("이 팀은 지금 실행 중입니다")
     } else if let last {
-        lines += ["마지막 실행 " + relativeTime(last.updatedAt, now: now), "실행: 작업판을 이어 가고, 워커마다 마지막 대화를 resume합니다"]
+        lines += ["마지막 실행 " + relativeTime(last.updatedAt, now: now), "실행: 작업판을 이어 가고, 워커는 새 대화에서 작업판·마지막 handoff로 이어갑니다"]
     } else {
         lines.append("실행: 작업판을 이어 가고, 워커는 새 대화로 시작합니다")
     }

@@ -413,3 +413,21 @@ both('a document task in board-status: its landing has every field a landing has
     for (const k of ['repo', 'commit', 'base_commit', 'commits', 'left_out']) assert.equal(typeof fam.landings[0][k], typeof code[k], `${k} keeps its type`);
     assert.deepEqual([fam.landings[0].commit, fam.landings[0].commits, fam.verdicts[0].verified_commit], ['', [], '']);
 });
+
+both('status with open: unfinished tasks and unanswered decisions only, the whole board without it', async ({ store, as }) => {
+    await as('pm').add({ id: 'T1', title: 'one', assignee: 'core', reviewer: 'rv', ...full });
+    await as('pm').wait({ id: 'T1', ...brief('Answered?') });
+    await as('pm').answer({ id: 'T1', chosen: 'A', answer: 'yes' });
+    await as('pm').add({ id: 'T2', title: 'two', assignee: 'core', reviewer: 'rv', ...full });
+    await as('pm').wait({ id: 'T2', ...brief('Still open?') });
+    await as('pm').add({ id: 'T3', title: 'three', assignee: 'core', reviewer: 'rv', ...full });
+    await as('pm').cancel({ id: 'T3' });
+
+    const all = await status(store, ROSTER);
+    assert.deepEqual(all.tasks.map((t) => t.id).sort(), ['T1', 'T2', 'T3']);
+    assert.deepEqual(all.decisions.map((d) => d.state).sort(), ['answered', 'open']);
+    const open = await status(store, ROSTER, { open: true });
+    assert.deepEqual(open.tasks.map((t) => t.id).sort(), ['T1', 'T2'], 'a cancelled task is left out');
+    assert.deepEqual(open.decisions.map((d) => d.question), ['Still open?'], 'an answered decision is left out');
+    assert.deepEqual(open.workers, all.workers, 'loads are counted the same');
+});

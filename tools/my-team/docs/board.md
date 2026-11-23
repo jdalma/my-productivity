@@ -57,7 +57,7 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 | `board-progress` | the task's assignee, in `doing` or `changes` | **`id`**, **`item`** (the ticket's numbered item, 1 up; 0 for work outside them), **`note`**, **`done`** (true or false) | `progress` |
 | `board-inbox` | anyone, for themselves | `since` (the last `cursor`) | `tasks`, `review_queue`, `review_hint` (with 2 or more requests), `incomplete`, `notes`, `announcements`, `decisions` `{open, answered}`, `cursor` |
 | `board-review-queue` | anyone, for themselves | | `queue`, `incomplete`, `hint` (with 2 or more requests) |
-| `board-status` | anyone | `task` (one family in full, with its `answers` and the task's `progress`) | `store`, `tasks` (each with `progress_summary` and `history`), `workers` (`name`, `role`, `assigned`, `in_hand`, `reviewing`), `open_findings`, `recent`, `announcements`, `decisions` |
+| `board-status` | anyone | `task` (one family in full, with its `answers` and the task's `progress`); `open` (`true`: only tasks not done or cancelled and decisions not answered, what a worker in a new conversation of a continued team reads) | `store`, `tasks` (each with `progress_summary` and `history`), `workers` (`name`, `role`, `assigned`, `in_hand`, `reviewing`), `open_findings`, `recent`, `announcements`, `decisions` |
 | `board-pushable` | anyone | **`commit`**, **`upstream`** (the remote's commit) or **`remote`** (its name, for a new branch); `repo` (default: the current folder), `baseline` | `ok`, `repo`, `covered`, `uncovered` (`commit`, `short`, `subject`) |
 
 Notes on the inputs:

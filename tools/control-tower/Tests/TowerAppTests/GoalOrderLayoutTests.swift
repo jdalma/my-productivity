@@ -113,6 +113,8 @@ private func goal(_ id: String, _ waves: [[GoalNode]], cycle: [String]? = nil, e
     #expect(!goalFolded(done, stored: [done.path: false]) && goalFolded(startable, stored: [startable.path: true]))
     #expect(goalSpoken(all[1]) == "목표 G3, 대시보드: 사용량·인사이트, 진행 중 1, 단계 5개")
     #expect(goalErrorLine(all[3].errors) == #"순서 4번째 줄을 읽지 못함: expected exactly one "->""#)
+    let twoFiles = goal("G5", [], errors: ["a", "b"].map { GoalOrderError(line: nil, text: "/tmp/G5-\($0).md", reason: "G5 names 2 files") })
+    #expect(GoalTag(twoFiles) == .unreadable && goalErrorLine(twoFiles.errors) == "목표 파일 오류: G5 names 2 files 외 1")
 }
 
 @Test func theOrderViewShowsOnlyWhereMyTeamCanAnswerIt() {

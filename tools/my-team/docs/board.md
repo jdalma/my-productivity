@@ -333,7 +333,8 @@ when they are all in the task's `progress_summary.done_items` (`board-progress` 
   yet: those that can start now, and those already under way (read `state` to tell them apart). `unregistered`
   lists the tasks the board does not have.
 - A cycle gives `cycle` (`["A","B","A"]`) and no waves. Errors in the section give `errors` (`{line, text,
-  reason}`) and no waves, since a half-read order could show a task as ready that is not.
+  reason}`) and no waves, since a half-read order could show a task as ready that is not. `line` is null for an
+  error of the file itself (one G number in two files, `text` the file's path), so a reader takes it as optional.
 - A team whose config has no board gets every unit `unregistered`.
 
 ## States

@@ -248,10 +248,12 @@ func goalSpoken(_ g: GoalOrder) -> String {
     ["목표 \(g.id)", g.title, GoalTag(g).text, g.waves.isEmpty ? nil : "단계 \(g.waves.count)개"].compactMap { $0 }.joined(separator: ", ")
 }
 
-/// `순서 4번째 줄을 읽지 못함: expected …`, then `외 N` for the rest (design §3 문법 오류).
+/// `순서 4번째 줄을 읽지 못함: expected …`, or `목표 파일 오류: …` for one without a line (T230: one G number in
+/// two files), then `외 N` for the rest (design §3 문법 오류).
 func goalErrorLine(_ errors: [GoalOrderError]) -> String? {
     guard let first = errors.first else { return nil }
-    return "순서 \(first.line)번째 줄을 읽지 못함: \(first.reason)" + (errors.count > 1 ? " 외 \(errors.count - 1)" : "")
+    let head = first.line.map { "순서 \($0)번째 줄을 읽지 못함" } ?? "목표 파일 오류"
+    return "\(head): \(first.reason)" + (errors.count > 1 ? " 외 \(errors.count - 1)" : "")
 }
 
 /// A card the search does not find is dimmed and stays in place; a goal none of whose cards it finds shows its head

@@ -50,6 +50,19 @@ private func goals(_ json: String) throws -> [GoalOrder] {
     #expect(try goals(#"{"ok":true,"goals":[]}"#).isEmpty)
 }
 
+@Test func oneGNumberInTwoFilesReadsAsOneGoalWithFileErrors() throws {
+    // my-team T230 (R7 L1): the output for G5-a.md and G5-b.md, an error per file with no line
+    let reason = "G5 names 2 files; give each goal its own number"
+    let all = try goals("""
+        {"ok":true,"goals":[{"id":"G5","title":null,"path":"/tmp/example/G5-a.md","waves":[],"ready_now":[],
+         "unregistered":[],"cycle":null,"errors":[{"line":null,"text":"/tmp/example/G5-a.md","reason":"\(reason)"},
+         {"line":null,"text":"/tmp/example/G5-b.md","reason":"\(reason)"}]}]}
+        """)
+    #expect(all.map(\.id) == ["G5"] && all[0].waves.isEmpty)
+    #expect(all[0].errors == [GoalOrderError(line: nil, text: "/tmp/example/G5-a.md", reason: reason),
+                              GoalOrderError(line: nil, text: "/tmp/example/G5-b.md", reason: reason)])
+}
+
 @Test func twoFilesWithOneGNumberAreBothKept() throws {
     // my-team T212 R7 L1: G3-a.md and G3-b.md both come out as G3
     func goal(_ path: String) -> String {

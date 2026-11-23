@@ -34,10 +34,10 @@ public let cacheHitMinResponses = 20
 /// Below this, with enough responses, a rate is low. A guess to tune (design §1).
 public let cacheHitLowRate = 0.90
 
-/// A rate worth a warning: enough responses and under `cacheHitLowRate`.
+/// A rate worth a warning: enough responses and under `cacheHitLowRate` as shown, so "90.0%" is never low.
 public func cacheHitIsLow(_ t: UsageTokens) -> Bool {
     guard t.responses >= cacheHitMinResponses, let rate = cacheHitRate(t) else { return false }
-    return rate < cacheHitLowRate
+    return (rate * 1000).rounded() < cacheHitLowRate * 1000
 }
 
 /// What the dashboard can say of a running worker's cache.

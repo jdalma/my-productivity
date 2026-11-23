@@ -305,7 +305,7 @@ private let cases: [ShotCase] = {
     let dir = ProcessInfo.processInfo.environment["CT_DASHBOARD_SHOTS"].map { URL(fileURLWithPath: $0) }
     if let dir { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
     for c in cases {
-        let shot = Shot(c.report, month: c.month, width: c.width, height: c.width < 600 ? 3400 : 1800, scale: c.scale, dark: c.dark)
+        let shot = Shot(c.report, month: c.month, width: c.width, height: c.width < 600 ? 3400 : c.scale >= 2 ? 2800 : 1800, scale: c.scale, dark: c.dark)
         try await shot.settle()
         if c.selectFirstRows {
             shot.tables().forEach { $0.selectRowIndexes([0], byExtendingSelection: false) }

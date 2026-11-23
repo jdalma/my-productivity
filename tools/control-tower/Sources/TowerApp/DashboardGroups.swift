@@ -467,7 +467,8 @@ struct WorkersCacheGroup: View {
     }
 
     private func grid(wide: Bool) -> some View {
-        let columns = wide ? 7 : 4
+        // the 낮음 mark has a column of its own, so a low rate stays in line with the others (T232 sub-1 S1)
+        let columns = wide ? 8 : 5
         return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 4) {
             ForEach(teams, id: \.name) { team in
                 if teams.count > 1 {
@@ -505,10 +506,10 @@ struct WorkersCacheGroup: View {
 
     private func header(wide: Bool) -> some View {
         GridRow {
-            ForEach(wide ? ["워커", "히트율", "cache 읽기", "cache 생성", "입력", "응답", "sub-agent"]
-                         : ["워커", "히트율", "cache 읽기", "sub-agent"], id: \.self) { title in
+            ForEach(wide ? ["워커", "히트율", "", "cache 읽기", "cache 생성", "입력", "응답", "sub-agent"]
+                         : ["워커", "히트율", "", "cache 읽기", "sub-agent"], id: \.self) { title in
                 Text(title).scaledFont(.caption1).foregroundStyle(.secondary)
-                    .gridColumnAlignment(title == "워커" || title == "sub-agent" ? .leading : .trailing)
+                    .gridColumnAlignment(["워커", "", "sub-agent"].contains(title) ? .leading : .trailing)
             }
         }
         .accessibilityHidden(true)
@@ -519,7 +520,8 @@ struct WorkersCacheGroup: View {
         let tip = workerCacheTooltip(line)
         return GridRow {
             name(line).help(tip)
-            rate(c.rate, low: c.rateLow, few: c.rateFew).help(tip)
+            rate(c.rate, low: false, few: c.rateFew).help(tip)
+            lowMark(c.rateLow).help(tip)
             number(c.cacheRead).help(tip)
             if wide {
                 number(c.cacheCreation).help(tip)
@@ -546,13 +548,21 @@ struct WorkersCacheGroup: View {
     private func rate(_ text: String, low: Bool, few: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(text).scaledFont(.callout).monospacedDigit().foregroundStyle(few ? .secondary : .primary)
-            if low {
-                Label("낮음", systemImage: "exclamationmark.triangle.fill").scaledFont(.caption1).foregroundStyle(TaskColor.orange)
-            }
+            lowMark(low)
         }
         // a number never breaks: the name gives up its width first
         .fixedSize()
         .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func lowMark(_ low: Bool) -> some View {
+        if low {
+            Label("낮음", systemImage: "exclamationmark.triangle.fill").scaledFont(.caption1).foregroundStyle(TaskColor.orange)
+                .fixedSize().accessibilityHidden(true)
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
     }
 
     private func number(_ text: String) -> some View {

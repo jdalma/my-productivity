@@ -635,6 +635,8 @@ private func unlock(_ path: String, _ mode: Int = 0o644) { try? FileManager.defa
     #expect(cacheHitIsLow(low))
     #expect(!cacheHitIsLow(UsageTokens(cacheRead: 884, cacheCreation: 116, responses: cacheHitMinResponses - 1)))
     #expect(!cacheHitIsLow(UsageTokens(cacheRead: 900, cacheCreation: 100, responses: 500)))
+    #expect(!cacheHitIsLow(UsageTokens(cacheRead: 8996, cacheCreation: 1004, responses: 500)), "89.96% shows as 90.0%: not low")
+    #expect(cacheHitIsLow(UsageTokens(cacheRead: 8994, cacheCreation: 1006, responses: 500)), "89.94% shows as 89.9%")
     #expect(!cacheHitIsLow(UsageTokens(responses: 500)))
 }
 

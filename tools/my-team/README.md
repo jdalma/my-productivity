@@ -289,6 +289,9 @@ will actually do. High user attention required.
 > `mailbox-list` is the subtle one: it *looks* read-only but absorbs the spool,
 > which is exactly why the self-poll discipline works (and why skipping it loses
 > messages). `status` and `monitor` are also pure (read / watch only).
+> From a worker pane (`MY_TEAM_WORKER` set), `send-message`, `mailbox-list`,
+> `mailbox-mark-delivered` and `archive-lookup` act only as that worker of its own
+> team; naming another is refused (`forbidden`). The user's shell names any worker.
 
 Run `my-team <cmd> --help` for full options.
 

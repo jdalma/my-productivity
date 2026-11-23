@@ -123,7 +123,7 @@ test('T146: every decision for the user goes on the board first, tied to the tas
         assert.match(text, /Only a decision that serves no task at all goes on with `board-ask` and no `tasks`/);
     }
     const pm = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
-    assert.match(pm, /work that is not on the board yet[^\n]*add that task first with `board-add`/);
+    assert.equal(pm.match(/not on the board yet/g).length, 1, 'pm reads the worker rule; T229 dropped its copy');
     assert.match(pm, /`decisions\.open`[^\n]*record it at once[^\n]*board-answer[^\n]*D#…[^\n]*철회/);
     assert.match(pm, /made without being asked[^\n]*board-ask[^\n]*answered/);
     assert.match(pm, /`board-announce` is for notices to the team\. It is not where a user decision is recorded/);

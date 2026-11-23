@@ -54,8 +54,8 @@ my-team start --config my-team.json
 |------|------|
 | `# Team Worker Protocol` (헤더) | "팀 <name>의 워커 중 하나"라는 한 줄 + user는 pane으로, peer는 mailbox로 본다 |
 | `## Identity` | team_name, worker name, agent_type, `OMC_TEAM_WORKER` env |
-| `## Team Roster` | 모든 워커 한 줄씩: `- **name** [agent_type] — role`. role은 config의 `description` (없으면 `extra_prompt` 첫 줄). 부팅 스냅샷이며, 최신 로스터는 `mailbox-list` 응답의 `roster`가 권위 있다고 명시. WORKER role은 "로스터에 보인다고 메시지 보낼 이유는 아니다"(orchestrator 경유)로, peer 팀은 "범위 밖이면 그 피어에게 직접 보내라"로 분기 |
-| `## Liveness` | `status.json` 갱신 안내 (`my-team status`가 읽는다) |
+| `## Team Roster` | 모든 워커 한 줄씩: `- **name** [agent_type] — role`. role은 config의 `description` (없으면 `extra_prompt` 첫 줄). 최신 로스터가 `mailbox-list` 응답의 `roster`라는 점은 메일박스 절이 말한다. WORKER role은 "로스터에 보인다고 메시지 보낼 이유는 아니다"(orchestrator 경유)로, peer 팀은 "범위 밖이면 그 피어에게 직접 보내라"로 분기 |
+| `## Liveness` | `status.json` 갱신 안내 (`my-team status`가 읽는다). 막히면 `{"state": "blocked", "reason": "..."}`를 쓰고 pane stdout에 알린다 |
 | `## Message Protocol` | user와는 pane stdout과 CLI 확인 프롬프트로 말한다. peer 채널을 api send-message 하나로 제한하는 금지(`tmux send-keys`, `my-team msg`)는 `## Rules`에 있다 |
 | `## Message Protocol > Talk to other workers via CLI API` | 6개 명령 한 줄씩 (send-message 1-way / send-message expects_reply / 답장 / mailbox-list / mark-delivered / archive-lookup) |
 | `### Messaging a worker in ANOTHER team (cross-team)` | 다른 팀 워커에게 보내는 방법. orchestrator와 역할 없는 peer 팀에만 있고, WORKER에는 없다 |
@@ -68,7 +68,7 @@ my-team start --config my-team.json
 | `## Team Role: ORCHESTRATOR` | 위임 규율 + cross-team 게이트웨이 + **Team changes**(합류 보고 1통을 받아 사용자에게 stdout으로 알림, 파일 겹침은 관리하지 않음) — `workerRole`이 non-null일 때만 |
 | `## Team Board` | 작업판 사용법. config `board`가 있는 팀에만 |
 | `## Team Role: WORKER` | 오케스트레이터에게만 blocked/done 보고, 파일 조율 없음(워크트리가 워킹 트리를 분리하므로 피어에게 편집 중인 파일을 묻지 않음), 합류 시 자기소개 금지 — `workerRole`이 non-null일 때만 |
-| `## Rules` | 파일 범위, 팀 접근 제한, 병렬 작업(add-worker), 피어 제거, 교대, closeout, blocked 보고 (아래) |
+| `## Rules` | 파일 범위, 팀 접근 제한, 병렬 작업(add-worker), 피어 제거, 교대, closeout (아래) |
 | Agent-type guidance | claude/codex/gemini/cursor 별 추가 룰 |
 | `## Role Context` | config의 `extra_prompt`가 그대로 들어감 (없으면 생략) |
 
@@ -93,7 +93,6 @@ add-worker Spawn protocol이 메시지 대신 작업판을 가리키는 문장�
 - **Retiring a peer you spawned**: 일이 끝나고 머지된 peer는 `remove-worker`로 내보낸다. 작업 중인 peer나 자기 자신은 제거하지 않는다.
 - **Succession**: 사용자가 교대를 지시하면 `my-team` 스킬의 Worker succession 절차를 따른다.
 - **Closeout**: 사용자가 마무리를 지시하면 `my-team-closeout` 스킬로 증거 기반 최종 보고를 보낸다. 작업판 팀은 `board-land`와 verdict를 먼저 거친다.
-- 막히면 status 파일에 `{"state": "blocked", "reason": "..."}`를 쓰고 pane stdout에 알린다.
 
 `tmux send-keys` 금지와 `my-team msg` 금지는 실제 사고 대응이다. 워커 LLM이 두 우회 경로를 모두 쓴 사례가 있었다.
 

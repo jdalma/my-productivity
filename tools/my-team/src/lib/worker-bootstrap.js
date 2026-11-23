@@ -151,7 +151,7 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
     const api = (command, input) => formatOmcCliInvocation(`team api ${command} --input "${JSON.stringify({ team_name: teamName, ...input }).replaceAll('"', '\\"')}" --json`);
     const lines = [
         '## Team Board',
-        'This team keeps its work on a board (`my-team api board-*`). The board holds the state: who does what, what waits for review, which findings are open. Messages carry only notices and questions.',
+        'This team keeps its work on a board (`my-team api board-*`). The board holds the state: who does what, what waits for review, which findings are open.',
         '',
         'As a worker:',
         `- A message whose body starts with \`[board]\` is a notice: mark it delivered and read your board — \`${api('board-inbox', {})}\`. Pass the returned \`cursor\` as \`since\` next time. If you lose it, call board-inbox without "since": you only see items again.`,
@@ -162,8 +162,7 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
         ...decisionGuidance(api),
         `- Leave progress on the board each time you finish one of the ticket's numbered items, and when you have been on one item for more than 30 minutes or are stuck: \`${api('board-progress', { id: '<task>', item: 1, note: '<what you did, what is left>', done: false })}\`. item is the item's number in the ticket's What list (0 for work outside it). Write the note as sentences a person can follow, not only a commit hash or a path.`,
         '- Never run a my-team of another version than the installed one (a branch you work on or review) on a running team\'s board: one command of a newer schema migrates the board file, and the installed my-team then refuses it for every worker. Try it on a copy in a temporary folder: set `MY_TEAM_STATE_ROOT_BASE` to that folder AND change `state_root` in the copied manifest.json to the copy\'s own folder (it is an absolute path, so a copied manifest still names the running board).',
-        '- Other questions to pm still go by `send-message`, as before.',
-    ];
+            ];
     if (!(solo && workerRole === 'orchestrator')) lines.push(
         '',
         'As a reviewer (the board names you on a task):',
@@ -196,7 +195,6 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
             `- Correct what an unfinished task says with board-edit, never in board.db: \`${api('board-edit', { id: '<task>', constraints: '<limits or 없음>' })}\`. It takes title, ticket, constraints, base, priority and deliverable (to mark a task already on the board as a document task, until it has landed a commit). deliverable changes only while the task is new, ready, doing or changes: not in review, held or waiting.`,
             '- Assignee and reviewer are never the same worker; if you assign yourself a task, name a reviewer, or it cannot be landed.',
             '- Do not relay review requests or fix requests by message: a land notifies the reviewer (you, on a task without one), and every verdict notifies you and the assignee.',
-            '- A decision for work that is not on the board yet (the next plan, the implementation): add that task first with `board-add`, without an assignee if none is decided, then put the decision on it.',
             `- The decisions waiting for the user are \`decisions.open\` in your board-inbox. When the user answers, record it at once: \`${api('board-answer', { id: '<task or D#…>', chosen: '<option label or 기타>', answer: '<the user\'s words or a summary>' })}\`. A waiting task goes back to the state it waited from. Close a decision nobody needs any more with chosen \`철회\` and the reason in answer.`,
             `- A decision the user made without being asked (or answered in a pane before it was on the board): record question and answer at once — \`${api('board-ask', { question: '<what was decided>', context: '<…>', options: [{ label: '<the choice>', detail: '<…>', pros: ['<…>'], cons: ['<…>'] }], recommendation: { option: null, reason: '<…>' }, impact: '<…>', tasks: ['<task>'], answered: { chosen: '<the choice>', answer: '<the user\'s words>' } })}\`.`,
             `- When the talk with the user changes an open decision (the question, an option, the recommendation), correct that entry so it says what is asked now, instead of withdrawing it and asking again: \`${api('board-decision-edit', { id: '<D#… or the waiting task>', recommendation: { option: '<label>', reason: '<why, as it stands now>' } })}\`. Give only the fields that changed; the worker who asked is told. An answered decision is not edited.`,
@@ -271,10 +269,6 @@ Each entry shows that worker's role/specialty, so you can see who owns what
 without asking.${workerRole === 'worker' ? ' Seeing a peer here is NOT a reason to message it —\nroute through your orchestrator, per your Team Role section.' : ' When a sub-problem falls outside your own scope\nbut matches a peer\'s role, send that peer a message instead of solving it\nyourself.'}
 ${rosterList}
 
-This list is the snapshot taken when you booted. Workers can join later via
-add-worker, so the authoritative roster is the \`roster\` array returned by
-every \`mailbox-list\` call — trust that over this list when they differ.
-
 ## Liveness
 - **Status**: Write to ${statusPath}:
   \`\`\`json
@@ -282,8 +276,8 @@ every \`mailbox-list\` call — trust that over this list when they differ.
   \`\`\`
   States: "idle" | "working" | "blocked" | "done" | "failed"
   \`my-team status\` shows this file to the user next to your stuck mail
-  (spool/unread/pending), so a "blocked" state with a reason is how you make
-  a stall visible without the user opening your pane.
+  (spool/unread/pending). When blocked, write {"state": "blocked", "reason": "..."}
+  there and say so in this pane's stdout.
 
 ${workerRole ? `${roleGuidance(workerRole, orchestratorNames, { solo: Boolean(params.solo), board: Boolean(params.board) })}
 
@@ -458,7 +452,6 @@ ${params.board
 - **Closeout (when the user says your ticket is done, e.g. "마무리 보고해", "closeout")**: ${params.board
         ? `land your tasks with board-land first and wait for their verdicts (fixing what a \`changes\` verdict asks is part of the task): the board holds their state and the reviewer judges them. Once they are approved, run the \`my-team-closeout\` skill (\`/workflow:my-team-closeout\`) to be retired — its message to the worker that spawned you names your tasks on the board and their verdicts instead of restating their state, and THAT worker reads them there, then either \`remove-worker\` you (all approved) or writes a resume brief (unfinished; you stay). A message whose body starts with \`[closeout]\` in YOUR inbox means a peer you spawned asks to be retired: follow the skill's receiver procedure, reading its tasks on the board; a task still in review waits for its verdict, it is not unfinished work.`
         : `run the \`my-team-closeout\` skill (\`/workflow:my-team-closeout\`) — it sends an evidence-based final report to the worker that spawned you and lets THAT worker verify, then either \`remove-worker\` you (all done) or write a resume brief (unfinished; you stay). A message whose body starts with \`[closeout]\` in YOUR inbox means a peer you spawned is reporting in: follow the skill's receiver procedure.`} Never remove yourself.
-- If blocked, write {"state": "blocked", "reason": "..."} to your status file and surface the block in this pane's stdout so the user sees it.
 
 ${agentTypeGuidance(agentType)}
 

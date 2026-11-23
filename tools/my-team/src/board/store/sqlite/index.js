@@ -138,13 +138,17 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
     /**
      * Switching a file that is not in WAL yet rewrites its header from inside a read, and SQLite answers that
      * upgrade with BUSY at once, busy_timeout or not (T227): processes opening a new file together meet it. So the
-     * switch itself is tried again until BUSY_MS.
+     * switch itself is tried again until BUSY_MS. A switch that answers another mode without an error (SQLite
+     * keeps the old one when it cannot change it) fails the open, naming that mode.
      */
     async function toWal() {
         const until = Date.now() + BUSY_MS;
+        const sql = 'PRAGMA journal_mode = WAL';
         for (;;) {
             try {
-                exec('PRAGMA journal_mode = WAL');
+                trace(sql);
+                const mode = db.prepare(sql).get().journal_mode;
+                if (mode !== 'wal') throw new StoreError(`${file} stayed in journal_mode ${mode}: the switch to WAL did not take`);
                 return;
             } catch (err) {
                 if (!(storeError(err) instanceof Busy) || Date.now() >= until) throw err;

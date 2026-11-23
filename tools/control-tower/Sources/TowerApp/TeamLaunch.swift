@@ -11,8 +11,8 @@ let teamsDir = homeDirectory() + "/teams"
 /// team's config) gives it, else its agent and folder; each claude worker resuming its last ended session with
 /// `--resume <id>`, which my-team uses for that one launch and keeps out of the team's manifest. Codex workers start
 /// afresh: my-team passes launch args to codex as options, and its resume is a subcommand. A worker whose folder is
-/// gone (`folderIsGone`) is left out.
-func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any] {
+/// gone (`folderIsGone`) is left out, and named in `gone`.
+func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> ResumeConfig {
     var newest: [String: HistorySession] = [:]
     for h in run {
         guard let name = h.member?.worker else { continue }
@@ -24,8 +24,9 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any]
     let added = newest.keys.filter { !named.contains($0) }.sorted().map { name -> [String: Any] in
         ["name": name, "agent_type": newest[name]!.agent.rawValue, "cwd": newest[name]!.workspace]
     }
+    let all = configured + added
     var config = base
-    config["workers"] = (configured + added).filter { !folderIsGone($0["cwd"]) }.map { worker in
+    config["workers"] = all.filter { !folderIsGone($0["cwd"]) }.map { worker in
         guard worker["agent_type"] as? String == "claude", let name = worker["name"] as? String,
               let last = newest[name], !last.live, last.agent == .claude else { return worker }
         var args = worker["launch_args"] as? [String] ?? []
@@ -34,7 +35,42 @@ func resumeConfig(_ base: [String: Any], run: [HistorySession]) -> [String: Any]
         w["launch_args"] = args + ["--resume", last.id]
         return w
     }
-    return config
+    let gone = all.filter { folderIsGone($0["cwd"]) }
+        .map { GoneWorker(name: $0["name"] as? String ?? "", cwd: $0["cwd"] as? String ?? "") }
+    return ResumeConfig(config: config, gone: gone)
+}
+
+/// A worker the resume left out: its folder is gone.
+struct GoneWorker: Equatable {
+    let name: String
+    let cwd: String
+}
+
+/// The config a resume writes, and the workers it left out.
+struct ResumeConfig {
+    var config: [String: Any]
+    var gone: [GoneWorker] = []
+
+    var workers: [[String: Any]] { config["workers"] as? [[String: Any]] ?? [] }
+
+    /// What the user is told before the resume starts (T229, R15): nil when no worker was left out. `stops` when
+    /// my-team start would refuse what is left: no worker (parser.js `workers must be a non-empty array`), or a
+    /// role team whose every orchestrator was left out (parser.js `no 'orchestrator'`); neither names the folder.
+    func problem(team: String) -> (stops: Bool, failure: Failure)? {
+        guard !gone.isEmpty else { return nil }
+        let list = gone.map { "\($0.name) (\($0.cwd))" }.joined(separator: ", ")
+        let isOrchestrator = { (w: [String: Any]) in w["role"] as? String == "orchestrator" }
+        if workers.isEmpty {
+            return (true, Failure(title: "“\(team)” 팀을 이어서 띄우지 못함",
+                                  reason: "모든 워커의 작업 폴더가 없습니다: \(list)"))
+        }
+        if workers.contains(where: { $0["role"] is String }) && !workers.contains(where: isOrchestrator) {
+            return (true, Failure(title: "“\(team)” 팀을 이어서 띄우지 못함",
+                                  reason: "orchestrator의 작업 폴더가 없어 역할 팀을 띄울 수 없습니다. 작업 폴더가 없는 워커: \(list)"))
+        }
+        return (false, Failure(title: "“\(team)” 팀을 워커 \(gone.count)개 없이 띄움",
+                               reason: "작업 폴더가 없어 뺀 워커: \(list)"))
+    }
 }
 
 /// A worker folder my-team would accept the form of (absolute, `~` or `~/…`, `~` being `$HOME` as in my-team's
@@ -360,7 +396,7 @@ func runSessions(_ run: TeamRun, in history: [HistorySession]) -> [HistorySessio
 
 /// The config the resume of `run` starts (`Tower.resumeTeam` writes it): the team's base with each worker of the run.
 func resumeConfig(for run: TeamRun, history: [HistorySession], teams: String = teamsDir,
-                  stateBase: String = stateRootBase()) -> [String: Any]? {
+                  stateBase: String = stateRootBase()) -> ResumeConfig? {
     teamBase(run.team, teams: teams, stateBase: stateBase).map { resumeConfig($0, run: runSessions(run, in: history)) }
 }
 
@@ -371,7 +407,7 @@ func launchWorkerCounts(_ configs: [TeamConfig], history: [HistorySession], team
     let last = lastRuns(history)
     return Dictionary(uniqueKeysWithValues: configs.map { c in
         let resumed = last[c.team].flatMap { resumeConfig(for: $0.run, history: history, teams: teams, stateBase: stateBase) }
-        return (c.team, (resumed?["workers"] as? [Any])?.count ?? c.workers)
+        return (c.team, resumed?.workers.count ?? c.workers)
     })
 }
 

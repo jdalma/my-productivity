@@ -221,12 +221,16 @@ final class Tower {
     /// Opens a terminal that starts one run of a stopped team again, each claude worker resuming its last session.
     func resumeTeam(_ teamRun: TeamRun) {
         guard launches.begin(teamRun.team, at: Date()) else { return }
-        guard let config = resumeConfig(for: teamRun, history: history),
-              let data = try? JSONSerialization.data(withJSONObject: config,
+        guard let resumed = resumeConfig(for: teamRun, history: history),
+              let data = try? JSONSerialization.data(withJSONObject: resumed.config,
                                                      options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else {
             launches.cancel(teamRun.team)
             return showAlert("팀을 이어서 띄우지 못함", TeamLaunchError.noConfig(teamRun.team))
+        }
+        if let problem = resumed.problem(team: teamRun.team) {
+            show(problem.failure)
+            if problem.stops { return launches.cancel(teamRun.team) }
         }
         let command = resumeTeamCommand(team: teamRun.team, config: String(decoding: data, as: UTF8.self),
                                         path: "\(teamsDir)/\(teamRun.team).resume.json", myTeam: myTeamBin, tmux: towerTmuxBin)

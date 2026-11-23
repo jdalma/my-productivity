@@ -27,7 +27,7 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
             ["name": "later", "agent_type": "claude", "cwd": "/"],  // not in this run
         ],
     ]
-    let config = resumeConfig(base, run: run)
+    let config = resumeConfig(base, run: run).config
     let workers = try #require(config["workers"] as? [[String: Any]])
     #expect(config["note"] as? String == "kept")
     #expect(workers.map { $0["name"] as? String } == ["pm", "cx", "core"])
@@ -44,8 +44,40 @@ private func session(_ id: String, team: String?, worker: String, at: String, ag
     gone.workspace = "/nonexistent-\(UUID().uuidString)"
     let run = [session("pm", team: "t", worker: "pm", at: "2026-11-02T00:00:00.000Z"), gone]
     let base: [String: Any] = ["workers": [["name": "pm", "agent_type": "claude", "cwd": "~"]]]
-    let workers = try #require(resumeConfig(base, run: run)["workers"] as? [[String: Any]])
-    #expect(workers.map { $0["name"] as? String } == ["pm"])
+    let resumed = resumeConfig(base, run: run)
+    #expect(resumed.workers.map { $0["name"] as? String } == ["pm"])
+    // R15 L1: the user is told who was left out, and the team still starts
+    #expect(resumed.gone == [GoneWorker(name: "app", cwd: gone.workspace)])
+    let problem = try #require(resumed.problem(team: "t"))
+    #expect(!problem.stops)
+    #expect(problem.failure.title == "“t” 팀을 워커 1개 없이 띄움")
+    #expect(problem.failure.reason == "작업 폴더가 없어 뺀 워커: app (\(gone.workspace))")
+    #expect(resumeConfig(base, run: [run[0]]).problem(team: "t") == nil, "nobody left out, nothing to say")
+}
+
+@Test func aResumeWithNoWorkerOrNoOrchestratorLeftDoesNotStartAndNamesTheMissingFolders() throws {
+    // R15 L2, L3: my-team would fail with `workers must be a non-empty array` or `no 'orchestrator'`, naming no folder
+    let gone = "/nonexistent-\(UUID().uuidString)"
+    let run = [session("pm", team: "t", worker: "pm", at: "2026-11-02T00:00:00.000Z"),
+               session("dev", team: "t", worker: "dev", at: "2026-11-02T00:00:00.000Z")]
+    let none = resumeConfig(["workers": [["name": "pm", "agent_type": "claude", "cwd": gone + "/pm"],
+                                         ["name": "dev", "agent_type": "claude", "cwd": gone + "/dev"]]], run: run)
+    #expect(none.workers.isEmpty)
+    let empty = try #require(none.problem(team: "t"))
+    #expect(empty.stops)
+    #expect(empty.failure.reason == "모든 워커의 작업 폴더가 없습니다: pm (\(gone)/pm), dev (\(gone)/dev)")
+
+    let roles = resumeConfig(["workers": [["name": "pm", "agent_type": "claude", "cwd": gone, "role": "orchestrator"],
+                                          ["name": "dev", "agent_type": "claude", "cwd": "/", "role": "worker"]]], run: run)
+    let headless = try #require(roles.problem(team: "t"))
+    #expect(headless.stops)
+    #expect(headless.failure.title == "“t” 팀을 이어서 띄우지 못함")
+    #expect(headless.failure.reason.hasPrefix("orchestrator의 작업 폴더가 없어") && headless.failure.reason.hasSuffix("pm (\(gone))"))
+
+    // a peer team (no roles) that lost a worker still starts
+    let peers = resumeConfig(["workers": [["name": "pm", "agent_type": "claude", "cwd": gone],
+                                          ["name": "dev", "agent_type": "claude", "cwd": "/"]]], run: run)
+    #expect(peers.problem(team: "t")?.stops == false)
 }
 
 @Test func onlyAFolderOfTheFormMyTeamTakesCanBeGone() throws {
@@ -472,7 +504,7 @@ private final class Stubs {
     // the same count as the config the resume writes
     let run = try #require(lastRuns(history)["shop"]?.run)
     let resumed = try #require(resumeConfig(for: run, history: history, teams: teams, stateBase: state))
-    #expect((resumed["workers"] as? [Any])?.count == counts["shop"])
+    #expect(resumed.workers.count == counts["shop"])
 }
 
 @Test func theDefaultStateBaseHonoursMyTeamStateRootBase() throws {

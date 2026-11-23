@@ -207,7 +207,7 @@ private final class Gate: Sendable {
         read.withLock { $0 = true }
     }, answer: { _ in read.withLock { $0 } ? finished : unread })
     let window = NSWindow(contentRect: .init(x: -20000, y: -20000, width: 840, height: 700), styleMask: .borderless, backing: .buffered, defer: false)
-    window.contentView = NSHostingView(rootView: DashboardView(usage: usage, advisor: bench.advisor(), openProject: { _ in },
+    window.contentView = NSHostingView(rootView: DashboardView(usage: usage, advisor: bench.advisor(), teams: [], openProject: { _ in },
                                                                openSession: { _ in nil }, sessionTitle: { _ in nil }))
     window.contentView!.layoutSubtreeIfNeeded()
     #expect(await until { gate.started }, "the dashboard started its reading")

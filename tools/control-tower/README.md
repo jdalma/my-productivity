@@ -35,7 +35,9 @@ Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the scrip
   rest) and 새는 곳 (cache written again after a pause longer than the cache was kept, 5 minutes or an hour, and
   sessions compacted 3 times or more). A sentence is only shown when its sample is large enough, and names what it
   compares with. Click a sentence to scroll to its group; double-click a project to search the sidebar for it, a
-  session to open it (⌘[ comes back).
+  session to open it (⌘[ comes back). Last, 실행 중인 워커: each live my-team worker's prompt cache hit rate,
+  cache read ÷ (input + cache creation + cache read), over its whole current session whatever the period, with
+  its subagents' apart; 낮음 marks a rate under 90% after 20 responses. Click a worker to open its row.
   It reads the transcripts when it is shown, on ⌘R, when the period changes, and every minute (today) or five
   minutes while it stays on screen: never while another screen is shown. The same numbers: `tower-cli --usage`.
 - Analysis and advice (the 분석과 조언 button beside 새는 곳): Claude writes where the tokens leak and what to change.

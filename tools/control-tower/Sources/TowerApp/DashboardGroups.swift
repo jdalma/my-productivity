@@ -439,3 +439,133 @@ private struct LeakLine: View {
         .accessibilityValue(([project] + facts).joined(separator: ", "))
     }
 }
+
+/// 실행 중인 워커 (T232): each running worker's prompt cache hit rate over its current session, whatever the period.
+/// Seven columns, or four when they do not fit, or a worker's values under its name when even four do not; the
+/// tooltip and VoiceOver carry all seven either way.
+struct WorkersCacheGroup: View {
+    let teams: [WorkerCacheTeam]
+    /// What opens a transcript's row on the board; nil when the board has no row for it.
+    let openSession: (String) -> (() -> Void)?
+
+    var body: some View {
+        DashboardGroup(title: "실행 중인 워커") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("기간 선택과 상관없이 각 워커의 지금 세션 전체를 셉니다.").scaledFont(.caption1).foregroundStyle(.secondary)
+                if teams.isEmpty {
+                    Text("실행 중인 my-team 워커가 없습니다").scaledFont(.callout).foregroundStyle(.secondary)
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        grid(wide: true)
+                        grid(wide: false)
+                        list
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func grid(wide: Bool) -> some View {
+        // the 낮음 mark has a column of its own, so a low rate stays in line with the others (T232 sub-1 S1)
+        let columns = wide ? 8 : 5
+        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 4) {
+            ForEach(teams, id: \.name) { team in
+                if teams.count > 1 {
+                    Text(team.name).scaledFont(.callout, weight: .semibold).accessibilityAddTraits(.isHeader)
+                        .padding(.top, team == teams.first ? 0 : 8).gridCellColumns(columns)
+                }
+                if team == teams.first || teams.count > 1 { header(wide: wide) }
+                ForEach(team.lines, id: \.name) { row($0, wide: wide) }
+            }
+        }
+    }
+
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(teams, id: \.name) { team in
+                if teams.count > 1 {
+                    Text(team.name).scaledFont(.callout, weight: .semibold).accessibilityAddTraits(.isHeader)
+                        .padding(.top, team == teams.first ? 0 : 8)
+                }
+                ForEach(team.lines, id: \.name) { line in
+                    let c = workerCacheCells(line.state)
+                    VStack(alignment: .leading, spacing: 2) {
+                        name(line)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            rate(c.rate, low: c.rateLow, few: c.rateFew)
+                            Text("· cache 읽기 \(c.cacheRead) · sub-agent \(c.subagent)").scaledFont(.callout).monospacedDigit()
+                                .foregroundStyle(.secondary).accessibilityHidden(true)
+                        }
+                    }
+                    .help(workerCacheTooltip(line))
+                }
+            }
+        }
+    }
+
+    private func header(wide: Bool) -> some View {
+        GridRow {
+            ForEach(wide ? ["워커", "히트율", "", "cache 읽기", "cache 생성", "입력", "응답", "sub-agent"]
+                         : ["워커", "히트율", "", "cache 읽기", "sub-agent"], id: \.self) { title in
+                Text(title).scaledFont(.caption1).foregroundStyle(.secondary)
+                    .gridColumnAlignment(["워커", "", "sub-agent"].contains(title) ? .leading : .trailing)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func row(_ line: WorkerCacheLine, wide: Bool) -> some View {
+        let c = workerCacheCells(line.state)
+        let tip = workerCacheTooltip(line)
+        return GridRow {
+            name(line).help(tip)
+            rate(c.rate, low: false, few: c.rateFew).help(tip)
+            lowMark(c.rateLow).help(tip)
+            number(c.cacheRead).help(tip)
+            if wide {
+                number(c.cacheCreation).help(tip)
+                number(c.input).help(tip)
+                number(c.responses).help(tip)
+            }
+            rate(c.subagent, low: c.subagentLow, few: false).help(tip)
+        }
+    }
+
+    @ViewBuilder
+    private func name(_ line: WorkerCacheLine) -> some View {
+        let label = workerCacheAccessibilityLabel(line)
+        if let path = line.transcript, let open = openSession(path) {
+            Button(action: open) { Text("\(line.name) ›").scaledFont(.callout, weight: .semibold).lineLimit(1) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(label)
+                .accessibilityHint("사이드바에서 이 워커를 엽니다")
+        } else {
+            Text(line.name).scaledFont(.callout, weight: .semibold).lineLimit(1).accessibilityLabel(label)
+        }
+    }
+
+    private func rate(_ text: String, low: Bool, few: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(text).scaledFont(.callout).monospacedDigit().foregroundStyle(few ? .secondary : .primary)
+            lowMark(low)
+        }
+        // a number never breaks: the name gives up its width first
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func lowMark(_ low: Bool) -> some View {
+        if low {
+            Label("낮음", systemImage: "exclamationmark.triangle.fill").scaledFont(.caption1).foregroundStyle(TaskColor.orange)
+                .fixedSize().accessibilityHidden(true)
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
+    }
+
+    private func number(_ text: String) -> some View {
+        Text(text).scaledFont(.callout).monospacedDigit().fixedSize().accessibilityHidden(true)
+    }
+}

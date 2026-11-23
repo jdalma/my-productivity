@@ -6,6 +6,8 @@ import TowerCore
 struct DashboardView: View {
     @Bindable var usage: UsageDashboard
     @Bindable var advisor: UsageAdvisor
+    /// The live teams, for the 실행 중인 워커 group.
+    let teams: [Team]
     /// Puts a project's name in the sidebar search.
     let openProject: (String) -> Void
     /// What opens a session's row on the board; nil when the board has no row for that transcript.
@@ -30,6 +32,7 @@ struct DashboardView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) { DashboardHeader(usage: usage, phase: phase) }
         .task(id: usage.period) { await keepFresh() }
+        .onChange(of: workerTranscripts(teams), initial: true) { usage.workerTranscripts = $1 }
         .sheet(isPresented: $advisor.shown) { AdviceSheet(advisor: advisor, report: usage.report) }
     }
 
@@ -54,6 +57,7 @@ struct DashboardView: View {
                     LeaksGroup(report: report, advisor: advisor, openSession: openSession, sessionTitle: sessionTitle)
                         .id(DashboardBlock.section(.leaks))
                 }
+                WorkersCacheGroup(teams: workerCacheTeams(teams, totals: usage.workerTotals), openSession: openSession)
             }
             .scrollTargetLayout()
             .redacted(reason: phase == .shown ? [] : .placeholder)

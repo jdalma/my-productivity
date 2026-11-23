@@ -158,6 +158,7 @@ struct BoardView: View {
                        dashboard: DashboardView(
                            usage: tower.usage,
                            advisor: tower.advisor,
+                           teams: board.teams,
                            openProject: { query = $0 },
                            openSession: { path in
                                usageSessionTarget(path, model: model, history: tower.history).map { id in { go(Screen(id)) } }

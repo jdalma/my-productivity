@@ -484,6 +484,27 @@ public final class UsageLedger: Sendable {
         )
     }
 
+    /// Each of `transcripts`' sums over every hour the ledger holds, from what `refresh()` has read: no transcript
+    /// is read here. A transcript without a response in the ledger is left out.
+    public func sessionTotals(_ transcripts: Set<String>) -> [String: UsageSessionTotals] {
+        state.withLock { s in
+            load(&s)
+            var totals: [String: UsageSessionTotals] = [:]
+            for (key, row) in s.rows where transcripts.contains(key.session) {
+                if key.kind == .subagent {
+                    totals[key.session, default: UsageSessionTotals()].subagent += row.tokens
+                } else {
+                    totals[key.session, default: UsageSessionTotals()].main += row.tokens
+                }
+                totals[key.session, default: UsageSessionTotals()].rewrittenCache += row.rewrittenCache
+            }
+            for (key, count) in s.compactions where totals[key.session] != nil {
+                totals[key.session]?.compactions += count
+            }
+            return totals
+        }
+    }
+
     public func report(_ period: UsagePeriod, now: Date = Date(), calendar: Calendar = .current) -> UsageReport {
         let s = state.withLock { s in
             load(&s)

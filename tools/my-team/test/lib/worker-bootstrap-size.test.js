@@ -23,9 +23,11 @@ const render = (workerName, workerRole, extra = {}) => Buffer.byteLength(generat
 // [rendered bytes bound, render]. Measured 2026-11-21 before E7: 14.8K, 29.5K, 16.9K, 26.3K, 20.2K, 35.0K, 30.3K, 26.3K.
 // orchestrator+board stays near 30K: the board's worker, reviewer and pm rules are each pinned by a test of their own.
 // T221/T222 added the goal declaration to board-add (orchestrator+board 30,070, solo dev 22,019), so both bounds rose by 500.
+// T229 cut four sentences that repeated another (peer+board 24,973 -> 24,299) and raised peer+board by 400, so the next
+// rule fits with 1,000 bytes to spare: what is left there says one thing once.
 const COMBOS = {
     peer: [13_500, () => render('solo', null)],
-    'peer+board': [25_000, () => render('solo', null, { board })],
+    'peer+board': [25_400, () => render('solo', null, { board })],
     worker: [14_000, () => render('dev', 'worker')],
     'worker+board': [20_000, () => render('dev', 'worker', { board })],
     orchestrator: [18_500, () => render('pm', 'orchestrator')],

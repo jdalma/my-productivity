@@ -252,6 +252,21 @@ test('[sqlite] a version 1 file migrates: its rows stay, it gains a board id kep
     assert.equal((await store.describe()).schema_version, SCHEMA_VERSION);
 });
 
+test('[sqlite] R21 L1: a switch to WAL that answers another mode fails the open, naming the mode', needsSqlite, async (t) => {
+    class StaysDelete extends DatabaseSync {
+        prepare(sql) {
+            if (/^PRAGMA journal_mode\s*=\s*WAL$/i.test(sql)) return { get: () => ({ journal_mode: 'delete' }) };
+            return super.prepare(sql);
+        }
+    }
+    const store = createSqliteStore(tempFile(t), { load: async () => ({ DatabaseSync: StaysDelete }) });
+    await assert.rejects(store.open(), (err) => {
+        assert.equal(err.code, 'store');
+        assert.match(err.message, /journal_mode delete/);
+        return true;
+    });
+});
+
 test('[sqlite] a Node without node:sqlite makes the board unavailable, naming the Node it needs', async (t) => {
     const missing = Object.assign(new Error("No such built-in module: node:sqlite"), { code: 'ERR_UNKNOWN_BUILTIN_MODULE' });
     const store = createSqliteStore(tempFile(t), { load: async () => { throw missing; } });

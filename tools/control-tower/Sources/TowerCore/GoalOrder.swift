@@ -2,8 +2,8 @@ import Foundation
 
 // The order of each goal's tasks (T213; schema: tools/my-team/docs/board.md, goal-order). Read only, through
 // `my-team api goal-order --json`: waves from the `## 순서` section of the team's goal files, with each node's board
-// state. Fields this app does not know are ignored. Two files may share a G number and so an `id`: `path` tells
-// goals apart.
+// state. Fields this app does not know are ignored. Two files with one G number: my-team since T230 gives one goal
+// with an error per file and no line; an older one gave both with the same `id`, so `path` tells goals apart.
 
 /// One goal file: `waves` is empty when it has no `## 순서`, a cycle (`cycle` set) or syntax errors (`errors` set).
 public struct GoalOrder: Decodable, Hashable, Sendable {
@@ -50,9 +50,9 @@ public struct GoalBlock: Decodable, Hashable, Sendable {
     public var state: String
 }
 
-/// A line of `## 순서` that does not read.
+/// A line of `## 순서` that does not read, or (`line` nil) a problem with the file itself: `text` is then its path.
 public struct GoalOrderError: Decodable, Hashable, Sendable {
-    public var line: Int
+    public var line: Int?
     public var text: String
     public var reason: String
 }

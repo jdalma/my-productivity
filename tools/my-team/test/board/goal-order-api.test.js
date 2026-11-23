@@ -1,12 +1,12 @@
 /**
- * `my-team api goal-order` through the real CLI (T212; plan research/my-team-goal-order-plan.md 2.4).
+ * `my-team api goal-order` through the real CLI (T212; docs/board.md, Goal order).
  * The state base is <tmp>/sessions, so goal files live in <tmp>/docs/<team>/goals, never the user's.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
@@ -110,6 +110,34 @@ test('a cycle gives its path and no waves; syntax errors give their lines and no
     const [loop, typo] = goalOrder(base, { team_name: 'g2' }).json.goals;
     assert.deepEqual([loop.cycle, loop.waves, loop.ready_now], [['A', 'B', 'A'], [], []]);
     assert.deepEqual([typo.cycle, typo.waves, typo.errors.map((e) => e.line)], [null, [], [4]]);
+});
+
+test('R7 L1: one G number in two files is one goal with an error per file, and no order', (t) => {
+    const { base, goal, goals } = team(t, 'g6', { board: null });
+    goal('G5-b.md', '# G5 b\n## 순서\n- A -> B\n');
+    goal('G5-a.md', '# G5 a\n## 순서\n- C -> D\n');
+    goal('G6-other.md', '# G6 other\n## 순서\n- E\n');
+    const r = goalOrder(base, { team_name: 'g6' });
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.json.goals.map((g) => g.id), ['G5', 'G6']);
+    const reason = 'G5 names 2 files; give each goal its own number';
+    assert.deepEqual(r.json.goals[0], {
+        id: 'G5', title: null, path: join(goals, 'G5-a.md'), waves: [], ready_now: [], unregistered: [], cycle: null,
+        errors: [{ line: null, text: join(goals, 'G5-a.md'), reason }, { line: null, text: join(goals, 'G5-b.md'), reason }],
+    });
+    assert.deepEqual(goalOrder(base, { team_name: 'g6', goal: 'G5' }).json.goals.map((g) => g.errors.length), [2]);
+});
+
+test('R7 L2: a directory named like a goal file is skipped; a link to a goal file is read', (t) => {
+    const { base, goal, goals } = team(t, 'g7', { board: null });
+    goal('G1-real.md', '# G1 real\n## 순서\n- A\n');
+    mkdirSync(join(goals, 'G2-dir.md'));
+    mkdirSync(join(goals, 'G1-dir.md'));
+    symlinkSync(join(goals, 'G1-real.md'), join(goals, 'G3-link.md'));
+    const r = goalOrder(base, { team_name: 'g7' });
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.json.goals.map((g) => [g.id, g.errors.length]), [['G1', 0], ['G3', 0]]);
+    assert.equal(goalOrder(base, { team_name: 'g7', goal: 'G2' }).json.code, 'not-found');
 });
 
 test('T222: a goal of listed tasks in no order is one wave, all ready_now', needsSqlite, async (t) => {

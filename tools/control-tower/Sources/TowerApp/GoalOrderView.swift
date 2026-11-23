@@ -152,7 +152,7 @@ struct GoalOrderList: View {
                 if let line = goalErrorLine(g.errors) {
                     Label(line, systemImage: "exclamationmark.triangle.fill").scaledFont(.callout)
                         .foregroundStyle(TaskColor.orange).lineLimit(2)
-                        .help(g.errors.map { "\($0.line): \($0.text) — \($0.reason)" }.joined(separator: "\n"))
+                        .help(g.errors.map { "\($0.line.map { "\($0): " } ?? "")\($0.text) — \($0.reason)" }.joined(separator: "\n"))
                 }
                 if wavesStack(waves: g.waves.count, width: max(0, width - 24), scale: scale) {
                     VStack(alignment: .leading, spacing: 12) {

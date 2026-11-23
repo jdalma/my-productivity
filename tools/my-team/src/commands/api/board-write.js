@@ -5,14 +5,14 @@
  * not an input; a document task's land has none.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
 
 import { actorOf, boardFor, withBoard } from '../../board/compose.js';
 import { parseOrder } from '../../board/core/goal-order.js';
 import { BoardError, isDocument, pmsOf } from '../../board/core/rules.js';
 import { toplevel } from '../../board/git.js';
-import { GOAL_FILE, goalsDir } from './goal-order.js';
+import { goalFiles, goalsDir } from './goal-order.js';
 
 const fail = (message) => { throw new BoardError('invalid', message); };
 
@@ -31,10 +31,10 @@ function requireGoal(team, { id, goal, single }) {
     if (single) return;
     if (typeof goal !== 'string' || !/^G\d+$/.test(goal)) fail(`goal must be G<n>, got ${JSON.stringify(goal)}. ${how}`);
     if (typeof id !== 'string' || !id) fail(`goal needs the task's id, as the order names it. ${how}`);
-    const files = (existsSync(dir) ? readdirSync(dir) : []).filter((f) => GOAL_FILE.exec(f)?.[1] === goal).sort();
+    const files = goalFiles(dir).filter((g) => g.id === goal);
     if (!files.length) fail(`no goal file ${goal}-<slug>.md in ${dir}. ${how}`);
-    if (files.length > 1) fail(`${goal} names ${files.length} files in ${dir} (${files.join(', ')}); give each goal its own number. ${how}`);
-    const path = join(dir, files[0]);
+    if (files.length > 1) fail(`${goal} names ${files.length} files in ${dir} (${files.map((g) => basename(g.path)).join(', ')}); give each goal its own number. ${how}`);
+    const { path } = files[0];
     const order = parseOrder(readFileSync(path, 'utf-8'));
     if (order.edges.some((e) => e.from.task === id || e.to.task === id) || order.listed.some((r) => r.task === id)) return;
     const bad = order.invalid.length ? ` (${order.invalid.length} line(s) there could not be read: ${order.invalid.map((l) => `line ${l.line} ${l.reason}`).join('; ')})` : '';

@@ -1,5 +1,5 @@
 /**
- * Goal order (T210; plan: research/my-team-goal-order-plan.md 2.1-2.3): the `## 순서` section of a goal file
+ * Goal order (T210; contract: docs/board.md, Goal order): the `## 순서` section of a goal file
  * turned into waves of start units, then matched against the board's tasks. Pure functions, no board access:
  * parseOrder reads the text, waves sorts the graph, annotate adds what the board says.
  */

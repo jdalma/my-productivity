@@ -141,13 +141,13 @@ public struct EditorBuffers: Equatable, Sendable {
     }
 
     /// The page answered a reload with the disk text that hashes to `hash`: it took it, or (not forced) kept an edit
-    /// made meanwhile.
+    /// made meanwhile. An edit kept over the bytes it started from is no change of the disk: no banner.
     public mutating func reloaded(_ path: String, hash: String, applied: Bool) {
         guard var f = files[path] else { return }
         if applied {
             (f.base, f.dirty, f.disk, f.kept) = (hash, false, .same, false)
         } else {
-            (f.dirty, f.disk, f.kept) = (true, .changed(hash: hash), false)
+            (f.dirty, f.disk, f.kept) = (true, hash == f.base ? .same : .changed(hash: hash), false)
         }
         files[path] = f
     }

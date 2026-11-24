@@ -22,6 +22,13 @@ import TowerCore
     #expect(IdeBanner.text(.deleted(path: "/w/a", dirty: true)).contains("저장하지 않은 편집"))
 }
 
+@Test func aRefusedSaveSaysWhyInWords() {
+    #expect(saveRefusalText("readOnly") == "잠겨 있음 (잠금 해제 뒤 저장)")
+    #expect(saveRefusalText("missing") == "디스크에 파일이 없음")
+    #expect(saveRefusalText(EditorRefusal.notOpen.rawValue) == "열린 파일이 아님")
+    #expect(saveRefusalText("something new") == "something new")
+}
+
 @Test func quittingAsksOnlyWithEditsThatAreNotSaved() {
     #expect(unsavedQuitMessage([], home: "/Users/example") == nil)
     let one = unsavedQuitMessage(["/Users/example/w/a.swift"], home: "/Users/example")

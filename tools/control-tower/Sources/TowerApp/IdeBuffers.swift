@@ -110,15 +110,17 @@ final class IdeSession {
         case .conflict(let diskHash):
             buffers.conflict(path, diskHash: diskHash)
             status = "저장 안 함: 디스크의 파일이 바뀜"
-        case .refused(let why): status = "저장 안 함: \(why.rawValue)"
+        case .refused(let why): status = "저장 안 함: " + saveRefusalText(why.rawValue)
         case .failed(let message): status = "저장 실패: \(message)"
         case .file, .ok: break
         }
     }
 
-    /// A save the page refused before asking Swift.
+    /// A save the page refused before asking Swift. It locks a file it heard is deleted: that is the reason then.
     private func say(refusal reply: [String: Any]?) {
-        if reply?["result"] as? String == "refused" { status = "저장 안 함: \(reply?["reason"] as? String ?? "")" }
+        guard reply?["result"] as? String == "refused" else { return }
+        let gone = buffers.shown.flatMap { buffers.files[$0]?.disk } == .deleted
+        status = "저장 안 함: " + saveRefusalText(gone ? "missing" : reply?["reason"] as? String ?? "")
     }
 
     /// The page's process ended: its buffers are gone, the edits in them too. The shown file opens again from disk.
@@ -130,6 +132,17 @@ final class IdeSession {
             if let was { await open(was) }
             status = lost > 0 ? "편집기가 다시 시작됨: 저장하지 않은 편집 \(lost)개가 사라짐" : "편집기가 다시 시작됨"
         }
+    }
+}
+
+/// Why a save did not happen, from the reason the page or Swift gave (`EditorRefusal`).
+func saveRefusalText(_ reason: String) -> String {
+    switch reason {
+    case "readOnly": "잠겨 있음 (잠금 해제 뒤 저장)"
+    case "missing", "notRegularFile": "디스크에 파일이 없음"
+    case "notOpen": "열린 파일이 아님"
+    case "outside": "이 작업 트리 밖의 파일"
+    default: reason
     }
 }
 

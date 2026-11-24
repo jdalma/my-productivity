@@ -140,6 +140,14 @@ private func opened(dirty: Bool = false) -> EditorBuffers {
     // written again by a worker: other bytes under the edit
     #expect(b.diskChanged(a, hash: "h2") == nil && b.banner == .changed(path: a))
 
+    // deleted, then there again with the bytes the edit started from (a checkout and back): the page is told, to
+    // unlock the file, keeps the edit, and that is no change of the disk
+    var back = opened(dirty: true)
+    _ = back.diskChanged(a, hash: nil)
+    #expect(back.diskChanged(a, hash: "h1") == .reload(path: a, force: false))
+    back.reloaded(a, hash: "h1", applied: false)
+    #expect(back.banner == nil && back.files[a]?.dirty == true && back.files[a]?.disk == .same)
+
     var clean = opened()
     #expect(clean.diskChanged(a, hash: nil) == .deleted(path: a))
     #expect(clean.banner == .deleted(path: a, dirty: false))

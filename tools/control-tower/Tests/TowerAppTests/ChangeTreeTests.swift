@@ -142,3 +142,28 @@ extension TreeLine {
         TreeLine(ChangeTreeNode(name: path, path: path, kind: .file(.unchanged)), part: part)
     }
 }
+
+/// T19: the tree draws without a diff (the IDE area's explorer): every file unchanged, same nesting.
+@Test func aFolderTreeWithoutADiffListsEveryFileUnchanged() {
+    let tree = folderTree(files: ["src/a.swift", "src/deep/x/y.swift", "README.md"])
+    #expect(outline(tree) == ["src/", "  deep/x/", "    y.swift", "  a.swift", "README.md"])
+    #expect(changes(tree) == ["src/a.swift": .unchanged, "src/deep/x/y.swift": .unchanged, "README.md": .unchanged])
+}
+
+/// T19: the open folders and the picked line live apart from `ChangesState`.
+@MainActor @Test func aFolderTreeStateKeepsFlippedFoldersAndThePickUntilReset() {
+    let t = FolderTreeState()
+    let dir = TreeLine(ChangeTreeNode(name: "src", path: "src", kind: .directory([])), part: nil)
+    #expect(t.isOpen(dir, byDefault: true) && !t.isOpen(dir, byDefault: false))
+    t.setOpen(dir, true, byDefault: false)
+    #expect(t.isOpen(dir, byDefault: false) && t.flippedFolders == ["a:src"])
+    // the same folder of another section is another line
+    #expect(!t.isOpen(TreeLine(ChangeTreeNode(name: "src", path: "src", kind: .directory([])), part: .committed), byDefault: false))
+    t.setOpen(dir, false, byDefault: false)
+    #expect(t.flippedFolders.isEmpty)
+
+    t.setOpen(dir, false, byDefault: true)
+    t.picked = .file("src/a.swift")
+    t.reset()
+    #expect(t.flippedFolders.isEmpty && t.picked == nil)
+}

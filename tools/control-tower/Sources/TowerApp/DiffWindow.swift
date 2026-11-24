@@ -124,8 +124,6 @@ struct NotRestorable: NSViewRepresentable {
 struct DiffTreeSidebar: View {
     let workspace: String
     @Bindable var state: ChangesState
-    @State private var picked: TreeLine?
-    @FocusState private var focused: Bool
 
     private struct FullTreeKey: Equatable {
         var mode: TreeMode
@@ -133,7 +131,7 @@ struct DiffTreeSidebar: View {
     }
 
     var body: some View {
-        List(selection: $picked) {
+        FolderTreeList(tree: state.tree, pick: state.pick) {
             if let diff = state.diff(for: workspace) {
                 switch state.treeMode {
                 case .changed:
@@ -141,7 +139,7 @@ struct DiffTreeSidebar: View {
                     section("미커밋", diff.uncommitted, .uncommitted)
                 case .all:
                     if let full = state.fullTree {
-                        ForEach(full.nodes, id: \.path) { TreeNodeRow(node: $0, part: nil, openByDefault: full.changed.contains, state: state) }
+                        ForEach(full.nodes, id: \.path) { TreeNodeRow(node: $0, part: nil, openByDefault: full.changed.contains, tree: state.tree) }
                     } else if state.fullTreeFailed {
                         Text("파일 목록을 읽지 못함").scaledFont(.caption1).foregroundStyle(.secondary)
                     } else {
@@ -150,12 +148,6 @@ struct DiffTreeSidebar: View {
                 }
             }
         }
-        .listStyle(.sidebar)
-        // ↑↓ walk the tree as soon as the window opens
-        .focused($focused)
-        .onAppear { focused = true }
-        .onChange(of: picked) { _, line in if let line { state.pick(line) } }
-        .contextMenu(forSelectionType: TreeLine.self) { _ in } primaryAction: { lines in lines.first.map(state.pick) }
         .safeAreaInset(edge: .top, spacing: 0) {
             Picker("트리", selection: $state.treeMode) {
                 Text("변경된 파일").tag(TreeMode.changed)
@@ -174,28 +166,47 @@ struct DiffTreeSidebar: View {
         Section {
             let nodes = changeTree(s)
             if nodes.isEmpty { Text("변경 없음").scaledFont(.caption1).foregroundStyle(.secondary) }
-            ForEach(nodes, id: \.path) { TreeNodeRow(node: $0, part: part, openByDefault: { _ in true }, state: state) }
+            ForEach(nodes, id: \.path) { TreeNodeRow(node: $0, part: part, openByDefault: { _ in true }, tree: state.tree) }
         } header: {
             Text(title).scaledFont(.subheadline, weight: .semibold)
         }
     }
 }
 
+/// A folder tree as a sidebar list of `TreeNodeRow`s, in sections or not. Picking a line, by click or arrow key,
+/// calls `pick`; a double click or Return calls it again.
+struct FolderTreeList<Rows: View>: View {
+    @Bindable var tree: FolderTreeState
+    let pick: (TreeLine) -> Void
+    @ViewBuilder let rows: Rows
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        List(selection: $tree.picked) { rows }
+            .listStyle(.sidebar)
+            // ↑↓ walk the tree as soon as it shows
+            .focused($focused)
+            .onAppear { focused = true }
+            .onChange(of: tree.picked) { _, line in if let line { pick(line) } }
+            .contextMenu(forSelectionType: TreeLine.self) { _ in } primaryAction: { lines in lines.first.map(pick) }
+    }
+}
+
 /// A tree line and, while it is an open folder, the lines under it; a closed folder builds nothing below it.
-private struct TreeNodeRow: View {
+struct TreeNodeRow: View {
     let node: ChangeTreeNode
     let part: DiffPart?
     let openByDefault: (String) -> Bool
-    @Bindable var state: ChangesState
+    let tree: FolderTreeState
 
     var body: some View {
         let line = TreeLine(node, part: part)
         if let children = node.children {
             let byDefault = openByDefault(node.path)
-            let open = Binding { state.isOpen(line, byDefault: byDefault) } set: { state.setOpen(line, $0, byDefault: byDefault) }
+            let open = Binding { tree.isOpen(line, byDefault: byDefault) } set: { tree.setOpen(line, $0, byDefault: byDefault) }
             DisclosureGroup(isExpanded: open) {
                 if open.wrappedValue {
-                    ForEach(children, id: \.path) { TreeNodeRow(node: $0, part: part, openByDefault: openByDefault, state: state) }
+                    ForEach(children, id: \.path) { TreeNodeRow(node: $0, part: part, openByDefault: openByDefault, tree: tree) }
                 }
             } label: {
                 Label(node.name, systemImage: "folder").lineLimit(1).truncationMode(.middle)

@@ -164,3 +164,15 @@ test('a team from a config file keeps the orchestrator guidance it had, solo fal
     assert.doesNotMatch(absent.pm, /\(solo\)/);
     assert.throws(() => validateConfig({ ...raw, solo: 'yes' }), /solo must be true or false/);
 });
+
+test('solo --detached and --new-window reach the plan start boots (T5)', () => {
+    const { base, cwd } = folder('shop-api');
+    try {
+        const plain = solo(cwd, base, []);
+        assert.deepEqual([plain.detached, plain.new_window], [false, false]);
+        const flagged = solo(cwd, base, ['--detached', '--new-window']);
+        assert.deepEqual([flagged.detached, flagged.new_window], [true, true]);
+    } finally {
+        rmSync(base, { recursive: true, force: true });
+    }
+});

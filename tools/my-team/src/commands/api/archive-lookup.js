@@ -31,8 +31,8 @@ import { setStateRoot } from '../../lib/state-root.js';
 import { TeamPaths } from '../../lib/state-paths.js';
 import { requireTeamAndWorker, resolveTeamPath } from '../../lib/handler-guards.js';
 
-export function runApiArchiveLookup(input) {
-    const { teamName, worker } = requireTeamAndWorker(input);
+export function runApiArchiveLookup(input, deps = {}) {
+    const { teamName, worker } = requireTeamAndWorker(input, { env: deps.env ?? process.env });
     const messageId = input?.message_id;
     if (!messageId) throw new Error('message_id is required');
 

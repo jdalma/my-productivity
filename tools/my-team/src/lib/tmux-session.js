@@ -198,7 +198,8 @@ export function sessionName(teamName, workerName) {
 export async function createTeamSession(teamName, workers, options = {}) {
     validateTeamName(teamName);
     const multiplexerContext = detectTeamMultiplexerContext();
-    const inTmux = multiplexerContext === 'tmux';
+    // detached (T5): a session of its own even when called from inside tmux; it wins over newWindow
+    const inTmux = multiplexerContext === 'tmux' && !options.detached;
     const useDedicatedWindow = Boolean(options.newWindow && inTmux);
 
     if (!inTmux) {

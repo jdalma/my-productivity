@@ -166,3 +166,17 @@ private final class WatchBox: @unchecked Sendable {
     try await Task.sleep(for: .milliseconds(400))
     #expect(!got.changed.contains("b.txt"))  // stopped: nothing after
 }
+
+@Test func aSymlinkWhoseTargetIsGoneIsStillThere() async throws {
+    let dir = FileManager.default.temporaryDirectory.appending(path: "tower-watch-\(UUID().uuidString)").path
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try await Task.sleep(for: .milliseconds(300))
+    let got = Batches()
+    let watch = try #require(FileWatch(root: dir) { got.add($0) })
+    defer { watch.stop() }
+    try FileManager.default.createSymbolicLink(atPath: dir + "/link", withDestinationPath: dir + "/missing")
+    #expect(await got.wait { got.changed.contains("link") })
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!got.deleted.contains("link"))
+}

@@ -183,8 +183,10 @@ public final class FileWatch: @unchecked Sendable {
 
     private var now: Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
 
+    /// The entry itself, a link not followed: a symlink whose target is gone is still there.
     private func exists(_ path: String) -> Bool {
-        FileManager.default.fileExists(atPath: rootURL.appending(path: path).path)
+        var info = stat()
+        return lstat(rootURL.appending(path: path).path, &info) == 0
     }
 
     private func receive(_ paths: [String], flags: [UInt32]) {

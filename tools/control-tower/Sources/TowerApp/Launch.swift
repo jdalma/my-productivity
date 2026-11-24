@@ -35,6 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if kind.opensBoard { tower.boardOpenRequested = true }
     }
 
+    /// Quitting with edits that are not saved in an editor asks first (G4 I7): they would be lost.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        confirmQuitWithUnsavedEdits() ? .terminateNow : .terminateCancel
+    }
+
     /// Opening the app again while it runs (Spotlight, Finder, `open`) brings the board forward; no second instance.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         writeLaunchLog("reopen")

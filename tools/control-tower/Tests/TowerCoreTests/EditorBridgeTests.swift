@@ -210,3 +210,68 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     #expect(commands == [.fileDeleted(path: root + "/a.swift"),
                          .fileChangedOnDisk(path: root + "/b.swift", text: "b2", hash: sha256(Data("b2".utf8)))])
 }
+
+// MARK: - Buffers (G4 I7)
+
+@Test func theBannersCommandsEncode() throws {
+    #expect(NSDictionary(dictionary: try json(EditorCommand.reloadFile(path: "/w/a", text: "n", hash: "h2")))
+            == ["kind": "reloadFile", "path": "/w/a", "text": "n", "hash": "h2"])
+    #expect(NSDictionary(dictionary: try json(EditorCommand.overwrite(path: "/w/a", diskHash: "h2")))
+            == ["kind": "overwrite", "path": "/w/a", "diskHash": "h2"])
+    #expect(NSDictionary(dictionary: try json(EditorCommand.getText(path: "/w/a"))) == ["kind": "getText", "path": "/w/a"])
+}
+
+@Test func anOpenFileIsReadAgainFromTheDiskForAReload() async {
+    let dir = tempTree()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let a = dir + "/a.txt"
+    put("one\n", a)
+    let files = EditorFiles(roots: [dir])
+    #expect(await files.reload(a) == nil, "not a file this editor read")
+    let first = await read(files, a)
+    put("two\n", a)
+    guard case .reloadFile(a, "two\n", let hash)? = await files.reload(a) else { return #expect(Bool(false), "no reload") }
+    #expect(hash != first)
+    #expect(await files.changed(a) == .fileChangedOnDisk(path: a, text: "two\n", hash: hash))
+    try? FileManager.default.removeItem(atPath: a)
+    #expect(await files.reload(a) == nil)
+    #expect(await files.changed(a) == .fileDeleted(path: a))
+}
+
+/// The banner's 덮어쓰기 as the page does it: a save whose base is the disk hash the banner was for. It writes over
+/// those bytes, and over no others.
+@Test func anOverwriteWritesOverTheBytesTheBannerWasForAndNoOthers() async {
+    let dir = tempTree()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let a = dir + "/a.txt"
+    put("base\n", a)
+    let files = EditorFiles(roots: [dir])
+    let base = await read(files, a)!
+    _ = await files.setReadOnly(a, false)
+    // a worker writes; the user's save from the old read is a conflict that names the disk's bytes
+    put("worker\n", a)
+    guard case .conflict(let disk) = await files.handle(.writeFile(path: a, text: "mine\n", baseHash: base)) else { return #expect(Bool(false), "no conflict") }
+    #expect(text(a) == "worker\n")
+    // the worker writes once more before the user picks 덮어쓰기: still nothing written
+    put("worker again\n", a)
+    guard case .conflict = await files.handle(.writeFile(path: a, text: "mine\n", baseHash: disk)) else { return #expect(Bool(false), "written over newer bytes") }
+    #expect(text(a) == "worker again\n")
+    put("worker\n", a)
+    guard case .written = await files.handle(.writeFile(path: a, text: "mine\n", baseHash: disk)) else { return #expect(Bool(false), "not written") }
+    #expect(text(a) == "mine\n")
+}
+
+@Test func aBufferIsComparedWithTheDiskWithoutWritingAnything() throws {
+    let dir = tempTree()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let a = dir + "/a.txt"
+    put("one\ntwo\nthree\n", a)
+    let d = try #require(bufferDiff(path: a, text: "one\nTWO\nthree\nfour\n"))
+    #expect(d.path == "a.txt" && d.added == 2 && d.removed == 1)
+    #expect(d.lines.filter { $0.kind == .removed }.map(\.text) == ["two"])
+    #expect(d.lines.filter { $0.kind == .added }.map(\.text) == ["TWO", "four"])
+    #expect(text(a) == "one\ntwo\nthree\n")
+    #expect(try FileManager.default.contentsOfDirectory(atPath: dir) == ["a.txt"])
+    // the same text: no lines
+    #expect(try #require(bufferDiff(path: a, text: "one\ntwo\nthree\n")).lines.isEmpty)
+}

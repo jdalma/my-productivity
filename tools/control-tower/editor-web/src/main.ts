@@ -63,7 +63,7 @@ async function main() {
       fire('dirtyChanged', { path, dirty })
     }
   }
-  /** Takes the disk's text into a clean buffer; a dirty one is kept (its banner is I7's). */
+  /** Takes the disk's text into a clean buffer; a dirty one is kept, and Swift shows its banner (EditorBuffers.swift). */
   const reload = (path: string, f: OpenFile, text: string, hash: string) => {
     if (isDirty(f)) return false
     if (model(f).getValue() !== text) model(f).setValue(text)
@@ -73,11 +73,10 @@ async function main() {
     return true
   }
 
-  async function save(): Promise<Reply> {
-    const f = shown === undefined ? undefined : files.get(shown)
-    if (shown === undefined || !f) return { result: 'refused', reason: 'notOpen' }
+  async function save(path = shown): Promise<Reply> {
+    const f = path === undefined ? undefined : files.get(path)
+    if (path === undefined || !f) return { result: 'refused', reason: 'notOpen' }
     if (f.readOnly) return { result: 'refused', reason: 'readOnly' }
-    const path = shown
     const version = model(f).getAlternativeVersionId()
     const r = await call('writeFile', { path, text: model(f).getValue(), baseHash: f.hash })
     if (r.result === 'ok') {
@@ -122,6 +121,31 @@ async function main() {
       if (!f || m.text === undefined) return { result: 'ok', applied: false }
       return { result: 'ok', applied: reload(m.path, f, m.text, m.hash) }
     },
+    /** The banner's 디스크로 다시 읽기: the disk's text over the buffer, as one edit that undo takes back. */
+    reloadFile(m) {
+      const f = files.get(m.path)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      if (model(f).getValue() !== m.text) {
+        model(f).pushStackElement()
+        model(f).pushEditOperations(null, [{ range: model(f).getFullModelRange(), text: m.text }], () => null)
+        model(f).pushStackElement()
+      }
+      f.hash = m.hash
+      f.savedVersion = model(f).getAlternativeVersionId()
+      reportDirty(m.path, f)
+      return { result: 'ok', applied: true }
+    },
+    /** The banner's 덮어쓰기: a save from the disk bytes the banner was for. */
+    overwrite(m) {
+      const f = files.get(m.path)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      f.hash = m.diskHash
+      return save(m.path)
+    },
+    getText(m) {
+      const f = files.get(m.path)
+      return f ? { result: 'ok', text: model(f).getValue() } : { result: 'refused', reason: 'notOpen' }
+    },
     fileDeleted(m) {
       // nothing to save to: Swift refuses a save of a missing file anyway; the buffer stays for the user to copy
       const f = files.get(m.path)
@@ -146,7 +170,7 @@ async function main() {
       if (shown === m.path) showReadOnly(f)
       return { result: 'ok' }
     },
-    save,
+    save: () => save(),
   }
   ;(window as any).ctBridge = {
     receive: async (m: { kind: string }) => {

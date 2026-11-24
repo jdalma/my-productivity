@@ -2,7 +2,7 @@
 
 One view of every my-team worker and every Claude Code / Codex session on this Mac: who is waiting for you, for how long, and a click to jump to that tmux pane.
 
-Read-only except for what the user asks for: moving focus; resuming an ended session they double-click (a new Ghostty window runs `claude --resume <id>` or `codex resume <id>` in that session's directory); starting a team in a new Ghostty window (팀 실행, 새 팀 만들기…); and shutting down a running my-team team (팀 종료…), only after the user confirms the dialog. It never types into a pane, never closes a single session, and never reads a my-team mailbox in a way that consumes it.
+Read-only except for what the user asks for: moving focus; resuming an ended session they double-click (a new Ghostty window runs `claude --resume <id>` or `codex resume <id>` in that session's directory); starting a team in a new Ghostty window (팀 실행, 새 팀 만들기…); shutting down a running my-team team (팀 종료…), only after the user confirms the dialog; and saving a worktree file in the board's editor, only a file the user unlocked there (잠금 해제) and only when they save it. It never types into a pane, never closes a single session, and never reads a my-team mailbox in a way that consumes it.
 
 A Swift package for macOS 14+. `TowerCore` collects and judges, `TowerApp` is the menu bar app, and `tower-cli` prints the same data for scripts.
 
@@ -260,6 +260,7 @@ Prints `my turn N` while N > 0. Prints nothing and exits 0 when N is 0 or `.buil
 | `sysctl` / libproc | processes, Codex processes and their open rollout files |
 | `tmux list-panes` / `list-clients` / `capture-pane` | worker liveness, pane titles, attached sessions, permission prompts |
 | transcript tails (last 200 KB) | last user / assistant message |
+| a session's worktree (its `cwd`'s git repository): `git ls-files`, the files the user opens in the board's editor, FSEvents on the folder | the editor and its folder tree. Files open locked; the app writes only a file the user unlocked, when they save it, and only over the bytes the edit started from. When the disk changed under an edit that is not saved, nothing is written or merged by itself: a banner asks (비교, 디스크로 다시 읽기, 덮어쓰기, 내 편집 유지), and only 덮어쓰기 writes. It never creates a file, nor writes one that was deleted |
 | `~/.claude/projects/*/<id>.jsonl` (`CLAUDE_CONFIG_DIR`), `~/.codex/sessions/**/rollout-*.jsonl` and `session_index.jsonl` (`CODEX_HOME`), first and last 256 KB each | session history: title, workspace, branch, last prompt; only `entrypoint: cli` Claude sessions and Codex TUI / CLI / Desktop sessions |
 
 `MY_TEAM_STATE_ROOT_BASE` overrides `~/.my-team/sessions`, as it does for my-team. Requires `tmux`.

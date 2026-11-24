@@ -4,80 +4,42 @@ import TowerCore
 
 // The board's IDE area (G4 I5, plan K4): the editor with the worktree's folder tree on its right, the session's
 // terminal under both, the whole width. The editor's files are the worktree's only (D#6 a), read-only until
-// unlocked (D#5 b), and the board window's own (D#8 b).
+// unlocked (D#5 b), and the board window's own (D#8 b) while it shows them.
 
-/// One board window's editor, its folder tree and the watch on its worktree. Kept across the detail's redraws and
-/// rows; made again when a row of another worktree shows.
-// ponytail: one editor per window, its buffers lost on a switch of worktree; keep one per worktree if switching back and forth costs too much
+/// One board window's IDE area: the worktree it shows, that worktree's editor (IdeBuffers.swift) and its folder tree.
+/// Kept across the detail's redraws and rows. A row of another worktree shows that worktree's editor; the one left
+/// waits in `IdeParking` while it holds edits that are not saved, and is dropped otherwise.
 @MainActor @Observable
 final class IdeState {
-    private(set) var root: String?
-    private(set) var editor: EditorController?
-    @ObservationIgnored private var watch: FileWatch?
+    private(set) var session: IdeSession?
     /// The tree's diff and file list, read as the diff window reads them.
     let changes = ChangesState()
-    /// The real path of the file the editor shows.
-    private(set) var shown: String?
-    private(set) var readOnly = true
-    private(set) var dirty: Set<String> = []
-    private(set) var status = ""
 
-    /// Shows `root`'s files; another root drops the editor's files and watch.
+    var editor: EditorController? { session?.editor }
+    var buffers: EditorBuffers { session?.buffers ?? EditorBuffers() }
+    /// The real path of the file the editor shows.
+    var shown: String? { buffers.shown }
+    var readOnly: Bool { shown.flatMap { buffers.files[$0]?.readOnly } ?? true }
+    var status: String { session?.status ?? "" }
+
+    /// Shows `root`'s files: its waiting editor, edits and all, or a new one.
     func show(root: String) {
-        guard root != self.root else { return }
-        self.root = root
-        shown = nil
-        readOnly = true
-        dirty = []
-        status = ""
+        guard root != session?.root else { return }
+        if let session { _ = IdeParking.park(session) }
         changes.select(workspace: root)
-        watch = nil
-        editor = editorPageFolder.map { EditorController(roots: [root], page: $0) }
-        guard let editor else { return }
-        editor.onDirty = { [weak self] path, dirty in
-            if dirty { self?.dirty.insert(path) } else { self?.dirty.remove(path) }
-        }
-        let files = editor.files
-        // a clean buffer takes what a worker wrote; a dirty one keeps the user's edit (its banner is I7's)
-        watch = FileWatch(root: root) { [weak editor] batch in
-            Task { @MainActor in
-                for command in await files.diskChanged(batch, root: root) { await editor?.send(command) }
-            }
-        }
+        session = IdeParking.session(for: root)
+    }
+
+    /// The area left the window (a row with no terminal, the window closed): an editor with edits that are not saved
+    /// waits for the next area of its worktree; one without stays here, as before.
+    func areaGone() {
+        if let session, IdeParking.park(session) { self.session = nil }
     }
 
     /// A tree line picked: a file opens in the editor, a folder does nothing.
     func pick(_ line: TreeLine) {
-        guard !line.isFolder, let root, let top = changes.diff(for: root)?.toplevel else { return }
-        Task { await open(top + "/" + line.path) }
-    }
-
-    func open(_ path: String) async {
-        guard let editor else { return }
-        if let opened = await editor.open(path) {
-            shown = opened.path
-            readOnly = opened.readOnly
-            status = ""
-        } else {
-            status = "열 수 없음"
-        }
-    }
-
-    func toggleLock() async {
-        guard let editor, let shown else { return }
-        readOnly.toggle()
-        await editor.setReadOnly(shown, readOnly)
-    }
-
-    func save() async {
-        guard let editor else { return }
-        let r = await editor.send(.save)
-        status = switch r?["result"] as? String {
-        case "ok": "저장함"
-        case "conflict": "저장 안 함: 디스크의 파일이 바뀜"
-        case "refused": "저장 안 함: \(r?["reason"] as? String ?? "")"
-        case let other: "저장 실패" + (other.map { ": \($0)" } ?? "")
-        }
+        guard !line.isFolder, let session, let top = changes.diff(for: session.root)?.toplevel else { return }
+        Task { await session.open(top + "/" + line.path) }
     }
 }
 
@@ -116,6 +78,10 @@ struct IdeArea: View {
             state.show(root: root)
             await state.changes.load(workspace: root)
         }
+        .onDisappear { state.areaGone() }
+        .sheet(isPresented: Binding { state.session?.comparing != nil } set: { if !$0 { state.session?.comparing = nil } }) {
+            if let file = state.session?.comparing { IdeCompare(file: file) { state.session?.comparing = nil } }
+        }
     }
 
     private func change(_ value: Double, _ apply: (inout IdeLayout, Double) -> Void) {
@@ -128,6 +94,15 @@ struct IdeArea: View {
         VStack(spacing: 0) {
             bar.padding(.horizontal, 8).padding(.vertical, 4)
             Divider()
+            // buffers (I7): the open files once there are two, and the shown file's banner
+            if state.buffers.tabs.count > 1 {
+                IdeTabs(buffers: state.buffers) { path in Task { await state.session?.open(path) } }
+                Divider()
+            }
+            if let banner = state.buffers.banner {
+                IdeBanner(banner: banner) { choice in Task { await state.session?.choose(choice) } }
+                Divider()
+            }
             if let editor = state.editor {
                 EditorWebView(controller: editor)
                     .overlay {
@@ -147,7 +122,7 @@ struct IdeArea: View {
     private var bar: some View {
         HStack(spacing: 8) {
             if let shown = state.shown {
-                Text(abbreviate(shown, home: homeDirectory()) + (state.dirty.contains(shown) ? " •" : ""))
+                Text(abbreviate(shown, home: homeDirectory()) + (state.buffers.files[shown]?.dirty == true ? " •" : ""))
                     .scaledFont(.caption1, design: .monospaced).lineLimit(1).truncationMode(.head).help(shown)
             } else {
                 Text("편집기").scaledFont(.headline, weight: .semibold)
@@ -155,11 +130,11 @@ struct IdeArea: View {
             Spacer(minLength: 8)
             Text(state.status).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
             Button(state.readOnly ? "잠금 해제" : "잠그기", systemImage: state.readOnly ? "lock" : "lock.open") {
-                Task { await state.toggleLock() }
+                Task { await state.session?.toggleLock() }
             }
             .disabled(state.shown == nil)
             .help("작업 트리 파일은 읽기 전용으로 열립니다. 풀면 이 파일을 고쳐 저장할 수 있습니다")
-            Button("저장", systemImage: "square.and.arrow.down") { Task { await state.save() } }
+            Button("저장", systemImage: "square.and.arrow.down") { Task { await state.session?.save() } }
                 .disabled(state.shown == nil || state.readOnly)
                 .help("저장 (편집기 안에서 ⌘S)")
             Button("트리", systemImage: "sidebar.right") { change(0) { l, _ in l.treeShown.toggle() } }

@@ -54,6 +54,10 @@ final class EditorPageView: WKWebView {
     private var shown: (path: String, line: Int?)?
     /// What the page last said of each file it shows.
     var onDirty: ((String, Bool) -> Void)?
+    /// The answer to each save the page asked for (its ⌘S and the save command alike), by the file's path.
+    var onWrite: ((String, EditorReply) -> Void)?
+    /// The page's process ended and the page was loaded again: its buffers are gone.
+    var onRestart: (() -> Void)?
 
     var fontSize = baseFontSize {
         didSet { if fontSize != oldValue { Task { _ = await send(.setFontSize(fontSize)) } } }
@@ -77,11 +81,11 @@ final class EditorPageView: WKWebView {
 
     /// Opens `path`, read-only unless Swift unlocked it (D#5 b): its real path and whether it is locked; nil when it
     /// is outside the roots or not a text file.
-    func open(_ path: String, line: Int? = nil) async -> (path: String, readOnly: Bool)? {
-        guard let command = await files.open(path, line: line), case .openFile(let real, _, _, _, let readOnly) = command else { return nil }
+    func open(_ path: String, line: Int? = nil) async -> (path: String, hash: String, readOnly: Bool)? {
+        guard let command = await files.open(path, line: line), case .openFile(let real, _, let hash, _, let readOnly) = command else { return nil }
         shown = (real, line)
         await send(command)
-        return (real, readOnly)
+        return (real, hash, readOnly)
     }
 
     /// The page's process ended (a crash, memory pressure): its buffers are gone. Load it again, open the shown file
@@ -91,6 +95,7 @@ final class EditorPageView: WKWebView {
         ready = false
         waiting = []
         loadPage()
+        onRestart?()
         guard let shown else { return }
         onDirty?(shown.path, false)
         Task { _ = await open(shown.path, line: shown.line) }
@@ -132,6 +137,7 @@ final class EditorPageView: WKWebView {
         }
         Task {
             let reply = await files.handle(request)
+            if case .writeFile(let path, _, _) = request { onWrite?(path, reply) }
             let object = (try? JSONEncoder().encode(reply)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
             replyHandler(object, nil)
         }

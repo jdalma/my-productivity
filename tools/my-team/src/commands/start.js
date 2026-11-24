@@ -203,8 +203,16 @@ function isTeamAlreadyRunning(teamName) {
  *    1. --config <path>
  *    2. auto-discover ./my-team.json or ./team.json in callerCwd
  *    3. inline --worker (--name + --worker name:agent:cwd ...)
+ *  --detached / --new-window turn their mode on over whatever the config says (T5).
  */
 export function resolveConfig(opts, callerCwd) {
+    const config = configFrom(opts, callerCwd);
+    if (opts.detached) config.detached = true;
+    if (opts.newWindow) config.new_window = true;
+    return config;
+}
+
+function configFrom(opts, callerCwd) {
     // a config another command built (solo)
     if (opts.teamConfig) return validateConfig(opts.teamConfig);
     // Inline mode: --name + at least one --worker
@@ -268,6 +276,8 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
             team_name: config.team_name,
             state_root: config.state_root,
             board: config.board,
+            detached: config.detached,
+            new_window: config.new_window,
             workers: config.workers.map((w) => ({
                 name: w.name, cwd: w.cwd, agent_type: w.agent_type, role: w.role, launch_args: w.launch_args,
                 has_extra_prompt: Boolean(w.extra_prompt && w.extra_prompt.trim()),
@@ -293,6 +303,7 @@ export async function runStart(opts, { listPanes: panes = listPanes } = {}) {
 
     const session = await createTeamSession(config.team_name, workerSpecs, {
         newWindow: config.new_window,
+        detached: config.detached,
     });
     console.log(`[my-team] Session: ${session.sessionName} (mode: ${session.sessionMode})`);
     console.log(`[my-team] Host pane (monitor): ${session.leaderPaneId}`);

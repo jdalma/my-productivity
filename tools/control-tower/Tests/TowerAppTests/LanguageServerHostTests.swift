@@ -93,8 +93,9 @@ private func pids(marked marker: String) -> Set<String> {
     var ended = 0
     var got: [String] = []
     let k = key()
-    // plain text and no header end: refused once it is clearly not a header (LSPFrameReader.headerLimit)
-    _ = host.start(k, executable: "/bin/sh", arguments: ["-c", "head -c 6000 /dev/zero | tr '\\\\0' x; sleep 30"],
+    // plain text and no header end: refused once it is clearly not a header (LSPFrameReader.headerLimit). `exec`: the
+    // stop ends the sleep itself; an orphaned sleep would hold pipes other tests' children inherit, for 30 s
+    _ = host.start(k, executable: "/bin/sh", arguments: ["-c", "head -c 6000 /dev/zero | tr '\\\\0' x; exec sleep 30"],
                    onMessage: { got.append($0) }, onExit: { ended += 1 })
     #expect(await until { ended == 1 })
     #expect(!host.isRunning(k))

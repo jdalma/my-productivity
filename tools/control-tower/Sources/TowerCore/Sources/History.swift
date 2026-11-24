@@ -307,10 +307,10 @@ public struct TeamWorker: Hashable, Sendable {
     }
 }
 
-/// The first prompt my-team types into a worker pane (start or add-worker) names its state dir,
+/// The first prompt my-team types into a worker pane (start, `start --continue` or add-worker) names its state dir,
 /// `…/sessions/<team>/workers/<worker>/`. nil for any other text or when the path is missing.
 func myTeamBootstrap(_ prompt: String) -> TeamWorker? {
-    guard prompt.hasPrefix("Team is live.") || prompt.hasPrefix("You just joined team "),
+    guard prompt.hasPrefix("Team is live") || prompt.hasPrefix("You just joined team "),
           let m = prompt.firstMatch(of: #//sessions/([^/\s]+)/workers/([^/\s]+)//#) else { return nil }
     return TeamWorker(team: String(m.1), worker: String(m.2), joined: prompt.hasPrefix("You just joined team "))
 }

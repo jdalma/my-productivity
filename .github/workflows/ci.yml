@@ -50,3 +50,11 @@ jobs:
         run: |
           swift build
           swift test
+      # the editor page is built, never committed (D#11 b): this is the only place its lockfile is checked to build.
+      # After swift test, so the tests above run without Resources/editor/, as on a PC without node.
+      - name: control-tower editor page
+        working-directory: tools/control-tower/editor-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f ../Sources/TowerCore/Resources/editor/index.html

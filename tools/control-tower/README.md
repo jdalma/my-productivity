@@ -10,10 +10,15 @@ A Swift package for macOS 14+. `TowerCore` collects and judges, `TowerApp` is th
 
 ```bash
 cd tools/control-tower
-scripts/bundle-app.sh          # swift build -c release, ad-hoc sign, install to ~/Applications/ControlTower.app
+scripts/bundle-app.sh          # build the editor page, swift build -c release, ad-hoc sign, install to ~/Applications/ControlTower.app
 ```
 
 Then open **Control Tower** from Spotlight, Launchpad or Finder. Rerun the script to update; it replaces the installed bundle.
+
+The script needs Node.js 22.12 or later and npm: it first builds the editor page (`editor-web/`, Monaco) with
+`npm ci && npm run build` into `Sources/TowerCore/Resources/editor/`, which is built, never committed. Without node it
+stops and says so. `swift build` and `swift test` do not need the editor page and run the same without
+`Resources/editor/`. To build only the page: `(cd editor-web && npm ci && npm run build)`.
 
 - Opening the app opens the board window. Opening it again while it runs brings the board forward; there is still one menu bar icon.
 - Started by Open at Login, it stays in the menu bar and does not open the board.
@@ -265,7 +270,8 @@ is open and every 15 s while none is, so a decision waiting for the user reaches
 with every window closed. While a task board window is open, `my-team api goal-order --input '{"team_name":"<team>"}' --json` runs
 with each read of the boards for that window's team (T214). It runs without
 `MY_TEAM_WORKER`, `MY_TEAM_STATE_ROOT` and `OMC_TEAM_WORKER` in its environment. That call only reads, and the app
-never opens `board.db` itself. With no such team, neither my-team nor `node` needs to be installed.
+never opens `board.db` itself. With no such team, neither my-team nor `node` needs to be installed to run the app;
+building it with `scripts/bundle-app.sh` needs node for the editor page (Menu bar app above).
 
 ## Test
 

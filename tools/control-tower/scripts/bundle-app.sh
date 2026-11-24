@@ -20,14 +20,22 @@ fi
 case "$bundle_id" in
     ''|*[!A-Za-z0-9.-]*) echo "bundle-app.sh: bundle id must be letters, digits, . and -: '$bundle_id'" >&2; exit 1 ;;
 esac
+# The editor page (editor-web, Monaco) is built here and never committed (D#11 b): it needs Node.js and npm.
+if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    echo "bundle-app.sh: node and npm not found. The editor page (editor-web) is built with Node.js 22.12 or later and npm:" >&2
+    echo "  install them (e.g. brew install node), then rerun. Only the build needs them: the editor runs in the app's web view." >&2
+    exit 1
+fi
+(cd editor-web && npm ci --no-audit --no-fund && npm run build)
 swift build -c release --product TowerApp
 app=.build/ControlTower.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$(swift build -c release --show-bin-path)/TowerApp" "$app/Contents/MacOS/TowerApp"
 # highlight.js, its BSD-3 license and NOTICE; Syntax.swift reads the script from Contents/Resources.
+# editor/: the built editor page and its THIRD-PARTY-LICENSES.md.
 mkdir -p "$app/Contents/Resources"
-cp Sources/TowerCore/Resources/* "$app/Contents/Resources/"
+cp -R Sources/TowerCore/Resources/* "$app/Contents/Resources/"
 # The app icon, from the square 1024 original: macOS rounds its corners (T82 report).
 iconset=.build/AppIcon.iconset
 rm -rf "$iconset"

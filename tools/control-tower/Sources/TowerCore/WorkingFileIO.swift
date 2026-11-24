@@ -128,8 +128,7 @@ public actor WorkingFileWriter {
     /// What `trash` does with a file: the user's trash, or a test's stand-in for it.
     let toTrash: @Sendable (URL) throws -> Void
 
-    public init(now: @escaping @Sendable () -> Date = Date.init,
-                toTrash: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) {
+    public init(now: @escaping @Sendable () -> Date = Date.init, toTrash: @escaping @Sendable (URL) throws -> Void = trashAction()) {
         self.now = now
         self.toTrash = toTrash
     }
@@ -171,6 +170,19 @@ public actor WorkingFileWriter {
 }
 
 // MARK: - Creating, renaming and trashing (G4 I9)
+
+/// What sends a file to the trash: the user's, where they can take it back. Under `TOWER_DRY_RUN` the file moves to
+/// `trashed/` beside that log, with a line in the log: `FileManager.trashItem` goes to the user's trash whatever
+/// `HOME` says, and a test instance puts nothing there (T96).
+public func trashAction(dryRun: String? = towerDryRun) -> @Sendable (URL) throws -> Void {
+    guard let dryRun else { return { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) } }
+    return { file in
+        let folder = URL(fileURLWithPath: dryRun).deletingLastPathComponent().appending(path: "trashed")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: file, to: folder.appending(path: "\(UUID().uuidString)-\(file.lastPathComponent)"))
+        recordDryRun("trash \(file.path)", to: dryRun)
+    }
+}
 
 public enum FileOpRefusal: String, Hashable, Sendable, Error {
     case notAbsolute

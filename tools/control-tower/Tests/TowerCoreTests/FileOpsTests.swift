@@ -177,3 +177,18 @@ private struct Tree {
         return #expect(Bool(false), "not written after the folder moved")
     }
 }
+
+/// T96: `FileManager.trashItem` goes to the user's trash whatever HOME says, so a test instance moves the file beside
+/// its log and writes a line there.
+@Test func underADryRunATrashedFileStaysBesideTheLog() async throws {
+    let t = Tree(); defer { t.remove() }
+    let log = t.trashed + "/actions.log"
+    let w = WorkingFileWriter(toTrash: trashAction(dryRun: log))
+    t.put("a\n", t.root + "/src/a.swift")
+    #expect(await w.trash(t.root + "/src/a.swift", roots: [t.root]) == .done(path: t.root + "/src/a.swift"))
+    #expect(!t.exists(t.root + "/src/a.swift"))
+    let kept = try FileManager.default.contentsOfDirectory(atPath: t.trashed + "/trashed")
+    #expect(kept.count == 1 && kept[0].hasSuffix("-a.swift"))
+    #expect(try String(contentsOfFile: t.trashed + "/trashed/" + kept[0], encoding: .utf8) == "a\n")
+    #expect(try String(contentsOfFile: log, encoding: .utf8) == "trash \(t.root)/src/a.swift\n")
+}

@@ -147,24 +147,24 @@ private let docs = TreeLine(ChangeTreeNode(name: "docs", path: "docs", kind: .di
 
 @MainActor @Test func aFolderOpensAndClosesAgainstItsDefault() {
     let s = ChangesState(reads: CountedReads().reads())
-    #expect(!s.isOpen(docs, byDefault: false))
-    s.setOpen(docs, true, byDefault: false)
-    #expect(s.isOpen(docs, byDefault: false))
-    #expect(s.flippedFolders == ["a:docs"])
-    s.setOpen(docs, false, byDefault: false)
-    #expect(s.flippedFolders.isEmpty)
+    #expect(!s.tree.isOpen(docs, byDefault: false))
+    s.tree.setOpen(docs, true, byDefault: false)
+    #expect(s.tree.isOpen(docs, byDefault: false))
+    #expect(s.tree.flippedFolders == ["a:docs"])
+    s.tree.setOpen(docs, false, byDefault: false)
+    #expect(s.tree.flippedFolders.isEmpty)
     // closing an open-by-default folder is the flip; reopening it forgets the flip
-    s.setOpen(docs, false, byDefault: true)
-    #expect(!s.isOpen(docs, byDefault: true))
-    s.setOpen(docs, true, byDefault: true)
-    #expect(s.flippedFolders.isEmpty)
+    s.tree.setOpen(docs, false, byDefault: true)
+    #expect(!s.tree.isOpen(docs, byDefault: true))
+    s.tree.setOpen(docs, true, byDefault: true)
+    #expect(s.tree.flippedFolders.isEmpty)
 }
 
 @MainActor @Test func aPickedFileShowsInTheDiffOrTheFileViewAndAFolderShowsNothing() async {
     let s = ChangesState(reads: CountedReads().reads())
     await s.load(workspace: "/w")
     s.pick(docs)
-    #expect(s.scrollTarget == nil && s.history.current == nil && s.flippedFolders.isEmpty)
+    #expect(s.scrollTarget == nil && s.history.current == nil && s.tree.flippedFolders.isEmpty)
 
     // a changed file of the full view: found in the uncommitted section
     s.pick(.file("a.swift"))
@@ -186,9 +186,9 @@ private let docs = TreeLine(ChangeTreeNode(name: "docs", path: "docs", kind: .di
     await s.load(workspace: "/w")
     s.treeMode = .all
     await s.loadFullTree()
-    s.setOpen(docs, true, byDefault: false)
+    s.tree.setOpen(docs, true, byDefault: false)
     s.select(workspace: "/w2")
-    #expect(s.flippedFolders.isEmpty)
+    #expect(s.tree.flippedFolders.isEmpty)
     #expect(s.fullTree == nil)
 }
 

@@ -1,3 +1,4 @@
+import Observation
 import TowerCore
 
 // The "변경" area's file tree, built from a diff section already collected. No view code.
@@ -26,12 +27,12 @@ struct ChangeTreeNode: Equatable, Sendable {
 /// Directories first, then files, each by name. A directory whose only child is a directory shares its line.
 func changeTree(_ section: DiffSection) -> [ChangeTreeNode] { tree(leaves(section)) }
 
-/// The diff window's full folder tree: every file `files` lists, a changed one with its change. A file changed in
+/// A full folder tree: every file `files` lists, a changed one with its change. A file changed in
 /// both sections shows its uncommitted change, as the file view shows the work tree; a changed file the list lacks
-/// (deleted and staged) is added.
-func folderTree(files: [String], diff: WorkspaceDiff) -> [ChangeTreeNode] {
+/// (deleted and staged) is added. Without a diff every file is `.unchanged`.
+func folderTree(files: [String], diff: WorkspaceDiff? = nil) -> [ChangeTreeNode] {
     var change: [String: FileChange] = [:]
-    for section in [diff.committed, diff.uncommitted].compactMap({ $0 }) {
+    for section in [diff?.committed, diff?.uncommitted].compactMap({ $0 }) {
         for leaf in leaves(section) { change[leaf.path] = leaf.change }
     }
     return tree(Set(files).union(change.keys).map { Leaf(path: $0, change: change[$0] ?? .unchanged) })
@@ -87,13 +88,35 @@ struct TreeLine: Hashable {
         isFolder = node.children != nil
     }
 
-    /// What `ChangesState.flippedFolders` holds for a folder.
+    /// What `FolderTreeState.flippedFolders` holds for a folder.
     var id: String {
         switch part {
         case .committed: "c:" + path
         case .uncommitted: "u:" + path
         case nil: "a:" + path
         }
+    }
+}
+
+/// What a folder tree keeps while it is shown, whoever shows it: the folders opened or closed, the line picked.
+@MainActor @Observable
+final class FolderTreeState {
+    /// Folder line ids (`TreeLine.id`) the user opened or closed against their default, both modes.
+    private(set) var flippedFolders: Set<String> = []
+    /// The line the list selects.
+    var picked: TreeLine?
+
+    /// A folder is open by `byDefault`, unless the user opened or closed it against that.
+    func isOpen(_ folder: TreeLine, byDefault: Bool) -> Bool { byDefault != flippedFolders.contains(folder.id) }
+
+    func setOpen(_ folder: TreeLine, _ open: Bool, byDefault: Bool) {
+        if open == byDefault { flippedFolders.remove(folder.id) } else { flippedFolders.insert(folder.id) }
+    }
+
+    /// Another root is another tree: its folders start at their defaults, nothing picked.
+    func reset() {
+        flippedFolders = []
+        picked = nil
     }
 }
 

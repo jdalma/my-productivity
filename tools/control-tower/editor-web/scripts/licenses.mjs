@@ -7,13 +7,24 @@ const outDir = new URL('../../Sources/TowerCore/Resources/editor/', import.meta.
 if (!existsSync(outDir)) throw new Error(`no build output at ${outDir}: run vite build first`)
 const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
 
+// The @codingame/monaco-vscode-* packages ship no license file; they are CodinGame's (MIT) and carry VS Code's source
+// (MIT, Microsoft). Their texts are kept in ../licenses/ (see its README.md).
+const local = (f) => readFileSync(new URL(`../licenses/${f}`, import.meta.url), 'utf8').trim()
+const monacoVscode = `${local('monaco-vscode-api-LICENSE')}\n\n---\n\n${local('vscode-LICENSE.txt')}`
+
 const sections = []
 for (const [path, entry] of Object.entries(lock.packages)) {
   if (!path || entry.dev) continue
   const dir = new URL(`../${path}/`, import.meta.url).pathname
-  const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length)
+  // an optional package npm did not install (e.g. npm's omit=optional) is not in the bundle
+  if (entry.optional && !existsSync(dir)) continue
+  const name = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).name
   const file = readdirSync(dir).find((f) => /^(licen[cs]e|copying)(\.|$)/i.test(f))
-  const text = file ? readFileSync(join(dir, file), 'utf8').trim() : '(no license file in the package)'
+  const text = file ? readFileSync(join(dir, file), 'utf8').trim()
+    : name.startsWith('@codingame/monaco-vscode-') ? monacoVscode
+    : null
+  // a bundled package without its license text would ship unnoticed: stop the build instead
+  if (text === null) throw new Error(`${name} ${entry.version} (${path}) has no license file: add its text to editor-web/licenses/`)
   sections.push(`## ${name} ${entry.version}\n\nLicense: ${entry.license ?? 'not stated'}\n\n\`\`\`\n${text}\n\`\`\``)
 }
 sections.sort()

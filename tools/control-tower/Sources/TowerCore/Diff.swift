@@ -14,14 +14,17 @@ enum GitRead: String, CaseIterable {
     case log
     /// A file as a commit holds it (`<rev>:<path>`), for a landing's diff and a finding's `<commit>:path` (G4 W1, W2).
     case show
+    /// The text search of a worktree (G4 I10): reads the work tree, writes nothing.
+    case grep
 }
 
 /// `-C dir` with the argument list as argv elements, never a shell. `--no-optional-locks` keeps
 /// a status-like read from taking the index lock; `core.quotepath=off` (set through the environment,
 /// so argv has no config flag) keeps paths unescaped.
-func git(_ cmd: GitRead, _ args: [String], in dir: String) throws -> CommandResult {
+func git(_ cmd: GitRead, _ args: [String], in dir: String, maxOutput: Int? = nil) throws -> CommandResult {
     try runCommand(["git", "--no-optional-locks", "-C", dir, cmd.rawValue] + args,
-                   timeout: 20, env: ["GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.quotepath", "GIT_CONFIG_VALUE_0": "off"])
+                   timeout: 20, env: ["GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.quotepath", "GIT_CONFIG_VALUE_0": "off"],
+                   maxOutput: maxOutput)
 }
 
 /// Stdout of a successful run; nil when git is missing or exits non-zero.

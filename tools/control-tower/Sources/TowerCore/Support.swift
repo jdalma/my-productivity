@@ -103,9 +103,11 @@ public func myTeamEnvironment(_ base: [String: String] = ProcessInfo.processInfo
 /// the program cannot be found or started.
 /// `unset` names variables the child must not inherit.
 /// `input` is what the child reads as its standard input, nothing without it; `cwd` is the folder it runs in.
+/// `maxOutput` stops reading once that many bytes of output are in (a few more may come with the last read): the
+/// output is then closed, the child's next write fails and it ends by itself, with whatever status that gives.
 /// `startKiller` starts the timeout's killer and `signal` sends its signals; tests start it late and record them.
 func runCommand(_ argv: [String], timeout: TimeInterval, env: [String: String] = [:], unset: Set<String> = [],
-                input: Data? = nil, cwd: String? = nil,
+                input: Data? = nil, cwd: String? = nil, maxOutput: Int? = nil,
                 startKiller: (@escaping @Sendable () -> Void) -> Void = { Thread(block: $0).start() },
                 signal: @escaping @Sendable (pid_t, Int32) -> Void = { _ = kill($0, $1) }) throws -> CommandResult {
     guard let exe = resolveExecutable(argv[0]) else { throw CommandError(description: "\(argv[0]): not found") }
@@ -154,7 +156,19 @@ func runCommand(_ argv: [String], timeout: TimeInterval, env: [String: String] =
         signal(pid, SIGTERM)
         if ended.wait(timeout: .now() + killGrace) == .timedOut { signal(pid, SIGKILL) }
     }
-    let data = out.fileHandleForReading.readDataToEndOfFile()
+    let reader = out.fileHandleForReading
+    var data = Data()
+    if let maxOutput {
+        while data.count < maxOutput {
+            let chunk = reader.availableData
+            if chunk.isEmpty { break }
+            data.append(chunk)
+        }
+        // no signal here: the child may have ended, and its pid may be another process's by now (R55 L1)
+        try? reader.close()
+    } else {
+        data = reader.readDataToEndOfFile()
+    }
     exited.wait()
     let err = (try? Data(contentsOf: errURL)) ?? Data()
     return CommandResult(status: p.terminationStatus,

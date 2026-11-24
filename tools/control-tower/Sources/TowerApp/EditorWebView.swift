@@ -70,11 +70,12 @@ final class EditorPageView: WKWebView {
         web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/index.html")!))
     }
 
-    /// Opens `path` read-only (D#5 b); false when it is outside the roots or not a text file.
-    func open(_ path: String, line: Int? = nil) async -> Bool {
-        guard let command = await files.open(path, line: line) else { return false }
+    /// Opens `path`, read-only unless it was unlocked (D#5 b): its real path, as the page names it from then on; nil
+    /// when it is outside the roots or not a text file.
+    func open(_ path: String, line: Int? = nil) async -> String? {
+        guard let command = await files.open(path, line: line), case .openFile(let real, _, _, _, _) = command else { return nil }
         await send(command)
-        return true
+        return real
     }
 
     func setReadOnly(_ path: String, _ readOnly: Bool) async {
@@ -171,22 +172,34 @@ let editorTryPath = ProcessInfo.processInfo.environment["CT_EDITOR_TRY"]
 struct EditorTryWindow: View {
     let path: String
     @State private var controller: EditorController?
-    @State private var readOnly = true
-    @State private var dirty = false
+    /// The file in the editor, by its real path: `path`, then what the search opened.
+    @State private var shown: String?
+    @State private var unlocked: Set<String> = []
+    @State private var dirty: Set<String> = []
     @State private var status = ""
     @AppStorage(FontScale.storageKey) private var storedScale = FontScale.standard.value
 
+    private var root: String { URL(fileURLWithPath: path).deletingLastPathComponent().path }
+
+    private func open(_ file: String, line: Int? = nil) async {
+        guard let real = await controller?.open(file, line: line) else { return status = "열 수 없음" }
+        shown = real
+        status = "열림"
+    }
+
     var body: some View {
+        let file = shown ?? path
+        let readOnly = !unlocked.contains(file)
         VStack(spacing: 0) {
             HStack {
-                Text(path + (dirty ? " •" : "")).lineLimit(1).truncationMode(.head)
+                Text(file + (dirty.contains(file) ? " •" : "")).lineLimit(1).truncationMode(.head)
                 Spacer()
                 Text(status).foregroundStyle(.secondary)
                 Button(readOnly ? "잠금 해제" : "잠그기") {
-                    readOnly.toggle()
-                    Task { await controller?.setReadOnly(path, readOnly) }
+                    if readOnly { unlocked.insert(file) } else { unlocked.remove(file) }
+                    Task { await controller?.setReadOnly(file, !readOnly) }
                 }
-                .disabled(controller == nil)
+                .disabled(controller == nil || shown == nil)
                 Button("저장") {
                     Task {
                         let r = await controller?.send(.save)
@@ -198,7 +211,13 @@ struct EditorTryWindow: View {
             .padding(8)
             Divider()
             if let controller {
-                EditorWebView(controller: controller)
+                HStack(spacing: 0) {
+                    // ponytail: I10's search beside I4's editor; I5 moves this panel into IdeArea with the window
+                    SearchPanel(root: root) { found, line in Task { await open(root + "/" + found, line: line) } }
+                        .frame(width: 300)
+                    Divider()
+                    EditorWebView(controller: controller)
+                }
             } else {
                 Text(editorPageFolder == nil ? "편집기 페이지가 빌드되지 않았습니다 (editor-web에서 npm run build)" : "여는 중")
                     .foregroundStyle(.secondary)
@@ -212,10 +231,10 @@ struct EditorTryWindow: View {
         .background(TestWindowPlacement())
         .task {
             guard let page = editorPageFolder else { return }
-            let c = EditorController(roots: [URL(fileURLWithPath: path).deletingLastPathComponent().path], page: page)
-            c.onDirty = { dirty = $1 }
+            let c = EditorController(roots: [root], page: page)
+            c.onDirty = { if $1 { dirty.insert($0) } else { dirty.remove($0) } }
             controller = c
-            status = await c.open(path) ? "열림" : "열 수 없음"
+            await open(path)
         }
     }
 }

@@ -151,3 +151,21 @@ private func scratch() throws -> URL {
         #expect(fileOpenPlan(p, stored: "", appURL: editor) == .open(app: vsCode, note: nil), "\(name) in VS Code")
     }
 }
+
+/// G4 I6: in the task board window a text document opens in the window's read-only editor; anything else (a PDF, an
+/// image, what R54 refuses) keeps the outside path, where `openRefusal` still decides.
+@Test func onlyATextDocumentOpensInTheTaskBoardsEditor() throws {
+    let dir = try scratch()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    func file(_ name: String, executable: Bool = false) throws -> String {
+        let p = dir.appending(path: name).path
+        try "x".write(toFile: p, atomically: true, encoding: .utf8)
+        if executable { try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: p) }
+        return p
+    }
+    for ok in ["T28-ticket.md", "notes.txt", "data.json", "main.swift"] { #expect(opensInIde(try file(ok)), "\(ok)") }
+    for no in [try file("doc.pdf"), try file("shot.png"), try file("run.sh"), try file("report.md", executable: true),
+               dir.appending(path: "gone.md").path, "reports/T1.md", dir.path] {
+        #expect(!opensInIde(no), "\(no)")
+    }
+}

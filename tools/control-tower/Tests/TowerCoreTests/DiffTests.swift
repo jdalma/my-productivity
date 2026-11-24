@@ -238,8 +238,9 @@ private func baseRef(_ d: WorkspaceDiff) -> String? {
 }
 
 @Test func gitRunsOnlyReadOnlySubcommands() {
-    // log: a task's commits since its start commit (T128); reads only, like the rest
-    #expect(Set(GitRead.allCases.map(\.rawValue)) == ["diff", "diff-index", "ls-files", "merge-base", "rev-parse", "symbolic-ref", "for-each-ref", "log", "show"])
+    // log: a task's commits since its start commit (T128); ls-tree: a commit's files (G4 I6); reads only, like the rest
+    #expect(Set(GitRead.allCases.map(\.rawValue)) == ["diff", "diff-index", "ls-files", "merge-base", "rev-parse", "symbolic-ref", "for-each-ref", "log",
+                                                      "show", "ls-tree"])
 }
 
 // MARK: - T9a regressions

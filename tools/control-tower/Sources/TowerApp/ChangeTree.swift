@@ -38,6 +38,11 @@ func folderTree(files: [String], diff: WorkspaceDiff? = nil) -> [ChangeTreeNode]
     return tree(Set(files).union(change.keys).map { Leaf(path: $0, change: change[$0] ?? .unchanged) })
 }
 
+/// A landing's changed files (G4 I6): an added one marked new, the others plain; git gives no line counts here.
+func changedTree(_ files: [ChangedFile]) -> [ChangeTreeNode] {
+    tree(files.map { Leaf(path: $0.path, change: $0.status == .added ? .untracked : .lines(added: 0, removed: 0)) })
+}
+
 /// The folders, by path, that hold a changed file somewhere below them: the full tree opens these by default.
 func changedFolders(_ diff: WorkspaceDiff) -> Set<String> {
     var folders = Set<String>()

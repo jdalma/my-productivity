@@ -786,7 +786,7 @@ private struct DetailView: View {
             if let terminal {
                 VStack(alignment: .leading, spacing: 12) {
                     head
-                    IdeArea(root: workspace, terminal: terminal, at: board.at, state: ide)
+                    IdeArea(source: .worktree(workspace), terminal: terminal, at: board.at, state: ide)
                         .frame(maxHeight: .infinity)
                 }
                 .padding(16)

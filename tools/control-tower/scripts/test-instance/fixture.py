@@ -193,6 +193,7 @@ write(f"{repo}/tests/area_test.swift", "// example test\n")
 git("add", "-A")
 git("commit", "-q", "-m", "example: tests for the shapes")
 beta_base = git("rev-parse", "main")
+beta_head = git("rev-parse", "HEAD")
 write(f"{repo}/README.md", "# Second example project\n\nA beta line not yet committed.\n")
 
 # ---------------------------------------------------------------- task board
@@ -241,6 +242,8 @@ tasks = [
 # in beta's folder since its start commit
 t5 = next(t for t in tasks if t["id"] == "T5")
 t5["base_commit"] = beta_base
+# T2 done (G4 I6): its landing is beta's work at a real commit, which the task board's tree and editor read
+next(t for t in tasks if t["id"] == "T2")["base_commit"] = beta_base
 write(t5["ticket_path"], """# T5 — example-team: example shapes report
 
 담당: beta · 리뷰: reviewer · base main
@@ -346,6 +349,7 @@ landings = [
     landing("T7#1", "T7", 75, "alpha"),
     landing("T8#1", "T8", 125, "delta", closes=["R5 L1"]),
 ]
+next(l for l in landings if l["id"] == "T2#1").update(repo=f"{T}/work/beta", commit=beta_head, base_commit=beta_base, commits=[beta_head])
 verdicts = [
     verdict("R1", "T2#1", "approve", 52),
     verdict("R2", "T3#1", "changes", 39),

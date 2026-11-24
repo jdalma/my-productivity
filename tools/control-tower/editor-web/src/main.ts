@@ -142,6 +142,15 @@ async function main() {
       f.hash = m.diskHash
       return save(m.path)
     },
+    /** The tree renamed an open file: its buffer stays, under the new path (the language stays the old name's until it is opened again). */
+    renameFile(m) {
+      const f = files.get(m.from)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      files.delete(m.from)
+      files.set(m.to, f)
+      if (shown === m.from) shown = m.to
+      return { result: 'ok' }
+    },
     getText(m) {
       const f = files.get(m.path)
       return f ? { result: 'ok', text: model(f).getValue() } : { result: 'refused', reason: 'notOpen' }

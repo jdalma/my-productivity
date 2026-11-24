@@ -125,8 +125,17 @@ public struct SelfWriteRegistry: Sendable {
 public actor WorkingFileWriter {
     private var selfWrites = SelfWriteRegistry()
     private let now: @Sendable () -> Date
+    /// What `trash` does with a file: the user's trash, or a test's stand-in for it.
+    let toTrash: @Sendable (URL) throws -> Void
 
-    public init(now: @escaping @Sendable () -> Date = Date.init) { self.now = now }
+    public init(now: @escaping @Sendable () -> Date = Date.init,
+                toTrash: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) {
+        self.now = now
+        self.toTrash = toTrash
+    }
+
+    /// Notes a path this writer just wrote, made, moved or trashed (`isSelfWrite`).
+    func wrote(_ realPath: String) { selfWrites.record(realPath, at: now()) }
 
     /// Writes `text` to `path` when its bytes on disk still hash to `expected`, the hash of the read the edit started
     /// from. The bytes go to the real path (a link inside the roots stays a link) atomically, and the file keeps its
@@ -153,10 +162,113 @@ public actor WorkingFileWriter {
         } catch {
             return .failed(error.localizedDescription)
         }
-        selfWrites.record(real, at: now())
+        wrote(real)
         return .written(hash: wanted)
     }
 
     /// Whether `realPath` was written by this writer within the last 750 ms.
     public func isSelfWrite(_ realPath: String) -> Bool { selfWrites.contains(realPath, at: now()) }
+}
+
+// MARK: - Creating, renaming and trashing (G4 I9)
+
+public enum FileOpRefusal: String, Hashable, Sendable, Error {
+    case notAbsolute
+    /// Nothing at the path to rename or trash, or no folder to make the new thing in.
+    case missing
+    /// The folder it is in, links followed, is in none of the roots.
+    case outside
+    /// Something is already at the new path: nothing is ever written over.
+    case exists
+    /// Not one path component: empty, `.`, `..`, or with a `/`.
+    case badName
+    /// File operations are locked until the user unlocks them (D#5 b).
+    case locked
+}
+
+public enum FileOpResult: Hashable, Sendable {
+    /// The real path of what was made, of the new name, or of what went to the trash.
+    case done(path: String)
+    case refused(FileOpRefusal)
+    case failed(String)
+}
+
+/// One path component a file or folder may be named.
+func isFileName(_ name: String) -> Bool {
+    !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\0")
+}
+
+/// `path` as the real path of its folder plus its last component, while that folder is inside one of `roots`: a
+/// folder reached through a link that leads out of every root, or by `..`, is refused. The last component is not
+/// followed: a link is renamed or trashed itself, and a new name is never looked through.
+private func placed(_ path: String, roots: [String]) -> Result<String, FileOpRefusal> {
+    guard path.hasPrefix("/"), let slash = path.lastIndex(of: "/") else { return .failure(.notAbsolute) }
+    let name = String(path[path.index(after: slash)...])
+    guard isFileName(name) else { return .failure(.badName) }
+    guard let folder = realPath(slash == path.startIndex ? "/" : String(path[..<slash])) else { return .failure(.missing) }
+    guard roots.compactMap(realPath).contains(where: { isInside(folder, $0) }) else { return .failure(.outside) }
+    return .success(folder + "/" + name)
+}
+
+/// Whether anything is at `path`, a link that leads nowhere included.
+private func somethingAt(_ path: String) -> Bool {
+    var info = stat()
+    return lstat(path, &info) == 0
+}
+
+extension WorkingFileWriter {
+    /// Makes an empty file at `path`: its folder there already and inside the roots, nothing at the path.
+    public func createFile(_ path: String, roots: [String]) -> FileOpResult {
+        make(path, roots: roots) { try Data().write(to: URL(fileURLWithPath: $0), options: .withoutOverwriting) }
+    }
+
+    /// Makes a folder at `path`, under the same rules.
+    public func createFolder(_ path: String, roots: [String]) -> FileOpResult {
+        make(path, roots: roots) { try FileManager.default.createDirectory(atPath: $0, withIntermediateDirectories: false) }
+    }
+
+    private func make(_ path: String, roots: [String], _ create: (String) throws -> Void) -> FileOpResult {
+        let target: String
+        switch placed(path, roots: roots) {
+        case .success(let t): target = t
+        case .failure(let why): return .refused(why)
+        }
+        guard !somethingAt(target) else { return .refused(.exists) }
+        do { try create(target) } catch { return somethingAt(target) ? .refused(.exists) : .failed(error.localizedDescription) }
+        wrote(target)
+        return .done(path: target)
+    }
+
+    /// Gives the file or folder at `path` the name `name`, in the folder it is in. Nothing is written over: with
+    /// something at the new name already, even made in this instant, nothing moves (`RENAME_EXCL`).
+    // ponytail: a change of letter case only is refused as `exists` where the file system ignores case (the name is taken, by the file itself)
+    public func rename(_ path: String, to name: String, roots: [String]) -> FileOpResult {
+        let source: String
+        switch placed(path, roots: roots) {
+        case .success(let s): source = s
+        case .failure(let why): return .refused(why)
+        }
+        guard somethingAt(source) else { return .refused(.missing) }
+        guard isFileName(name) else { return .refused(.badName) }
+        let target = String(source[...source.lastIndex(of: "/")!]) + name
+        guard renamex_np(source, target, UInt32(RENAME_EXCL)) == 0 else {
+            return errno == EEXIST ? .refused(.exists) : .failed(String(cString: strerror(errno)))
+        }
+        wrote(source)
+        wrote(target)
+        return .done(path: target)
+    }
+
+    /// Moves the file or folder at `path` to the trash, where the user can take it back.
+    public func trash(_ path: String, roots: [String]) -> FileOpResult {
+        let source: String
+        switch placed(path, roots: roots) {
+        case .success(let s): source = s
+        case .failure(let why): return .refused(why)
+        }
+        guard somethingAt(source) else { return .refused(.missing) }
+        do { try toTrash(URL(fileURLWithPath: source)) } catch { return .failed(error.localizedDescription) }
+        wrote(source)
+        return .done(path: source)
+    }
 }

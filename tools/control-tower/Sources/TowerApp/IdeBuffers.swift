@@ -17,6 +17,8 @@ final class IdeSession {
     private(set) var status = ""
     /// The banner's 비교: the disk's text against the buffer's.
     var comparing: FileDiff?
+    /// Making, renaming and trashing from the tree: locked until the user unlocks it for this worktree (D#5 b).
+    private(set) var fileOpsLocked = true
     /// The path of a file Swift read itself and the page shows (`show`), in place of the shown buffer; nil when a
     /// buffer shows.
     private(set) var outside: String?
@@ -71,6 +73,49 @@ final class IdeSession {
     func save() async {
         guard let editor else { return }
         say(refusal: await editor.send(.save))
+    }
+
+    func toggleFileOps() async {
+        fileOpsLocked.toggle()
+        await editor?.files.setFileOpsLocked(fileOpsLocked)
+    }
+
+    /// The tree's menu, by absolute path; `rename` takes the new name.
+    enum FileOp: Equatable {
+        case newFile(String), newFolder(String), rename(String, to: String), trash(String)
+    }
+
+    /// Does `op` through the editor's files, which judge the path and the lock again, then brings the buffers along:
+    /// a new file opens, a renamed file's buffer follows it, a trashed file's buffer is marked deleted.
+    func run(_ op: FileOp) async {
+        guard let editor else { return }
+        let files = editor.files
+        let result = switch op {
+        case .newFile(let path): await files.createFile(path)
+        case .newFolder(let path): await files.createFolder(path)
+        case .rename(let path, let name): await files.rename(path, to: name)
+        case .trash(let path): await files.trash(path)
+        }
+        switch result {
+        case .refused(let why): status = "하지 않음: " + fileOpRefusalText(why)
+        case .failed(let message): status = "실패: " + message
+        case .done(let done):
+            switch op {
+            case .newFile:
+                await open(done)
+                status = "만듦"
+            case .newFolder:
+                status = "폴더를 만듦"
+            case .rename(let path, _):
+                let old = (done as NSString).deletingLastPathComponent + "/" + (path as NSString).lastPathComponent
+                for moved in buffers.renamed(from: old, to: done) { await editor.send(.renameFile(from: moved.from, to: moved.to)) }
+                status = "이름을 바꿈"
+            case .trash:
+                // the watch says the same 250 ms later; the buffers hear a deletion once
+                for path in buffers.open(under: done) { await run(buffers.diskChanged(path, hash: nil)) }
+                status = "휴지통으로 옮김"
+            }
+        }
     }
 
     func choose(_ choice: BannerChoice) async {
@@ -158,6 +203,18 @@ func saveRefusalText(_ reason: String) -> String {
     case "notOpen": "열린 파일이 아님"
     case "outside": "이 작업 트리 밖의 파일"
     default: reason
+    }
+}
+
+/// Why a file operation from the tree did not happen.
+func fileOpRefusalText(_ why: FileOpRefusal) -> String {
+    switch why {
+    case .locked: "파일 작업이 잠겨 있음"
+    case .missing: "그 자리에 없음"
+    case .outside: "이 작업 트리 밖"
+    case .exists: "같은 이름이 이미 있음"
+    case .badName: "쓸 수 없는 이름"
+    case .notAbsolute: "경로가 올바르지 않음"
     }
 }
 

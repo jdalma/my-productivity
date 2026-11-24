@@ -53,3 +53,33 @@ import TowerCore
     state.show(root: root + "-other")
     #expect(state.session !== first && state.session?.root == root + "-other")
 }
+
+// MARK: - The tree's file menu (G4 I9)
+
+@Test func aNewFileGoesInTheLinesFolderOrTheWorktreeRoot() {
+    let folder = TreeLine(ChangeTreeNode(name: "src", path: "app/src", kind: .directory([])), part: nil)
+    let file = TreeLine(ChangeTreeNode(name: "a.swift", path: "app/src/a.swift", kind: .file(.unchanged)), part: nil)
+    let top = TreeLine(ChangeTreeNode(name: "README.md", path: "README.md", kind: .file(.unchanged)), part: nil)
+    #expect(newPath("x.swift", from: folder, toplevel: "/repo", root: "/repo/app") == "/repo/app/src/x.swift")
+    #expect(newPath("x.swift", from: file, toplevel: "/repo", root: "/repo/app") == "/repo/app/src/x.swift", "beside the file")
+    #expect(newPath("x.swift", from: top, toplevel: "/repo", root: "/repo") == "/repo/x.swift")
+    #expect(newPath("a/b/x.swift", from: nil, toplevel: "/repo", root: "/repo/app") == "/repo/app/a/b/x.swift", "no line: the worktree")
+}
+
+@Test func everyRefusalOfAFileOperationHasItsWords() {
+    let all: [FileOpRefusal] = [.locked, .missing, .outside, .exists, .badName, .notAbsolute]
+    #expect(Set(all.map(fileOpRefusalText)).count == all.count)
+    #expect(fileOpRefusalText(.locked) == "파일 작업이 잠겨 있음")
+}
+
+/// The task board window's area reads only: no file operation runs from it.
+@MainActor @Test func theReadOnlyWindowsAreaRunsNoFileOperation() async throws {
+    let dir = FileManager.default.temporaryDirectory.appending(path: "ct-ide-readonly-\(UUID().uuidString)").path
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let state = IdeState(lockable: false)
+    state.show(root: dir)
+    await state.session?.toggleFileOps()
+    await state.fileOp(.newFile(dir + "/x.txt"))
+    #expect(!FileManager.default.fileExists(atPath: dir + "/x.txt"))
+}

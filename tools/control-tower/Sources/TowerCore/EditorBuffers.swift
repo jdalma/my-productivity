@@ -166,6 +166,24 @@ public struct EditorBuffers: Equatable, Sendable {
         files[path] = f
     }
 
+    /// The file or folder at `from` was given the path `to` (the tree's 이름 변경): the open files at or under it keep
+    /// their state, tab and place under their new paths. What moved comes back, in tab order, for the page.
+    public mutating func renamed(from: String, to: String) -> [(from: String, to: String)] {
+        let moved = open(under: from).map { (from: $0, to: to + $0.dropFirst(from.count)) }
+        for m in moved {
+            files[m.to] = files.removeValue(forKey: m.from)
+            if shown == m.from { shown = m.to }
+        }
+        let new = Dictionary(uniqueKeysWithValues: moved.map { ($0.from, $0.to) })
+        tabs = tabs.map { new[$0] ?? $0 }
+        return moved
+    }
+
+    /// The open files at `path` or under it as a folder, in tab order: what a rename moves and a trash marks deleted.
+    public func open(under path: String) -> [String] {
+        tabs.filter { $0 == path || $0.hasPrefix(path + "/") }
+    }
+
     /// The banner's choice for `path`; nothing unless the disk changed under an edit that is not saved.
     public mutating func choose(_ choice: BannerChoice, _ path: String) -> BufferEffect? {
         guard var f = files[path], f.dirty, case .changed(let diskHash) = f.disk else { return nil }

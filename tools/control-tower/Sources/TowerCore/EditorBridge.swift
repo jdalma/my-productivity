@@ -97,6 +97,8 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
     case overwrite(path: String, diskHash: String)
     /// The buffer's text, for the banner's 비교.
     case getText(path: String)
+    /// An open file has a new path (the tree's 이름 변경): the page keeps its buffer, under that path from now on.
+    case renameFile(from: String, to: String)
     case fileDeleted(path: String)
     case setTheme(dark: Bool)
     case setFontSize(Double)
@@ -104,7 +106,7 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
     /// Save the shown file, as ⌘S in the editor does.
     case save
 
-    private enum Key: String, CodingKey { case kind, path, text, hash, diskHash, line, readOnly, dark, size }
+    private enum Key: String, CodingKey { case kind, path, text, hash, diskHash, line, readOnly, dark, size, from, to }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -133,6 +135,10 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
         case .getText(let path):
             try c.encode("getText", forKey: .kind)
             try c.encode(path, forKey: .path)
+        case .renameFile(let from, let to):
+            try c.encode("renameFile", forKey: .kind)
+            try c.encode(from, forKey: .from)
+            try c.encode(to, forKey: .to)
         case .fileDeleted(let path):
             try c.encode("fileDeleted", forKey: .kind)
             try c.encode(path, forKey: .path)
@@ -157,6 +163,8 @@ public actor EditorFiles {
     public let roots: [String]
     private var opened: [String: TextEncoding] = [:]
     private var unlocked: Set<String> = []
+    /// Making, renaming and trashing files is refused until the user unlocks it (D#5 b), as editing a file is.
+    private var fileOpsLocked = true
     private let writer: WorkingFileWriter
 
     public init(roots: [String], writer: WorkingFileWriter = WorkingFileWriter()) {
@@ -195,6 +203,62 @@ public actor EditorFiles {
     public func reload(_ path: String) -> EditorCommand? {
         guard opened[path] != nil, case .file(let text, let hash) = read(path) else { return nil }
         return .reloadFile(path: path, text: text, hash: hash)
+    }
+
+    // MARK: The tree's file operations (G4 I9): Swift's own, never the page's
+
+    public func setFileOpsLocked(_ locked: Bool) { fileOpsLocked = locked }
+
+    /// Makes an empty file at `path`, and the folders missing on the way to it.
+    public func createFile(_ path: String) async -> FileOpResult {
+        guard !fileOpsLocked else { return .refused(.locked) }
+        if let stopped = await makeFolders(above: path) { return stopped }
+        return await writer.createFile(path, roots: roots)
+    }
+
+    /// Makes a folder at `path`, and the folders missing on the way to it.
+    public func createFolder(_ path: String) async -> FileOpResult {
+        guard !fileOpsLocked else { return .refused(.locked) }
+        if let stopped = await makeFolders(above: path) { return stopped }
+        return await writer.createFolder(path, roots: roots)
+    }
+
+    /// The folders of `path` that are not there yet, made nearest the root first; what stopped it, or nil. Each is
+    /// judged as any new folder is: inside the roots, and no `..` in a name.
+    private func makeFolders(above path: String) async -> FileOpResult? {
+        var missing: [String] = []
+        var folder = (path as NSString).deletingLastPathComponent
+        // NSString resolves no `..`: a component is taken off as written, and `placed` refuses `..` as a name
+        while folder.count > 1, realPath(folder) == nil {
+            missing.append(folder)
+            folder = String(folder[..<(folder.lastIndex(of: "/") ?? folder.startIndex)])
+        }
+        // every name first: a `..` further down must not leave the folders before it made
+        guard missing.allSatisfy({ isFileName(($0 as NSString).lastPathComponent) }) else { return .refused(.badName) }
+        for folder in missing.reversed() {
+            let made = await writer.createFolder(folder, roots: roots)
+            guard case .done = made else { return made }
+        }
+        return nil
+    }
+
+    /// Renames the file or folder at `path` in its folder. The files this editor read at or under it stay open, and
+    /// unlocked, under their new paths.
+    public func rename(_ path: String, to name: String) async -> FileOpResult {
+        guard !fileOpsLocked else { return .refused(.locked) }
+        let result = await writer.rename(path, to: name, roots: roots)
+        guard case .done(let new) = result, let slash = new.lastIndex(of: "/") else { return result }
+        let old = String(new[...slash]) + (path as NSString).lastPathComponent
+        func moved(_ p: String) -> String? { p == old || p.hasPrefix(old + "/") ? new + p.dropFirst(old.count) : nil }
+        opened = Dictionary(uniqueKeysWithValues: opened.map { (moved($0.key) ?? $0.key, $0.value) })
+        unlocked = Set(unlocked.map { moved($0) ?? $0 })
+        return result
+    }
+
+    /// Moves the file or folder at `path` to the trash.
+    public func trash(_ path: String) async -> FileOpResult {
+        guard !fileOpsLocked else { return .refused(.locked) }
+        return await writer.trash(path, roots: roots)
     }
 
     public func handle(_ request: EditorRequest) async -> EditorReply {

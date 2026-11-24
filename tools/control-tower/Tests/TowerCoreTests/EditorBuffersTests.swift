@@ -154,3 +154,41 @@ private func opened(dirty: Bool = false) -> EditorBuffers {
     #expect(clean.diskChanged(a, hash: "h1") == .reload(path: a, force: false), "the same bytes again: the page unlocks through a reload")
     #expect(clean.banner == nil)
 }
+
+// MARK: - A file renamed or trashed from the tree (G4 I9)
+
+@Test func aRenamedFileKeepsItsBufferUnderTheNewPath() {
+    var b = opened(dirty: true)
+    b.open("/w/b.swift", hash: "hb", readOnly: true)
+    b.open(a, hash: "h1", readOnly: true)
+    let moved = b.renamed(from: a, to: "/w/z.swift")
+    #expect(moved.map(\.from) == [a] && moved.map(\.to) == ["/w/z.swift"])
+    #expect(b.tabs == ["/w/z.swift", "/w/b.swift"] && b.shown == "/w/z.swift")
+    #expect(b.files[a] == nil)
+    #expect(b.files["/w/z.swift"]?.dirty == true && b.files["/w/z.swift"]?.readOnly == false && b.files["/w/z.swift"]?.base == "h1")
+    #expect(b.unsaved == ["/w/z.swift"])
+    // a file that is not open moves nothing
+    #expect(b.renamed(from: "/w/not-open.swift", to: "/w/other.swift").isEmpty)
+}
+
+@Test func aRenamedFolderMovesEveryBufferUnderItAndNoOther() {
+    var b = EditorBuffers()
+    for path in ["/w/src/a.swift", "/w/src/deep/b.swift", "/w/src2/c.swift", "/w/srcfile"] { b.open(path, hash: "h", readOnly: true) }
+    let moved = b.renamed(from: "/w/src", to: "/w/lib")
+    #expect(moved.map(\.to) == ["/w/lib/a.swift", "/w/lib/deep/b.swift"])
+    #expect(b.tabs == ["/w/lib/a.swift", "/w/lib/deep/b.swift", "/w/src2/c.swift", "/w/srcfile"])
+    #expect(b.shown == "/w/srcfile")
+}
+
+@Test func theOpenFilesUnderATrashedPathAreFoundAndMarkedDeleted() {
+    var b = EditorBuffers()
+    for path in ["/w/src/a.swift", "/w/src/deep/b.swift", "/w/src2/c.swift"] { b.open(path, hash: "h", readOnly: true) }
+    #expect(b.open(under: "/w/src") == ["/w/src/a.swift", "/w/src/deep/b.swift"])
+    #expect(b.open(under: "/w/src/a.swift") == ["/w/src/a.swift"])
+    #expect(b.open(under: "/w/sr").isEmpty)
+    b.open("/w/src/a.swift", hash: "h", readOnly: true)
+    #expect(b.diskChanged("/w/src/a.swift", hash: nil) == .deleted(path: "/w/src/a.swift"))
+    #expect(b.banner == .deleted(path: "/w/src/a.swift", dirty: false))
+    // the watch reports the same deletion a moment later: said once
+    #expect(b.diskChanged("/w/src/a.swift", hash: nil) == nil)
+}

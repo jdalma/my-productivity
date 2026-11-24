@@ -74,6 +74,14 @@ final class IdeState {
         }
     }
 
+    /// A file operation from the tree's menu (I9), then the tree read again. The board window's only.
+    func fileOp(_ op: IdeSession.FileOp) async {
+        guard lockable, let session, let root else { return }
+        await session.run(op)
+        await changes.load(workspace: root)
+        await changes.loadFullTree()
+    }
+
     /// A ticket or report the task board names, read-only in this editor (D#7 b); narrow, the code tab comes forward.
     func openDocument(_ path: String) {
         codeShown = true
@@ -148,7 +156,9 @@ struct IdeArea: View {
     private var tree: some View {
         switch source {
         case .worktree(let root)?:
-            DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick)
+            // the tree's file menu (I9): the board window's only, the task board window reads
+            DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick,
+                            menu: state.lockable ? { line in AnyView(IdeTreeMenu(line: line, state: state)) } : nil)
         case .commit(_, _, let commit)?:
             CommitTreeSidebar(commit: commit, state: state)
         case nil:
@@ -308,4 +318,68 @@ private struct CommitTreeSidebar: View {
 extension EnvironmentValues {
     /// Opens a document path the task board names in the window's read-only editor; nil where there is none.
     @Entry var openInIde: ((String) -> Void)?
+}
+
+// MARK: - The tree's file menu (G4 I9)
+
+/// The absolute path of a new file or folder `name` made from `line`'s menu: in the line's folder, beside a file's
+/// line, or in `root` where no line is. `name` may hold folders (`a/b.swift`); `toplevel` is what the tree's paths are from.
+func newPath(_ name: String, from line: TreeLine?, toplevel: String, root: String) -> String {
+    let folder = line.map { toplevel + "/" + ($0.isFolder ? $0.path : String(splitPath($0.path).dir.dropLast())) } ?? root
+    return (folder.hasSuffix("/") ? String(folder.dropLast()) : folder) + "/" + name
+}
+
+/// Asks for a name in a dialog; nil when cancelled or left empty.
+@MainActor func askName(_ title: String, initial: String = "", note: String = "") -> String? {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = note
+    let field = NSTextField(string: initial)
+    field.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
+    alert.accessoryView = field
+    alert.addButton(withTitle: "확인")
+    alert.addButton(withTitle: "취소")
+    alert.window.initialFirstResponder = field
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+    return name.isEmpty ? nil : name
+}
+
+/// The context menu of the board window's worktree tree: make, rename, trash. Everything but the lock is off until
+/// the user unlocks file operations for this worktree (D#5 b).
+struct IdeTreeMenu: View {
+    let line: TreeLine?
+    let state: IdeState
+
+    var body: some View {
+        let locked = state.session?.fileOpsLocked ?? true
+        Button(locked ? "파일 작업 잠금 해제" : "파일 작업 잠그기") { Task { await state.session?.toggleFileOps() } }
+        Divider()
+        Group {
+            Button("새 파일…") { make(folder: false) }
+            Button("새 폴더…") { make(folder: true) }
+            if let line {
+                Button("이름 변경…") {
+                    guard let path = absolute(line), let name = askName("이름 변경", initial: splitPath(line.path).name) else { return }
+                    Task { await state.fileOp(.rename(path, to: name)) }
+                }
+                Button("휴지통으로 이동") {
+                    guard let path = absolute(line) else { return }
+                    Task { await state.fileOp(.trash(path)) }
+                }
+            }
+        }
+        .disabled(locked)
+    }
+
+    private var toplevel: String? { state.root.flatMap { state.changes.diff(for: $0)?.toplevel } }
+
+    private func absolute(_ line: TreeLine) -> String? { toplevel.map { $0 + "/" + line.path } }
+
+    private func make(folder: Bool) {
+        guard let root = state.root, let toplevel,
+              let name = askName(folder ? "새 폴더" : "새 파일", note: folder ? "폴더는 파일이 생긴 뒤에 트리에 보입니다 (git이 빈 폴더를 세지 않음)" : "이름에 /를 넣으면 폴더도 만듭니다") else { return }
+        let path = newPath(name, from: line, toplevel: toplevel, root: root)
+        Task { await state.fileOp(folder ? .newFolder(path) : .newFile(path)) }
+    }
 }

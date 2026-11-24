@@ -12,6 +12,8 @@ enum GitRead: String, CaseIterable {
     case diffIndex = "diff-index"
     /// A task's commits since its start commit (T128).
     case log
+    /// A file as a commit holds it (`<rev>:<path>`), for a landing's diff and a finding's `<commit>:path` (G4 W1, W2).
+    case show
 }
 
 /// `-C dir` with the argument list as argv elements, never a shell. `--no-optional-locks` keeps
@@ -189,6 +191,67 @@ public func workspaceFiles(toplevel: String, scope: String) -> [String]? {
 
 private extension String {
     func stripPrefix(_ p: String) -> String? { hasPrefix(p) ? String(dropFirst(p.count)) : nil }
+}
+
+// MARK: - A landing's files at its commits (G4 W2)
+
+public struct ChangedFile: Hashable, Sendable {
+    public enum Status: Hashable, Sendable {
+        case added, modified, deleted, renamed, copied, typeChanged
+    }
+    public var status: Status
+    /// The path at `head`; at `base` for a deleted file.
+    public var path: String
+    /// A renamed or copied file's path at `base`.
+    public var oldPath: String?
+}
+
+/// The files `head` changes from `base` in `dir`, as `git diff --name-status` lists them (renames found); nil when
+/// either is no revision there. Both come after `--end-of-options`: a landing's commits are another worker's input.
+public func diffFiles(dir: String, base: String, head: String) -> [ChangedFile]? {
+    guard let z = out(.diff, ["--no-ext-diff", "--name-status", "-z", "-M", "--end-of-options", base, head, "--"], in: dir) else { return nil }
+    var fields = z.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)[...]
+    var files: [ChangedFile] = []
+    while let code = fields.popFirst(), let kind = code.first {
+        let status: ChangedFile.Status? = switch kind {
+        case "A": .added
+        case "M": .modified
+        case "D": .deleted
+        case "R": .renamed
+        case "C": .copied
+        case "T": .typeChanged
+        default: nil
+        }
+        guard let status else { break }
+        if status == .renamed || status == .copied {
+            guard let old = fields.popFirst(), let new = fields.popFirst() else { break }
+            files.append(ChangedFile(status: status, path: new, oldPath: old))
+        } else {
+            guard let path = fields.popFirst() else { break }
+            files.append(ChangedFile(status: status, path: path, oldPath: nil))
+        }
+    }
+    return files
+}
+
+/// A file as a commit holds it.
+public enum RevisionFile: Hashable, Sendable {
+    /// No such revision, no such path in it, or a folder.
+    case missing
+    /// A NUL in the first 8000 bytes, as `readWorkingFile` decides.
+    case binary
+    case text(String)
+}
+
+/// `path` (from the repository's top) as `rev` holds it in `dir`. `rev` comes after `--end-of-options`, as in
+/// `diffFiles`; `--no-textconv` keeps a repository's own textconv driver from running.
+public func fileAt(dir: String, rev: String, path: String) -> RevisionFile {
+    let spec = "\(rev):\(path)"
+    guard let text = out(.show, ["--no-textconv", "--end-of-options", spec], in: dir) else { return .missing }
+    // a folder prints its listing under this header
+    // ponytail: a blob whose content starts with the very same header line reads as a folder; cat-file -t if one does
+    if text.hasPrefix("tree \(spec)\n\n") { return .missing }
+    return text.utf8.prefix(8000).contains(0) ? .binary : .text(text)
 }
 
 // MARK: - Base resolution

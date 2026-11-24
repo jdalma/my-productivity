@@ -171,3 +171,25 @@ private func outsideFixDetail(approved: Bool?) throws -> TaskDetail {
     let d = try outsideFixDetail(approved: nil)
     #expect(d.openFindings.map(\.id) == ["R1 S1"])
 }
+
+// MARK: - A landing's repo and range (G4 W2, T18)
+
+@Test func aLandingCarriesItsRepoBaseAndCommits() throws {
+    let f = try family()
+    #expect(f.landings[0].repo == "/tmp/example/repo")
+    #expect(f.landings[0].baseCommit == "0000000")
+    #expect(f.landings[0].commits == ["1111111aaaaaaa"])
+    #expect(f.landings[2].baseCommit == "2222222")
+}
+
+@Test func aLandingWithoutThemOrADocumentLandingDecodes() throws {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    // an answer from before the fields, and a document task's landing, which has them empty
+    let old = #"{"id":"T1#1","task_id":"T1","commit":"abc","focus":[],"closes":[],"deployed":null}"#
+    let doc = #"{"id":"T2#1","task_id":"T2","repo":"","commit":"","base_commit":"","commits":[],"focus":[],"closes":[],"deployed":null}"#
+    for json in [old, doc] {
+        let l = try decoder.decode(TaskBoardLanding.self, from: Data(json.utf8))
+        #expect(l.repo == nil && l.baseCommit == nil && l.commits == [])
+    }
+}

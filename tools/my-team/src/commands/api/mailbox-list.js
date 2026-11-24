@@ -33,8 +33,8 @@ function sortByCreatedAt(a, b) {
     return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''));
 }
 
-export async function runApiMailboxList(input) {
-    const { teamName, worker } = requireTeamAndWorker(input);
+export async function runApiMailboxList(input, deps = {}) {
+    const { teamName, worker } = requireTeamAndWorker(input, { env: deps.env ?? process.env });
     const onlyUnread = input?.unread_only === undefined ? true : Boolean(input.unread_only);
 
     const manifest = loadManifest(teamName);

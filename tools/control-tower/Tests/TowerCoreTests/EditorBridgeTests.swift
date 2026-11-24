@@ -177,3 +177,36 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     #expect(editorContentType("js") == "text/javascript")
     #expect(editorContentType("bin") == "application/octet-stream")
 }
+
+// MARK: - The disk under an open file (FileWatch → page)
+
+@Test func aWatchBatchTellsThePageOnlyOfTheFilesItHasOpen() async {
+    let root = tempTree()
+    put("a", root + "/open.swift")
+    put("b", root + "/other.swift")
+    put("c", root + "/gone.swift")
+    let files = EditorFiles(roots: [root])
+    _ = await read(files, root + "/open.swift")
+    _ = await read(files, root + "/gone.swift")
+    put("a2", root + "/open.swift")
+    try? FileManager.default.removeItem(atPath: root + "/gone.swift")
+
+    let commands = await files.diskChanged(FileWatchBatch(changed: ["open.swift", "other.swift"], deleted: ["gone.swift"]), root: root)
+    #expect(commands == [.fileDeleted(path: root + "/gone.swift"),
+                         .fileChangedOnDisk(path: root + "/open.swift", text: "a2", hash: sha256(Data("a2".utf8)))])
+}
+
+@Test func aRescanLooksAgainAtEveryOpenFile() async {
+    let root = tempTree()
+    put("a", root + "/a.swift")
+    put("b", root + "/b.swift")
+    let files = EditorFiles(roots: [root])
+    _ = await read(files, root + "/a.swift")
+    _ = await read(files, root + "/b.swift")
+    put("b2", root + "/b.swift")
+    try? FileManager.default.removeItem(atPath: root + "/a.swift")
+
+    let commands = await files.diskChanged(FileWatchBatch(rescan: true), root: root)
+    #expect(commands == [.fileDeleted(path: root + "/a.swift"),
+                         .fileChangedOnDisk(path: root + "/b.swift", text: "b2", hash: sha256(Data("b2".utf8)))])
+}

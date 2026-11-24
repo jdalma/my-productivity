@@ -145,6 +145,9 @@ public actor WorkingFileWriter {
         guard current == expected else { return .conflict(current: current) }
         let mode = (try? FileManager.default.attributesOfItem(atPath: real))?[.posixPermissions]
         do {
+            // `.atomic` (a new file renamed over the name) is what keeps a hard link inside the roots from writing
+            // through to a file outside them, which `writeTarget` cannot see: never write in place here (R15 L1,
+            // EditorBridgeTests aSaveThroughAHardLink…). The link is broken instead; the outside file keeps its bytes.
             try bytes.write(to: url, options: .atomic)
             if let mode { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: real) }
         } catch {

@@ -32,6 +32,12 @@ struct TowerApp: App {
         }
         .defaultSize(width: 1100, height: 760)
 
+        // I4's temporary way to try the editor (CT_EDITOR_TRY); I5 removes it
+        WindowGroup("편집기 시험", id: "editorTry", for: String.self) { $path in
+            if let path { EditorTryWindow(path: path) } else { ClosesItself() }
+        }
+        .defaultSize(width: 900, height: 640)
+
         Settings {
             SettingsView()
         }
@@ -54,6 +60,7 @@ private struct MenuBarLabel: View {
                 OpenWindows.show { openWindow(id: "board") }
             }
             .onChange(of: storedAppearance, initial: true) { _, stored in AppearanceChoice(stored: stored).apply() }
+            .onAppear { if let editorTryPath { OpenWindows.show { openWindow(id: "editorTry", value: editorTryPath) } } }
             .onChange(of: tower.taskBoardOpenRequest) { _, target in
                 guard let target else { return }
                 tower.taskBoardOpenRequest = nil

@@ -129,7 +129,7 @@ struct IdeArea: View {
             bar.padding(.horizontal, 8).padding(.vertical, 4)
             Divider()
             if let editor = state.editor {
-                EditorWebView(controller: editor)
+                EditorSlot(editor: editor)
                     .overlay {
                         if state.shown == nil {
                             Text("오른쪽 트리에서 파일을 고르세요").foregroundStyle(.secondary)

@@ -27,15 +27,44 @@ struct EditorWebView: NSViewRepresentable {
     }
 }
 
+/// The editor in the board: one page per controller. The identity is the controller's: another one (another
+/// worktree) makes the view again, so its page joins the window; a representable otherwise keeps the view it made
+/// first, and the new page, never in a window, has no size and Monaco does not start (T33).
+struct EditorSlot: View {
+    let editor: EditorController
+
+    var body: some View {
+        EditorWebView(controller: editor).id(ObjectIdentifier(editor))
+    }
+}
+
 /// A web view that tells its controller when the app's appearance changes, for the page's theme.
 final class EditorPageView: WKWebView {
     var appearanceChanged: (@MainActor (Bool) -> Void)?
+    /// The view is in a window and has a size: the first time, the page may load (T33).
+    var shown: (@MainActor () -> Void)?
 
     var isDark: Bool { effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         appearanceChanged?(isDark)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        tellShown()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        tellShown()
+    }
+
+    private func tellShown() {
+        guard window != nil, bounds.width > 0, bounds.height > 0, let shown else { return }
+        self.shown = nil
+        shown()
     }
 }
 
@@ -70,7 +99,9 @@ final class EditorPageView: WKWebView {
         web.isInspectable = true
         web.navigationDelegate = self
         web.appearanceChanged = { [weak self] dark in Task { _ = await self?.send(.setTheme(dark: dark)) } }
-        loadPage()
+        // Monaco reads the page's size when it starts: a page loaded in no window (another worktree's editor made
+        // before SwiftUI shows it, a hidden tab) fails or stays blank. It loads once the view is shown (T33).
+        web.shown = { [weak self] in self?.loadPage() }
     }
 
     private func loadPage() { web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/index.html")!)) }

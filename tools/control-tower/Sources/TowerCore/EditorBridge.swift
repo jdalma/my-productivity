@@ -2,7 +2,8 @@ import Foundation
 
 // The editor page's bridge (G4 I4, plan §1.4). The page (Monaco in a WKWebView) is outside the trust boundary: a path
 // it sends is judged again here every time, and it writes only a file Swift gave it and unlocked (D#5 b).
-// Later tickets add their messages here: lsp.send/receive (K12), openDiff and setMarkers (W2, W5).
+// Later tickets add their messages here: openDiff and setMarkers (W2, W5). The LSP relay's are lspStart, lspSend
+// (page to Swift) and lspReceive, lspClosed (Swift to page), LanguageServer.swift.
 
 /// What the page sends: `window.webkit.messageHandlers.ct.postMessage({kind, …})`.
 public enum EditorRequest: Equatable, Sendable, Decodable {
@@ -15,8 +16,12 @@ public enum EditorRequest: Equatable, Sendable, Decodable {
     case ready
     /// An error in the page or one of its workers, for the app's log.
     case log(message: String)
+    /// The page opened a file of `languageId` at `path`: start its language server, if the table has one.
+    case lspStart(languageId: String, path: String)
+    /// One JSON-RPC message from the page's language client to the server of `channel`.
+    case lspSend(channel: String, message: String)
 
-    private enum Key: String, CodingKey { case kind, path, text, baseHash, dirty, line, col, message }
+    private enum Key: String, CodingKey { case kind, path, text, baseHash, dirty, line, col, message, languageId, channel }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Key.self)
@@ -32,6 +37,10 @@ public enum EditorRequest: Equatable, Sendable, Decodable {
                            col: try c.decode(Int.self, forKey: .col))
         case "ready": self = .ready
         case "log": self = .log(message: try c.decode(String.self, forKey: .message))
+        case "lspStart":
+            self = .lspStart(languageId: try c.decode(String.self, forKey: .languageId), path: try c.decode(String.self, forKey: .path))
+        case "lspSend":
+            self = .lspSend(channel: try c.decode(String.self, forKey: .channel), message: try c.decode(String.self, forKey: .message))
         default: throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "unknown kind \(kind)")
         }
     }
@@ -44,6 +53,12 @@ public enum EditorRefusal: String, Equatable, Sendable, Encodable {
     case notOpen
     /// A save of a file Swift has not unlocked.
     case readOnly
+    /// No language server for this language in the table (LanguageServer.swift).
+    case noLanguageServer
+    /// The table has one, but it is not installed: the app shows the notice.
+    case languageServerMissing
+    /// A message for a server this editor did not start, or one that has ended.
+    case noChannel
 }
 
 /// The answer to a request: `{result: "ok" | "conflict" | "refused" | "failed", …}`.
@@ -55,8 +70,10 @@ public enum EditorReply: Equatable, Sendable, Encodable {
     case refused(EditorRefusal)
     case failed(message: String)
     case ok
+    /// The server of `channel` runs (or already ran) for the workspace `root`; its client serves `languages`.
+    case lspStarted(channel: String, root: String, languages: [String])
 
-    private enum Key: String, CodingKey { case result, text, hash, diskHash, reason, message }
+    private enum Key: String, CodingKey { case result, text, hash, diskHash, reason, message, channel, root, languages }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -78,6 +95,11 @@ public enum EditorReply: Equatable, Sendable, Encodable {
             try c.encode("failed", forKey: .result)
             try c.encode(message, forKey: .message)
         case .ok: try c.encode("ok", forKey: .result)
+        case .lspStarted(let channel, let root, let languages):
+            try c.encode("ok", forKey: .result)
+            try c.encode(channel, forKey: .channel)
+            try c.encode(root, forKey: .root)
+            try c.encode(languages, forKey: .languages)
         }
     }
 }
@@ -93,8 +115,12 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
     case setReadOnly(path: String, readOnly: Bool)
     /// Save the shown file, as ⌘S in the editor does.
     case save
+    /// One JSON-RPC message from the server of `channel`, in the order the server wrote them.
+    case lspReceive(channel: String, message: String)
+    /// The server of `channel` ended: its client stops; the next file of its language starts it again.
+    case lspClosed(channel: String)
 
-    private enum Key: String, CodingKey { case kind, path, text, hash, line, readOnly, dark, size }
+    private enum Key: String, CodingKey { case kind, path, text, hash, line, readOnly, dark, size, channel, message }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -125,6 +151,13 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
             try c.encode(path, forKey: .path)
             try c.encode(readOnly, forKey: .readOnly)
         case .save: try c.encode("save", forKey: .kind)
+        case .lspReceive(let channel, let message):
+            try c.encode("lspReceive", forKey: .kind)
+            try c.encode(channel, forKey: .channel)
+            try c.encode(message, forKey: .message)
+        case .lspClosed(let channel):
+            try c.encode("lspClosed", forKey: .kind)
+            try c.encode(channel, forKey: .channel)
         }
     }
 }
@@ -160,8 +193,14 @@ public actor EditorFiles {
         switch request {
         case .readFile(let path): return read(path)
         case .writeFile(let path, let text, let baseHash): return await write(path, text, baseHash)
-        case .dirtyChanged, .cursor, .ready, .log: return .ok
+        case .dirtyChanged, .cursor, .ready, .log, .lspStart, .lspSend: return .ok
         }
+    }
+
+    /// The root `path` is in (its real path), for a language server's workspace: nil outside every root.
+    public func root(of path: String) -> String? {
+        guard path.hasPrefix("/"), let real = realPath(path) else { return nil }
+        return roots.compactMap(realPath).first { isInside(real, $0) }
     }
 
     private func read(_ path: String) -> EditorReply {

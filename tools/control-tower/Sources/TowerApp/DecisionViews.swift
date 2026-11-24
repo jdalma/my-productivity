@@ -138,7 +138,6 @@ struct DecisionDetailView: View {
                     .modifier(IncreasedContrastBorder(color: color, radius: 8))
             }
             .padding(.horizontal, 24).padding(.vertical, 20)
-            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .id(d.id)

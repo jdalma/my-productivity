@@ -360,7 +360,6 @@ private struct TaskDetailBody: View {
                         }
                     }
                 }
-                .frame(maxWidth: detailColumnWidth * scale, alignment: .leading)
                 .padding(.horizontal, 24).padding(.vertical, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -864,8 +863,6 @@ func detailBlocks(waits: Bool, record: DetailRecord) -> [DetailBlock] {
     }
     return [.head] + (waits ? [.decisions] : []) + [.properties] + body + [.taskInfo]
 }
-
-let detailColumnWidth: CGFloat = 44 * 13
 
 /// A decision's tag among a task's properties: `D#2 답을 기다림`, `T5:1 답함 · Text`.
 func decisionTagText(_ d: BoardDecision) -> String {

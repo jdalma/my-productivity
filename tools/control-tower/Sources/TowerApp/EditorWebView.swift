@@ -58,7 +58,7 @@ final class EditorPageView: WKWebView {
     var onLanguageNotice: ((String) -> Void)?
 
     /// This editor's language servers (D#14 a: one client per server), by the channel the page names them with.
-    private let editorID = EditorController.nextID()
+    let editorID = EditorController.nextID()
     private let servers: LanguageServerHost
     private var channels: [String: LanguageServerKey] = [:]
     private var noticed: Set<String> = []
@@ -105,6 +105,8 @@ final class EditorPageView: WKWebView {
     /// from disk, and hold commands until the new page is ready. An unsaved edit is lost.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Self.log.error("editor page ended; loading it again")
+        // the new page has no language client: its servers stop, and its files start them again when they open
+        close()
         ready = false
         waiting = []
         loadPage()

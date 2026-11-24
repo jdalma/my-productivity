@@ -21,8 +21,15 @@ final class IdeState {
     private(set) var readOnly = true
     private(set) var dirty: Set<String> = []
     private(set) var status = ""
+    /// The editor for a root: the built page's, nil when editor-web was not built. Tests give their own.
+    @ObservationIgnored private let makeEditor: (String) -> EditorController?
 
-    /// Shows `root`'s files; another root drops the editor's files and watch.
+    init(makeEditor: @escaping (String) -> EditorController? = { root in editorPageFolder.map { EditorController(roots: [root], page: $0) } }) {
+        self.makeEditor = makeEditor
+    }
+
+    /// Shows `root`'s files; another root drops the editor's files and watch, and stops the old editor's language
+    /// servers (K12: a root no longer shown has none).
     func show(root: String) {
         guard root != self.root else { return }
         self.root = root
@@ -32,11 +39,13 @@ final class IdeState {
         status = ""
         changes.select(workspace: root)
         watch = nil
-        editor = editorPageFolder.map { EditorController(roots: [root], page: $0) }
+        editor?.close()
+        editor = makeEditor(root)
         guard let editor else { return }
         editor.onDirty = { [weak self] path, dirty in
             if dirty { self?.dirty.insert(path) } else { self?.dirty.remove(path) }
         }
+        editor.onLanguageNotice = { [weak self] notice in self?.status = notice }
         let files = editor.files
         // a clean buffer takes what a worker wrote; a dirty one keeps the user's edit (its banner is I7's)
         watch = FileWatch(root: root) { [weak editor] batch in
@@ -44,6 +53,15 @@ final class IdeState {
                 for command in await files.diskChanged(batch, root: root) { await editor?.send(command) }
             }
         }
+    }
+
+    /// The window closed: its editor and watch go, its language servers stop. A later `show` starts afresh.
+    func close() {
+        editor?.close()
+        editor = nil
+        watch = nil
+        root = nil
+        shown = nil
     }
 
     /// A tree line picked: a file opens in the editor, a folder does nothing.

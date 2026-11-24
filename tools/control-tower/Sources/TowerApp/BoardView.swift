@@ -98,6 +98,8 @@ struct BoardView: View {
         .onDisappear {
             tower.windows.board = false
             tower.diffTotals.folders = []
+            // the window's editor goes, and its language servers with it (K12)
+            ide.close()
         }
     }
 

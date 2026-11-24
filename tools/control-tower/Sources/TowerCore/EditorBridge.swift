@@ -93,8 +93,10 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
     case setReadOnly(path: String, readOnly: Bool)
     /// Save the shown file, as ⌘S in the editor does.
     case save
+    /// The open findings beside their lines in `path` (G4 W5); an empty list clears them.
+    case setMarkers(path: String, markers: [EditorMarker])
 
-    private enum Key: String, CodingKey { case kind, path, text, hash, line, readOnly, dark, size }
+    private enum Key: String, CodingKey { case kind, path, text, hash, line, readOnly, dark, size, markers }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -125,6 +127,10 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
             try c.encode(path, forKey: .path)
             try c.encode(readOnly, forKey: .readOnly)
         case .save: try c.encode("save", forKey: .kind)
+        case .setMarkers(let path, let markers):
+            try c.encode("setMarkers", forKey: .kind)
+            try c.encode(path, forKey: .path)
+            try c.encode(markers, forKey: .markers)
         }
     }
 }
@@ -240,5 +246,19 @@ public func editorContentType(_ pathExtension: String) -> String {
     case "png": "image/png"
     case "ttf": "font/ttf"
     default: "application/octet-stream"
+    }
+}
+
+/// A finding's place in the editor (G4 W5): its line, how loud, what the hover says.
+public struct EditorMarker: Hashable, Sendable, Encodable {
+    public enum Severity: String, Sendable, Encodable { case error, warning, info, hint }
+    public var line: Int
+    public var severity: Severity
+    public var message: String
+
+    public init(line: Int, severity: Severity, message: String) {
+        self.line = line
+        self.severity = severity
+        self.message = message
     }
 }

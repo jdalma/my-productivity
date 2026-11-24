@@ -674,7 +674,8 @@ struct TaskBoardView: View {
             DecisionDetailView(decision: decision, tasks: s.tasks, team: team, now: now, pick: pick)
         } else if let line {
             let shownFamily = family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil
-            TaskCodeSplit(state: ide, source: codeSource(line.task, family: shownFamily), at: "\(now.timeIntervalSince1970)") {
+            TaskCodeSplit(state: ide, source: codeSource(line.task, family: shownFamily), at: "\(now.timeIntervalSince1970)",
+                          findings: findingPlaces(line.task, family: shownFamily), workerCwd: workerRow(line.task.assignee)?.session.cwd) {
                 TaskDetailView(team: team, line: line, family: shownFamily,
                                decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
                                now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
@@ -692,6 +693,16 @@ struct TaskBoardView: View {
         let detail = family?.family.flatMap { taskDetail($0, task: t.id) }
         return taskCodeSource(state: detail?.task.state ?? t.state, workerCwd: workerRow(t.assignee)?.session.cwd,
                               taskBase: t.baseCommit, landings: detail?.submissions.map(\.landing) ?? [])
+    }
+
+    /// The task's open findings and the landings they were raised on: the editor's markers (G4 W5).
+    private func findingPlaces(_ t: TaskBoardTask, family: TaskFamilyState?) -> [FindingPlace] {
+        guard let d = family?.family.flatMap({ taskDetail($0, task: t.id) }) else { return [] }
+        return d.findings.filter { $0.pile == .open }.map { f in
+            let landing = f.raisedIn.flatMap { id in d.cards.first { $0.landing.id == id }?.landing }
+            return FindingPlace(id: f.finding.id, severity: f.finding.severity, summary: f.finding.summary, repro: f.finding.repro,
+                                repo: landing?.repo, commit: landing?.commit.nonEmptyText)
+        }
     }
 
     /// The detail's 목표 line (design §4): the 순서 view, the task's card scrolled into view. Narrow, the detail has the
@@ -1084,6 +1095,8 @@ struct TaskCodeSplit<Detail: View>: View {
     @Bindable var state: IdeState
     let source: TaskCodeSource?
     let at: String
+    var findings: [FindingPlace] = []
+    var workerCwd: String?
     @ViewBuilder let detail: Detail
     /// The detail's and the code's least widths, side by side.
     private static var detailWidth: CGFloat { 360 }
@@ -1111,6 +1124,11 @@ struct TaskCodeSplit<Detail: View>: View {
             }
         }
         .environment(\.openInIde) { [source] path in Task { await state.openDocument(path, in: source) } }
+        .environment(\.openTargetInIde) { [source] target in Task { await state.openTarget(target, in: source) } }
+        // the markers' places run git: off the main actor, again when the findings or the worker's folder change
+        .task(id: findings.map(\.id) + [workerCwd ?? ""]) { [findings, workerCwd] in
+            state.findingMarks = await Task.detached { findingMarks(findings, workerCwd: workerCwd) }.value
+        }
     }
 
     private var code: some View {

@@ -349,7 +349,8 @@ landings = [
     landing("T7#1", "T7", 75, "alpha"),
     landing("T8#1", "T8", 125, "delta", closes=["R5 L1"]),
 ]
-next(l for l in landings if l["id"] == "T2#1").update(repo=f"{T}/work/beta", commit=beta_head, base_commit=beta_base, commits=[beta_head])
+next(l for l in landings if l["id"] == "T2#1").update(repo=f"{T}/work/beta", commit=beta_head, base_commit=beta_base, commits=[beta_head],
+                                                    focus=["the area function: lib/area.swift:1-3"])
 verdicts = [
     verdict("R1", "T2#1", "approve", 52),
     verdict("R2", "T3#1", "changes", 39),
@@ -371,6 +372,10 @@ findings = [
     finding("R6 L2", "R6", "T8", "low", "accepted-limit", "example tidied: accepted limit"),
     finding("R6 L3", "R6", "T8", "low", "rejected", "example tidied: not a finding"),
 ]
+# T2's open finding names places in work/beta (G4 I12): a path from the repo, a bare name, a commit's file, one gone
+r1 = next(f for f in findings if f["id"] == "R1 M1")
+r1["summary"] = "example must finding left open on a done task: `lib/area.swift:2` rounds, shapes.swift:5 too, gone.swift:3 left"
+r1["repro"] = f"git -C {T}/work/beta show {beta_base}:lib/shapes.swift | sed -n 2,3p"
 notes = [{"seq": 1, "task_id": "T1", "body": "example note: waiting on the **user's** decision, see `T12`", "to": ["pm"],
           "created_at": iso(41), "created_by": "pm"}]
 announcements = [

@@ -58,9 +58,9 @@ final class IdeState {
         let root = root
         if let root { changes.select(workspace: root) }
         editor = page.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
-        if let waiting = waitingDocument, waiting.source == source {
-            waitingDocument = nil
-            Task { await openDocument(waiting.path, in: source) }
+        if let waiting, waiting.source == source {
+            self.waiting = nil
+            Task { await openRead(waiting.read, in: source) }
         }
         guard let editor, let root else { return }
         editor.onDirty = { [weak self] path, dirty in
@@ -89,20 +89,38 @@ final class IdeState {
         }
     }
 
-    /// A document asked for while the code of `source` had no editor yet: opened when `show(source)` makes it.
-    @ObservationIgnored private var waitingDocument: (path: String, source: TaskCodeSource?)?
+    /// A file asked for while the code of `source` had no editor yet: opened when `show(source)` makes it.
+    @ObservationIgnored private var waiting: (read: @Sendable () -> EditorCommand?, source: TaskCodeSource?)?
+    /// The open findings of the task shown, beside their lines in whichever file the editor shows (G4 W5).
+    var findingMarks: [FindingMark] = [] {
+        didSet { if findingMarks != oldValue { Task { await sendMarkers() } } }
+    }
 
-    /// A ticket or report the task board names, read-only in this editor (D#7 b), for the task whose code is `source`;
-    /// narrow, the code tab comes forward. The editor is made by `IdeArea` once the code shows (a web view loaded
-    /// out of a window stays blank), so until it is there for `source` the document waits for it (R27 S1).
+    /// A ticket or report the task board names, read-only in this editor (D#7 b), for the task whose code is `source`.
     func openDocument(_ path: String, in source: TaskCodeSource?) async {
+        await openRead({ readOnlyOpen(path) }, in: source)
+    }
+
+    /// A file:line a finding, a focus or a report names (G4 I12), at that line, read-only.
+    func openTarget(_ target: FileTarget, in source: TaskCodeSource?) async {
+        await openRead({ targetOpen(target) }, in: source)
+    }
+
+    /// Narrow, the code tab comes forward. The editor is made by `IdeArea` once the code shows (a web view loaded out
+    /// of a window stays blank), so until it is there for `source` the file waits for it (R27 S1).
+    private func openRead(_ read: @escaping @Sendable () -> EditorCommand?, in source: TaskCodeSource?) async {
         codeShown = true
         guard started, source == self.source, editor != nil else {
-            waitingDocument = (path, source)
+            waiting = (read, source)
             if started, source == self.source { status = "편집기 페이지가 없어 열지 못함" }
             return
         }
-        await show(await Task.detached { readOnlyOpen(path) }.value)
+        await show(await Task.detached { read() }.value)
+    }
+
+    private func sendMarkers() async {
+        guard let editor, let shown else { return }
+        await editor.send(.setMarkers(path: shown, markers: editorMarkers(for: shown, marks: findingMarks)))
     }
 
     /// Shows a file Swift read itself (a commit's, a document), always read-only.
@@ -113,6 +131,7 @@ final class IdeState {
         shown = path
         readOnly = true
         status = ""
+        await sendMarkers()
     }
 
     /// The commit source's tree in `commitMode`: every file of the commit, or those the task changed from its base.
@@ -137,6 +156,7 @@ final class IdeState {
             shown = opened.path
             readOnly = opened.readOnly
             status = ""
+            await sendMarkers()
         } else {
             status = "열 수 없음"
         }
@@ -360,4 +380,6 @@ private struct CommitTreeSidebar: View {
 extension EnvironmentValues {
     /// Opens a document path the task board names in the window's read-only editor; nil where there is none.
     @Entry var openInIde: ((String) -> Void)?
+    /// Opens a file:line a task board text names in the window's read-only editor (G4 I12); nil where there is none.
+    @Entry var openTargetInIde: ((FileTarget) -> Void)?
 }

@@ -86,3 +86,28 @@ private func repo() throws -> (dir: String, first: String) {
     let files = EditorFiles(roots: [])
     #expect(await files.handle(.writeFile(path: doc, text: "x", baseHash: sha256(Data("two\n".utf8)))) == .refused(.outside))
 }
+
+// MARK: - G4 I12: the line a link names, and whether the file moved since the review
+
+@Test func aLinkOpensTheFileAtItsLine() throws {
+    let (dir, first) = try repo()
+    #expect(commitOpen(dir: dir, rev: first, path: "src/a.swift", line: 1)
+            == .openFile(path: dir + "/src/a.swift", text: "one\n", hash: sha256(Data("one\n".utf8)), line: 1, readOnly: true))
+    #expect(readOnlyOpen(dir + "/src/a.swift", line: 1)
+            == .openFile(path: dir + "/src/a.swift", text: "two\n", hash: sha256(Data("two\n".utf8)), line: 1, readOnly: true))
+}
+
+@Test func aFileChangedSinceTheReviewedCommitIsToldApart() throws {
+    let (dir, first) = try repo()  // src/a.swift edited in the work tree after `first`
+    #expect(fileChanged(dir: dir, since: first, path: "src/a.swift") == true)
+    try git(dir, "checkout", "-q", "--", "src/a.swift")
+    #expect(fileChanged(dir: dir, since: first, path: "src/a.swift") == false)
+    #expect(fileChanged(dir: dir, since: "0000000", path: "src/a.swift") == nil)
+}
+
+@Test func markersEncodeForThePage() throws {
+    let m = EditorCommand.setMarkers(path: "/w/a", markers: [EditorMarker(line: 3, severity: .warning, message: "R1 S1 x")])
+    let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(m)) as! [String: Any]
+    #expect(json["kind"] as? String == "setMarkers" && json["path"] as? String == "/w/a")
+    #expect((json["markers"] as? [[String: Any]])?.first?["severity"] as? String == "warning")
+}

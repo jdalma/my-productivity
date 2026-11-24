@@ -11,7 +11,7 @@ import '@codingame/monaco-vscode-json-default-extension'
 import '@codingame/monaco-vscode-markdown-basics-default-extension'
 import '@codingame/monaco-vscode-shellscript-default-extension'
 import '@codingame/monaco-vscode-yaml-default-extension'
-import { KeyCode, KeyMod, Uri } from '@codingame/monaco-vscode-editor-api'
+import { editor as monacoEditor, KeyCode, KeyMod, MarkerSeverity, Uri } from '@codingame/monaco-vscode-editor-api'
 import { createModelReference } from '@codingame/monaco-vscode-api/monaco'
 import { getService, IConfigurationService } from '@codingame/monaco-vscode-api/services'
 import { MonacoVscodeApiWrapper } from 'monaco-languageclient/vscodeApiWrapper'
@@ -147,6 +147,21 @@ async function main() {
       return { result: 'ok' }
     },
     save,
+    /** The open findings beside their lines (G4 W5), on the file's model: they stay while it is open. */
+    setMarkers(m) {
+      const f = files.get(m.path)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      const text = model(f)
+      const severity: Record<string, MarkerSeverity> = {
+        error: MarkerSeverity.Error, warning: MarkerSeverity.Warning, info: MarkerSeverity.Info, hint: MarkerSeverity.Hint,
+      }
+      monacoEditor.setModelMarkers(text, 'findings', m.markers.map((k: { line: number; severity: string; message: string }) => {
+        const line = Math.max(1, Math.min(k.line, text.getLineCount()))
+        return { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: text.getLineMaxColumn(line),
+                 severity: severity[k.severity] ?? MarkerSeverity.Info, message: k.message }
+      }))
+      return { result: 'ok' }
+    },
   }
   ;(window as any).ctBridge = {
     receive: async (m: { kind: string }) => {

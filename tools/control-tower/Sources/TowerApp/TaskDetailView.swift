@@ -620,11 +620,11 @@ private struct TaskDetailBody: View {
                 if !fs.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         if p == .open {
-                            ForEach(fs, id: \.finding.id) { findingRow($0, task: d.task.id) }
+                            ForEach(fs, id: \.finding.id) { findingRow($0, d) }
                         } else {
                             DisclosureGroup(isExpanded: Binding(get: { pileOpen(p, d) }, set: { piles[p] = $0 })) {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(fs, id: \.finding.id) { findingRow($0, task: d.task.id) }
+                                    ForEach(fs, id: \.finding.id) { findingRow($0, d) }
                                 }
                                 .padding(.top, 4)
                             } label: {
@@ -646,14 +646,22 @@ private struct TaskDetailBody: View {
         }
     }
 
-    private func findingRow(_ f: DetailFinding, task: String) -> some View {
+    /// Where a text of the landing `landingId` places a file:line: its repo, then the worker's folder (G4 I12).
+    private func refs(_ landingId: String?, _ d: TaskDetail) -> (FileRef) -> FileTarget? {
+        let repo = landingId.flatMap { id in d.cards.first { $0.landing.id == id }?.landing.repo }
+        let cwd = workerRow(d.task.assignee)?.session.cwd
+        return { refTarget($0, repo: repo, workerCwd: cwd) }
+    }
+
+    private func findingRow(_ f: DetailFinding, _ d: TaskDetail) -> some View {
+        let task = d.task.id
         let style = FindingStyle.of(f.status)
         let indent = StatusIconView.size(.callout, scale: scale) + 6
         return VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: style.symbol).foregroundStyle(style.color).frame(width: indent - 6).accessibilityLabel(style.label)
                 SeverityTag(severity: f.finding.severity, count: 1)
-                Text(inlineMarkdown(f.finding.summary)).scaledFont(.callout, weight: f.pile == .open ? .semibold : .regular)
+                RefText(text: f.finding.summary, resolve: refs(f.raisedIn, d)).scaledFont(.callout, weight: f.pile == .open ? .semibold : .regular)
                     .strikethrough(style.struck).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Text(f.finding.id).scaledFont(.caption1, design: .monospaced).foregroundStyle(.secondary).fixedSize()
@@ -666,7 +674,10 @@ private struct TaskDetailBody: View {
             }
             if let repro = f.finding.repro?.nonEmptyText {
                 DisclosureGroup {
-                    CopyText(text: repro, what: "재현 명령", mono: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        CopyText(text: repro, what: "재현 명령", mono: true)
+                        RefLinks(text: repro, resolve: refs(f.raisedIn, d))
+                    }
                 } label: {
                     Text("재현").scaledFont(.callout)
                 }
@@ -715,7 +726,7 @@ private struct TaskDetailBody: View {
                             }
                             if open, let detail = h.detail {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    historyDetail(detail)
+                                    historyDetail(detail, d)
                                     // under the facts, not a row of their grid: a row this wide would spread its columns
                                     if let (p, what) = reportOf(detail), previewsAsMarkdown(p) { ReportPreview(path: p, what: what) }
                                 }
@@ -756,14 +767,14 @@ private struct TaskDetailBody: View {
     }
 
     @ViewBuilder
-    private func historyDetail(_ detail: HistoryDetail) -> some View {
+    private func historyDetail(_ detail: HistoryDetail, _ d: TaskDetail) -> some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 5) {
             switch detail {
             case .submission(let l):
                 GridRow { factName("커밋"); CopyText(text: l.commit, shown: String(l.commit.prefix(7)), what: "커밋") }
                 if let cmd = l.checkCmd?.nonEmptyText { GridRow { factName("담당이 돌린 확인"); command(cmd, result: l.checkResult) } }
                 if !l.focus.isEmpty {
-                    GridRow { factName("리뷰어에게: 볼 곳"); Text(inlineMarkdown(l.focus.joined(separator: "\n"))).scaledFont(.callout).textSelection(.enabled) }
+                    GridRow { factName("리뷰어에게: 볼 곳"); RefText(text: l.focus.joined(separator: "\n"), resolve: refs(l.id, d)).scaledFont(.callout).textSelection(.enabled) }
                 }
                 if !l.closes.isEmpty {
                     GridRow { factName("이 제출로 고친 지적"); Text(l.closes.joined(separator: ", ")).scaledFont(.callout, design: .monospaced).textSelection(.enabled) }

@@ -239,7 +239,7 @@ private func baseRef(_ d: WorkspaceDiff) -> String? {
 
 @Test func gitRunsOnlyReadOnlySubcommands() {
     // log: a task's commits since its start commit (T128); reads only, like the rest
-    #expect(Set(GitRead.allCases.map(\.rawValue)) == ["diff", "diff-index", "ls-files", "merge-base", "rev-parse", "symbolic-ref", "for-each-ref", "log"])
+    #expect(Set(GitRead.allCases.map(\.rawValue)) == ["diff", "diff-index", "ls-files", "merge-base", "rev-parse", "symbolic-ref", "for-each-ref", "log", "show"])
 }
 
 // MARK: - T9a regressions
@@ -511,4 +511,52 @@ private func sections(_ dir: String) throws -> DiffTotal {
     try commit(repo, "f.txt", "f1\nf2\n")
     #expect(diffTotal(at: repo) == DiffTotal(added: 3, removed: 0))
     #expect(diffTotal(at: repo, pins: [repo: "mid"]) == DiffTotal(added: 2, removed: 0))
+}
+
+// MARK: - A landing's files and their content at a commit (G4 W2, T18)
+
+@Test func theFilesTwoCommitsDifferInByStatus() throws {
+    let dir = try fixture()
+    let base = try sh(dir, ["rev-parse", "HEAD"])
+    try sh(dir, ["mv", "b.txt", "moved.txt"])
+    try write(dir, "a.txt", "1\n2\nTHREE\n4\n5\n")
+    try write(dir, "new file.txt", "n\n")
+    try sh(dir, ["add", "-A"])
+    try sh(dir, ["commit", "-q", "-m", "change"])
+    let head = try sh(dir, ["rev-parse", "HEAD"])
+    try commit(dir, "gone.txt", "g\n")
+    let withGone = try sh(dir, ["rev-parse", "HEAD"])
+    try sh(dir, ["rm", "-q", "gone.txt"])
+    try sh(dir, ["commit", "-q", "-m", "rm"])
+
+    #expect(diffFiles(dir: dir, base: base, head: head) == [
+        ChangedFile(status: .modified, path: "a.txt", oldPath: nil),
+        ChangedFile(status: .renamed, path: "moved.txt", oldPath: "b.txt"),
+        ChangedFile(status: .added, path: "new file.txt", oldPath: nil),
+    ])
+    #expect(diffFiles(dir: dir, base: withGone, head: "HEAD") == [ChangedFile(status: .deleted, path: "gone.txt", oldPath: nil)])
+    #expect(diffFiles(dir: dir, base: head, head: head) == [])
+    #expect(diffFiles(dir: dir, base: "nosuchrev", head: head) == nil)
+    // a revision that looks like an option is a revision git cannot find, never an option
+    #expect(diffFiles(dir: dir, base: "--output=\(dir)/x", head: head) == nil)
+    #expect(!FileManager.default.fileExists(atPath: "\(dir)/x"))
+}
+
+@Test func aFileAsACommitHoldsIt() throws {
+    let dir = try fixture()
+    let base = try sh(dir, ["rev-parse", "HEAD~1"])
+    try commit(dir, "a.txt", "changed\n")
+    #expect(fileAt(dir: dir, rev: base, path: "a.txt") == .text("1\n2\n3\n4\n5\n"))
+    #expect(fileAt(dir: dir, rev: "HEAD", path: "a.txt") == .text("changed\n"))
+    #expect(fileAt(dir: dir, rev: base, path: "b.txt") == .missing)  // added after base
+    #expect(fileAt(dir: dir, rev: "nosuchrev", path: "a.txt") == .missing)
+    try FileManager.default.createDirectory(atPath: "\(dir)/sub", withIntermediateDirectories: true)
+    try commit(dir, "sub/c.txt", "c\n")
+    #expect(fileAt(dir: dir, rev: "HEAD", path: "sub") == .missing)  // a tree is no file
+    try Data([0x61, 0x00, 0x62]).write(to: URL(fileURLWithPath: "\(dir)/bin.dat"))
+    try sh(dir, ["add", "-A"])
+    try sh(dir, ["commit", "-q", "-m", "bin"])
+    #expect(fileAt(dir: dir, rev: "HEAD", path: "bin.dat") == .binary)
+    #expect(fileAt(dir: dir, rev: "--output=\(dir)/y", path: "a.txt") == .missing)
+    #expect(!FileManager.default.fileExists(atPath: "\(dir)/y"))
 }

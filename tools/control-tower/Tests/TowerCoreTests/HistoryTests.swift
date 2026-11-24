@@ -160,6 +160,22 @@ private func userMessage(_ text: String, at: String) -> String {
     #expect(!json.contains("shop"))
 }
 
+@Test func aContinuedTeamsNoticeBecomesTeamAndWorker() throws {
+    // `my-team start --continue` (startup-notice.js): a new conversation, a resumed one whose AGENTS.md changed,
+    // and a resumed one whose AGENTS.md did not (no path in it, so no team or worker to name)
+    let recover = "Team is live again in a new conversation. Follow /u/.my-team/sessions/shop/workers/be/AGENTS.md for the peer protocol, then pick up the last run before anything new: run mailbox-list."
+    let changed = "Team is live again. Your instructions in /u/.my-team/sessions/shop/workers/fe/AGENTS.md changed (changed: Rules): read those sections."
+    let unchanged = "Team is live again; your AGENTS.md is unchanged. You have 2 waiting message(s): run your mailbox-list."
+    #expect(myTeamBootstrap(recover) == TeamWorker(team: "shop", worker: "be"))  // launched by start, not joined
+    #expect(myTeamBootstrap(changed) == TeamWorker(team: "shop", worker: "fe"))
+    #expect(myTeamBootstrap(unchanged) == nil)
+    let h = try Homes()
+    defer { try? FileManager.default.removeItem(atPath: h.dir) }
+    try h.claude("fresh", [user(recover)])
+    #expect(h.history().first?.member == TeamWorker(team: "shop", worker: "be"))
+    #expect(h.history().first?.title == "shop · be")
+}
+
 @Test func newestFirstAcrossAgents() throws {
     let h = try Homes()
     defer { try? FileManager.default.removeItem(atPath: h.dir) }

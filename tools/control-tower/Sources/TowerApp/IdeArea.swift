@@ -30,7 +30,13 @@ final class IdeState {
     /// Narrow, the code is a tab beside the detail: shown, or the detail is.
     var codeShown = false
 
-    init(lockable: Bool = true) { self.lockable = lockable }
+    /// The built editor page; nil without one (the editor is off).
+    @ObservationIgnored private let page: URL?
+
+    init(lockable: Bool = true, page: URL? = editorPageFolder) {
+        self.lockable = lockable
+        self.page = page
+    }
 
     /// The worktree the editor reads and may save in; nil for a commit or no source.
     var root: String? { if case .worktree(let r) = source { r } else { nil } }
@@ -51,7 +57,11 @@ final class IdeState {
         watch = nil
         let root = root
         if let root { changes.select(workspace: root) }
-        editor = editorPageFolder.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
+        editor = page.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
+        if let waiting = waitingDocument, waiting.source == source {
+            waitingDocument = nil
+            Task { await openDocument(waiting.path, in: source) }
+        }
         guard let editor, let root else { return }
         editor.onDirty = { [weak self] path, dirty in
             if dirty { self?.dirty.insert(path) } else { self?.dirty.remove(path) }
@@ -79,10 +89,20 @@ final class IdeState {
         }
     }
 
-    /// A ticket or report the task board names, read-only in this editor (D#7 b); narrow, the code tab comes forward.
-    func openDocument(_ path: String) {
+    /// A document asked for while the code of `source` had no editor yet: opened when `show(source)` makes it.
+    @ObservationIgnored private var waitingDocument: (path: String, source: TaskCodeSource?)?
+
+    /// A ticket or report the task board names, read-only in this editor (D#7 b), for the task whose code is `source`;
+    /// narrow, the code tab comes forward. The editor is made by `IdeArea` once the code shows (a web view loaded
+    /// out of a window stays blank), so until it is there for `source` the document waits for it (R27 S1).
+    func openDocument(_ path: String, in source: TaskCodeSource?) async {
         codeShown = true
-        Task { await show(await Task.detached { readOnlyOpen(path) }.value) }
+        guard started, source == self.source, editor != nil else {
+            waitingDocument = (path, source)
+            if started, source == self.source { status = "편집기 페이지가 없어 열지 못함" }
+            return
+        }
+        await show(await Task.detached { readOnlyOpen(path) }.value)
     }
 
     /// Shows a file Swift read itself (a commit's, a document), always read-only.
@@ -99,6 +119,8 @@ final class IdeState {
     func loadCommitTree() async {
         guard case .commit(let repo, let base, let commit)? = source else { return }
         let mode = commitMode
+        // a commit does not change: the window's 15 s refresh reads nothing again, a failed read is tried again (R27 L1)
+        if let tree = commitTree, tree.mode == mode, tree.nodes != nil { return }
         let nodes = await Task.detached { () -> [ChangeTreeNode]? in
             switch mode {
             case .all: filesAt(dir: repo, rev: commit).map { folderTree(files: $0) }

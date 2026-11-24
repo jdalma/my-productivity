@@ -189,8 +189,8 @@ final class ChangesState {
     var treeMode = TreeMode.changed
     /// The folder tree column: shown in every new window, hidden only while that window stays open (T80).
     var treeVisible = true
-    /// Folder line ids (`TreeLine.id`) the user opened or closed against their default, both modes.
-    private(set) var flippedFolders: Set<String> = []
+    /// The folder tree's own state: open folders, the picked line.
+    let tree = FolderTreeState()
     /// Read when the full view first shows a diff, and again for each new diff; nil until then.
     private(set) var fullTree: FullTree?
     /// Why the full tree could not be read.
@@ -207,13 +207,6 @@ final class ChangesState {
         guard !Task.isCancelled, fetched == f else { return }
         if let built { fullTree = built }
         fullTreeFailed = built == nil
-    }
-
-    /// A folder is open by `byDefault`, unless the user opened or closed it against that.
-    func isOpen(_ folder: TreeLine, byDefault: Bool) -> Bool { byDefault != flippedFolders.contains(folder.id) }
-
-    func setOpen(_ folder: TreeLine, _ open: Bool, byDefault: Bool) {
-        if open == byDefault { flippedFolders.remove(folder.id) } else { flippedFolders.insert(folder.id) }
     }
 
     /// A file picked in the tree: a changed one shows in the diff, another one in the file view. A folder shows nothing.
@@ -250,7 +243,7 @@ final class ChangesState {
             pickUnfolded = nil
             pickOpened = nil
             history = CodeHistory()
-            flippedFolders = []
+            tree.reset()
             fullTree = nil
         }
         self.workspace = workspace

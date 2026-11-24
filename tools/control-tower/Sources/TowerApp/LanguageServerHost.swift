@@ -74,6 +74,7 @@ import TowerCore
     /// Writes one message to the server of `key`; false when it does not run.
     func send(_ key: LanguageServerKey, _ message: String) -> Bool {
         guard let server = servers[key] else { return false }
+        Self.log.debug("to \(key.server, privacy: .public): \(Self.summary(message), privacy: .public)")
         do {
             try server.input.write(contentsOf: LSPFrameReader.frame(Data(message.utf8)))
             return true
@@ -97,13 +98,24 @@ import TowerCore
     private func received(_ data: Data, from key: LanguageServerKey) {
         guard let server = servers[key] else { return }
         do {
-            for body in try server.reader.push(data) { server.onMessage(String(decoding: body, as: UTF8.self)) }
+            for body in try server.reader.push(data) {
+                let message = String(decoding: body, as: UTF8.self)
+                Self.log.debug("from \(key.server, privacy: .public): \(Self.summary(message), privacy: .public)")
+                server.onMessage(message)
+            }
         } catch {
             Self.log.error("language server \(key.server, privacy: .public) wrote no LSP: \(String(describing: error), privacy: .public)")
             stop(key)
             pool.exited(key)
             server.onExit()
         }
+    }
+
+    /// A message's method and id, for the debug log (`log stream --level debug --predicate 'category == "lsp"'`).
+    private static func summary(_ message: String) -> String {
+        guard let m = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] else { return "not JSON" }
+        let id = m["id"].map { " #\($0)" } ?? ""
+        return (m["method"] as? String ?? (m["error"] != nil ? "error" : "result")) + id
     }
 
     private func ended(_ key: LanguageServerKey) {

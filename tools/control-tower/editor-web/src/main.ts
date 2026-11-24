@@ -48,7 +48,9 @@ async function main() {
   const app = new EditorApp({ codeResources: { modified: { text: '', uri: '/untitled.txt' } } })
   await app.start(document.getElementById('root')!)
   const editor = app.getEditor()!
-  editor.updateOptions({ readOnly: true })
+  // squiggles for LSP diagnostics in a read-only editor too: Monaco's default ('editable') hides them there, and this
+  // editor starts read-only (D#5 b)
+  editor.updateOptions({ readOnly: true, renderValidationDecorations: 'on' })
   const configuration = await getService(IConfigurationService)
 
   const files = new Map<string, OpenFile>()

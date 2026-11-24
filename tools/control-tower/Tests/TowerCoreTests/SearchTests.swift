@@ -24,6 +24,33 @@ import Testing
 @Test func aLongLineIsCut() {
     let hit = parseGrep("min.js\u{0}1\u{0}" + String(repeating: "x", count: searchLineLimit + 50) + "\n")
     #expect(hit.first?.text.count == searchLineLimit)
+    // characters, not bytes
+    let wide = parseGrep("ko.md\u{0}1\u{0}" + String(repeating: "가", count: searchLineLimit + 50) + "\n")
+    #expect(wide.first?.text == String(repeating: "가", count: searchLineLimit))
+}
+
+/// R25 M1: a Character holds CR LF as one, so a parser that looks for "\n" in the String joined these into one hit.
+@Test func aCRLFLineEndsAHitAndIsNotPartOfItsText() {
+    let out = "crlf.txt\u{0}1\u{0}needle one\r\ncrlf.txt\u{0}2\u{0}needle two\r\nlf.txt\u{0}1\u{0}needle three\nblank.txt\u{0}4\u{0}\r\n"
+    #expect(parseGrep(out) == [
+        SearchHit(path: "crlf.txt", line: 1, text: "needle one"),
+        SearchHit(path: "crlf.txt", line: 2, text: "needle two"),
+        SearchHit(path: "lf.txt", line: 1, text: "needle three"),
+        SearchHit(path: "blank.txt", line: 4, text: ""),
+    ])
+    // a CR inside the line is the line's
+    #expect(parseGrep("a\u{0}1\u{0}one\rtwo\n").first?.text == "one\rtwo")
+}
+
+/// R25 S1: the output cut off inside a line longer than a hit shows is that hit, not nothing.
+@Test func aCutOffLineLongerThanAHitShowsIsStillAHit() {
+    let long = String(repeating: "x", count: searchLineLimit + 1)
+    #expect(parseGrep("a\u{0}1\u{0}one\nmin.js\u{0}1\u{0}" + long) == [
+        SearchHit(path: "a", line: 1, text: "one"),
+        SearchHit(path: "min.js", line: 1, text: String(long.prefix(searchLineLimit))),
+    ])
+    // shorter than that, its end is not known: left out
+    #expect(parseGrep("min.js\u{0}1\u{0}" + String(repeating: "x", count: searchLineLimit - 1)).isEmpty)
 }
 
 // MARK: - A search in a repository
@@ -75,6 +102,35 @@ private func repo(_ files: [String: String], tracked: Set<String>) throws -> Str
 
     #expect(searchText("no such words here", in: dir) == SearchResult(hits: [], more: false))
     #expect(searchText("", in: dir) == SearchResult(hits: [], more: false))
+}
+
+/// R25 M1, in a repository: CRLF files, and a file that is not UTF-8.
+@Test func aSearchReadsCRLFFilesLineByLine() throws {
+    let dir = try repo(["crlf.txt": "needle one\r\nother\r\nneedle three\r\n", "lf.txt": "needle lf\n"], tracked: ["crlf.txt", "lf.txt"])
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try Data([0x6E, 0x65, 0x65, 0x64, 0x6C, 0x65, 0x20, 0xE9, 0x0A]).write(to: URL(fileURLWithPath: dir + "/latin.txt"))  // "needle é" in Latin-1
+    #expect(searchText("needle", in: dir)?.hits == [
+        SearchHit(path: "crlf.txt", line: 1, text: "needle one"),
+        SearchHit(path: "crlf.txt", line: 3, text: "needle three"),
+        SearchHit(path: "latin.txt", line: 1, text: "needle \u{FFFD}"),
+        SearchHit(path: "lf.txt", line: 1, text: "needle lf"),
+    ])
+}
+
+/// R25 S1: a minified file's line, longer than what the hits of `limit` lines take, before every other hit.
+@Test func aVeryLongLineAmongTheFirstHitsLeavesTheHitsAfterIt() throws {
+    let long = "var needle=" + String(repeating: "x", count: 400_000) + "\n"
+    let dir = try repo(["a.min.js": long, "b.txt": "needle here\n", "c.txt": "needle there\n"], tracked: ["a.min.js", "b.txt", "c.txt"])
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let r = try #require(searchText("needle", in: dir))
+    #expect(r.hits.map(\.path) == ["a.min.js", "b.txt", "c.txt"] && !r.more)
+    #expect(r.hits[0].text.count == searchLineLimit)
+
+    // a line past the whole read: that line's start is the one hit, and more is true
+    let huge = "var needle=" + String(repeating: "x", count: 3 << 20) + "\n"
+    try huge.write(toFile: dir + "/a.min.js", atomically: true, encoding: .utf8)
+    let cut = try #require(searchText("needle", in: dir))
+    #expect(cut.hits.map(\.path) == ["a.min.js"] && cut.more)
 }
 
 @Test func aSearchOutsideARepositoryFails() throws {

@@ -16,7 +16,7 @@ enum SearchMode: Hashable {
 enum SearchFound: Equatable, Sendable {
     /// Nothing typed.
     case idle
-    /// git could not read the folder: it is in no repository.
+    /// git gave no answer: the folder is in no repository, or git failed or took too long.
     case failed
     case files([String])
     case text(SearchResult)
@@ -102,7 +102,7 @@ struct SearchPanel: View {
         case .idle:
             note("")
         case .failed:
-            note("git 저장소가 아니어서 찾을 수 없음")
+            note("찾지 못함: git 저장소가 아니거나 git이 답하지 않음")
         case .files(let paths):
             if paths.isEmpty { note("맞는 파일 없음") }
             list {

@@ -34,8 +34,9 @@ let searchLineLimit = 400
 public func searchText(_ query: String, in root: String, limit: Int = 500) -> SearchResult? {
     guard !query.isEmpty, !query.contains("\n") else { return SearchResult(hits: [], more: false) }
     // A one-letter query in a large repository prints hundreds of megabytes (orca: 415 MB in 49 s): reading stops at
-    // `cap`, far past what `limit` lines take, and git ends at its next write.
-    let cap = max(limit, 1) * (searchLineLimit + 200)
+    // `cap`, far past what `limit` lines take, and git ends at its next write. git prints a line whole, so the cap
+    // is no less than 2 MB: a minified file's line among the first hits leaves room for the hits after it (R25 S1).
+    let cap = max(limit * (searchLineLimit + 200), 2 << 20)
     // `-z`: path NUL line NUL text, the path as it is. `-e`: a query that starts with `-` is no option.
     guard let r = try? git(.grep, ["-n", "-z", "-I", "--untracked", "-F", "-i", "-e", query], in: root, maxOutput: cap) else { return nil }
     let capped = r.stdout.utf8.count >= cap
@@ -45,18 +46,29 @@ public func searchText(_ query: String, in root: String, limit: Int = 500) -> Se
     return SearchResult(hits: Array(hits.prefix(limit)), more: capped || hits.count > limit)
 }
 
-/// The hits of `git grep -n -z` output: `path NUL line NUL text LF` each. A piece without its line end (output cut
-/// off) is left out.
+/// The hits of `git grep -n -z` output: `path NUL line NUL text LF` each, a CR before the LF not part of the text.
+/// The last piece without its line end (output cut off) is left out, unless its text is already longer than a hit
+/// shows: then it is a hit, cut like any long line.
 func parseGrep(_ out: String) -> [SearchHit] {
+    // By byte: a Character holds CR LF as one, so a search for "\n" in the String passes every CRLF line end (R25 M1).
+    let b = Array(out.utf8)
+    func text(_ range: Range<Int>) -> String {
+        // no more bytes than `searchLineLimit` characters can take: a line of megabytes is not decoded whole
+        String(String(decoding: b[range.prefix(searchLineLimit * 4)], as: UTF8.self).prefix(searchLineLimit))
+    }
     var hits: [SearchHit] = []
-    var rest = Substring(out)
-    while let pathEnd = rest.firstIndex(of: "\0") {
-        let afterPath = rest[rest.index(after: pathEnd)...]
-        guard let numberEnd = afterPath.firstIndex(of: "\0"), let line = Int(afterPath[..<numberEnd]) else { break }
-        let afterNumber = afterPath[afterPath.index(after: numberEnd)...]
-        guard let lineEnd = afterNumber.firstIndex(of: "\n") else { break }
-        hits.append(SearchHit(path: String(rest[..<pathEnd]), line: line, text: String(afterNumber[..<lineEnd].prefix(searchLineLimit))))
-        rest = afterNumber[afterNumber.index(after: lineEnd)...]
+    var at = 0
+    while let pathEnd = b[at...].firstIndex(of: 0), let numberEnd = b[(pathEnd + 1)...].firstIndex(of: 0),
+          let line = Int(String(decoding: b[(pathEnd + 1)..<numberEnd], as: UTF8.self)) {
+        let path = String(decoding: b[at..<pathEnd], as: UTF8.self)
+        guard var lineEnd = b[(numberEnd + 1)...].firstIndex(of: 0x0A) else {
+            let tail = text((numberEnd + 1)..<b.count)
+            if tail.count == searchLineLimit { hits.append(SearchHit(path: path, line: line, text: tail)) }
+            break
+        }
+        at = lineEnd + 1
+        if lineEnd > numberEnd + 1, b[lineEnd - 1] == 0x0D { lineEnd -= 1 }
+        hits.append(SearchHit(path: path, line: line, text: text((numberEnd + 1)..<lineEnd)))
     }
     return hits
 }

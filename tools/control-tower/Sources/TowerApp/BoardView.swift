@@ -13,6 +13,8 @@ struct BoardView: View {
     @State private var nav = ScreenHistory()
     /// Bumped to put the keyboard in the search field.
     @State private var searchFocus = 0
+    /// The window's editor and folder tree, under a live session's terminal (D#8 b: this window's own).
+    @State private var ide = IdeState()
     @Environment(\.openWindow) private var openWindow
     @AppStorage(FontScale.storageKey) private var storedScale = FontScale.standard.value
     @AppStorage(OpenedTeams.storageKey) private var storedOpened = ""
@@ -154,7 +156,7 @@ struct BoardView: View {
             .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 520)
         } detail: {
             DetailView(board: board, model: model, history: tower.history, selection: selection, home: home,
-                       taskBoards: tower.taskBoards, openTask: { openTaskBoard($0.team, task: $0.task) },
+                       taskBoards: tower.taskBoards, ide: ide, openTask: { openTaskBoard($0.team, task: $0.task) },
                        dashboard: DashboardView(
                            usage: tower.usage,
                            advisor: tower.advisor,
@@ -677,6 +679,7 @@ private struct DetailView: View {
     let selection: RowID
     let home: String
     let taskBoards: [String: TaskBoardState]
+    let ide: IdeState
     /// Opens the task's team's task board window on it.
     let openTask: (TaskRef) -> Void
     let dashboard: DashboardView
@@ -783,8 +786,7 @@ private struct DetailView: View {
             if let terminal {
                 VStack(alignment: .leading, spacing: 12) {
                     head
-                    // a new terminal, and a new tmux client, for each pane
-                    PaneTerminal(ref: terminal).id("\(terminal.session) \(terminal.pane)")
+                    IdeArea(root: workspace, terminal: terminal, at: board.at, state: ide)
                         .frame(maxHeight: .infinity)
                 }
                 .padding(16)

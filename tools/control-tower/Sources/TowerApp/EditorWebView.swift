@@ -40,7 +40,7 @@ final class EditorPageView: WKWebView {
 }
 
 /// One editor: the page, its files, and the commands waiting for the page to be ready.
-@MainActor final class EditorController: NSObject, WKScriptMessageHandlerWithReply {
+@MainActor final class EditorController: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDelegate {
     static let scheme = "ctedit"
     /// The page's font size at the standard scale, Monaco's own default.
     static let baseFontSize = 13.0
@@ -50,6 +50,8 @@ final class EditorPageView: WKWebView {
     let web: EditorPageView
     private var ready = false
     private var waiting: [EditorCommand] = []
+    /// The file the page shows, opened again when the page has to load again.
+    private var shown: (path: String, line: Int?)?
     /// What the page last said of each file it shows.
     var onDirty: ((String, Bool) -> Void)?
 
@@ -66,15 +68,32 @@ final class EditorPageView: WKWebView {
         // the controller holds the view; the content controller would hold the controller back, so it gets a proxy
         config.userContentController.addScriptMessageHandler(WeakReplyHandler(self), contentWorld: .page, name: "ct")
         web.isInspectable = true
+        web.navigationDelegate = self
         web.appearanceChanged = { [weak self] dark in Task { _ = await self?.send(.setTheme(dark: dark)) } }
-        web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/index.html")!))
+        loadPage()
     }
 
-    /// Opens `path` read-only (D#5 b); false when it is outside the roots or not a text file.
-    func open(_ path: String, line: Int? = nil) async -> Bool {
-        guard let command = await files.open(path, line: line) else { return false }
+    private func loadPage() { web.load(URLRequest(url: URL(string: "\(Self.scheme)://app/index.html")!)) }
+
+    /// Opens `path`, read-only unless Swift unlocked it (D#5 b): its real path and whether it is locked; nil when it
+    /// is outside the roots or not a text file.
+    func open(_ path: String, line: Int? = nil) async -> (path: String, readOnly: Bool)? {
+        guard let command = await files.open(path, line: line), case .openFile(let real, _, _, _, let readOnly) = command else { return nil }
+        shown = (real, line)
         await send(command)
-        return true
+        return (real, readOnly)
+    }
+
+    /// The page's process ended (a crash, memory pressure): its buffers are gone. Load it again, open the shown file
+    /// from disk, and hold commands until the new page is ready. An unsaved edit is lost.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Self.log.error("editor page ended; loading it again")
+        ready = false
+        waiting = []
+        loadPage()
+        guard let shown else { return }
+        onDirty?(shown.path, false)
+        Task { _ = await open(shown.path, line: shown.line) }
     }
 
     func setReadOnly(_ path: String, _ readOnly: Bool) async {
@@ -160,62 +179,4 @@ private final class EditorPageScheme: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
-}
-
-// MARK: - The temporary way in
-
-/// `CT_EDITOR_TRY=<file>` opens that file in an editor window at launch, its folder the editor's only root.
-// ponytail: I4's one way to try the editor; I5 puts it in the board (IdeArea) and removes this window.
-let editorTryPath = ProcessInfo.processInfo.environment["CT_EDITOR_TRY"]
-
-struct EditorTryWindow: View {
-    let path: String
-    @State private var controller: EditorController?
-    @State private var readOnly = true
-    @State private var dirty = false
-    @State private var status = ""
-    @AppStorage(FontScale.storageKey) private var storedScale = FontScale.standard.value
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(path + (dirty ? " •" : "")).lineLimit(1).truncationMode(.head)
-                Spacer()
-                Text(status).foregroundStyle(.secondary)
-                Button(readOnly ? "잠금 해제" : "잠그기") {
-                    readOnly.toggle()
-                    Task { await controller?.setReadOnly(path, readOnly) }
-                }
-                .disabled(controller == nil)
-                Button("저장") {
-                    Task {
-                        let r = await controller?.send(.save)
-                        status = "저장: " + ((r?["result"] as? String).map { [$0, r?["reason"] as? String].compactMap { $0 }.joined(separator: " ") } ?? "응답 없음")
-                    }
-                }
-                .disabled(controller == nil || readOnly)
-            }
-            .padding(8)
-            Divider()
-            if let controller {
-                EditorWebView(controller: controller)
-            } else {
-                Text(editorPageFolder == nil ? "편집기 페이지가 빌드되지 않았습니다 (editor-web에서 npm run build)" : "여는 중")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(minWidth: 600, minHeight: 400)
-        .navigationTitle("편집기 시험")
-        .environment(\.boardFontScale, FontScale(stored: storedScale).value)
-        .background(NotRestorable())
-        .background(TestWindowPlacement())
-        .task {
-            guard let page = editorPageFolder else { return }
-            let c = EditorController(roots: [URL(fileURLWithPath: path).deletingLastPathComponent().path], page: page)
-            c.onDirty = { dirty = $1 }
-            controller = c
-            status = await c.open(path) ? "열림" : "열 수 없음"
-        }
-    }
 }

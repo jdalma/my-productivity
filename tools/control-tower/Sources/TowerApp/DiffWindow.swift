@@ -124,6 +124,8 @@ struct NotRestorable: NSViewRepresentable {
 struct DiffTreeSidebar: View {
     let workspace: String
     @Bindable var state: ChangesState
+    /// What a picked line does; the diff window's `state.pick` when nil.
+    var pick: ((TreeLine) -> Void)?
 
     private struct FullTreeKey: Equatable {
         var mode: TreeMode
@@ -131,7 +133,7 @@ struct DiffTreeSidebar: View {
     }
 
     var body: some View {
-        FolderTreeList(tree: state.tree, pick: state.pick) {
+        FolderTreeList(tree: state.tree, pick: pick ?? state.pick) {
             if let diff = state.diff(for: workspace) {
                 switch state.treeMode {
                 case .changed:

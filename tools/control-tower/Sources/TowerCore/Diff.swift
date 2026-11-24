@@ -14,6 +14,8 @@ enum GitRead: String, CaseIterable {
     case log
     /// A file as a commit holds it (`<rev>:<path>`), for a landing's diff and a finding's `<commit>:path` (G4 W1, W2).
     case show
+    /// A commit's files, for the task board's tree of a done task (G4 I6).
+    case lsTree = "ls-tree"
 }
 
 /// `-C dir` with the argument list as argv elements, never a shell. `--no-optional-locks` keeps

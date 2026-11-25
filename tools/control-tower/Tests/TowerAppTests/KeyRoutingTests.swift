@@ -7,7 +7,7 @@ import WebKit
 // only when the key is the app's for the focus it comes from.
 
 @Test func theEditorKeepsItsOwnKeysAndLeavesTheWindowsToTheApp() {
-    for key in [SharedKey.find, .searchK, .escape, .back, .forward, .openDiff, .undo, .quickOpen, .commandPalette] {
+    for key in [SharedKey.find, .searchK, .escape, .back, .forward, .openDiff, .undo, .commandPalette] {
         #expect(keyConsumer(key, focus: .editor) == .editor, "\(key)")
     }
     for key in [SharedKey.close, .fontBigger, .fontSmaller, .fontReset] {

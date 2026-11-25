@@ -5,6 +5,7 @@ import Observation
 // equivalent to the page first and passes on only what the page did not take (T14 §5.3); the page takes the editor's
 // keys below even when Monaco leaves one (editor-web/src/keys.ts), and the app's menu acts on one of them only
 // when `keyConsumer` says it is the app's. The app never re-sends a key to the editor: that loops (T14 §5.4).
+// ⌘P and ⌘⇧F are not shared: the page sends them to the app as quickOpen and findInFiles (T39).
 
 /// The shortcuts in question: the app's menu items and hidden buttons that a focused editor also uses.
 enum SharedKey: CaseIterable {
@@ -14,7 +15,6 @@ enum SharedKey: CaseIterable {
     case back, forward   // ⌘[ ⌘]: history; outdent, indent
     case openDiff        // ⌘D: 변경 보기; add the next match to the selection
     case undo            // ⌘Z
-    case quickOpen       // ⌘P
     case commandPalette  // ⌘⇧P
     case close           // ⌘W: the window
     case fontBigger, fontSmaller, fontReset  // ⌘+ ⌘- ⌘0: the app's text scale, which the editor follows
@@ -45,7 +45,7 @@ enum KeyConsumer: Equatable { case editor, app }
 func keyConsumer(_ key: SharedKey, focus: KeyFocus) -> KeyConsumer {
     switch (focus, key) {
     case (.editor, .find), (.editor, .searchK), (.editor, .escape), (.editor, .back), (.editor, .forward),
-         (.editor, .openDiff), (.editor, .undo), (.editor, .quickOpen), (.editor, .commandPalette): .editor
+         (.editor, .openDiff), (.editor, .undo), (.editor, .commandPalette): .editor
     default: .app
     }
 }

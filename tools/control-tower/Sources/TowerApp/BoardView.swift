@@ -82,6 +82,8 @@ struct BoardView: View {
             back: WindowNavigation.step(nav.canGoBack) { nav.back() },
             forward: WindowNavigation.step(nav.canGoForward) { nav.forward() },
             search: { searchFocus += 1 },
+            quickOpen: ide.canSearch ? { ide.search(.files) } : nil,
+            findInFiles: ide.canSearch ? { ide.search(.text) } : nil,
             reload: {
                 tower.reloadTaskBoards()
                 if nav.current.row == .dashboard { Task { await tower.usage.refresh() } }

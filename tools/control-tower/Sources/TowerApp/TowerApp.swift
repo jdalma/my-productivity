@@ -147,6 +147,9 @@ struct WindowNavigation {
     var back: (() -> Void)?
     var forward: (() -> Void)?
     var search: (() -> Void)?
+    /// The board window's IDE area search panel, by file name and in the files' text (T39).
+    var quickOpen: (() -> Void)?
+    var findInFiles: (() -> Void)?
     var reload: (() -> Void)?
     /// The selected session's diff window.
     var openDiff: (() -> Void)?
@@ -228,6 +231,9 @@ struct TowerCommands: Commands {
             Button("앞으로") { if appTakes(.forward) { nav?.forward?() } }.keyboardShortcut("]").disabled(nav?.forward == nil)
             Divider()
             Button("검색") { if appTakes(.find) { nav?.search?() } }.keyboardShortcut("f").disabled(nav?.search == nil)
+            Button("파일 이름으로 열기") { nav?.quickOpen?() }.keyboardShortcut("p").disabled(nav?.quickOpen == nil)
+            Button("파일 내용에서 찾기") { nav?.findInFiles?() }.keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(nav?.findInFiles == nil)
         }
     }
 }

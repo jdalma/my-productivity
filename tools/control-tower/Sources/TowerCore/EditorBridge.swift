@@ -20,6 +20,8 @@ public enum EditorRequest: Equatable, Sendable, Decodable {
     case lspStart(languageId: String, path: String)
     /// One JSON-RPC message from the page's language client to the server of `channel`.
     case lspSend(channel: String, message: String)
+    /// ⌘P, ⌘⇧F in the editor: the app's search panel, by file name or in the files' text (T39).
+    case quickOpen, findInFiles
 
     private enum Key: String, CodingKey { case kind, path, text, baseHash, dirty, line, col, message, languageId, channel }
 
@@ -36,6 +38,8 @@ public enum EditorRequest: Equatable, Sendable, Decodable {
             self = .cursor(path: try c.decode(String.self, forKey: .path), line: try c.decode(Int.self, forKey: .line),
                            col: try c.decode(Int.self, forKey: .col))
         case "ready": self = .ready
+        case "quickOpen": self = .quickOpen
+        case "findInFiles": self = .findInFiles
         case "log": self = .log(message: try c.decode(String.self, forKey: .message))
         case "lspStart":
             self = .lspStart(languageId: try c.decode(String.self, forKey: .languageId), path: try c.decode(String.self, forKey: .path))
@@ -324,7 +328,7 @@ public actor EditorFiles {
         switch request {
         case .readFile(let path): return read(path)
         case .writeFile(let path, let text, let baseHash): return await write(path, text, baseHash)
-        case .dirtyChanged, .cursor, .ready, .log, .lspStart, .lspSend: return .ok
+        case .dirtyChanged, .cursor, .ready, .log, .lspStart, .lspSend, .quickOpen, .findInFiles: return .ok
         }
     }
 

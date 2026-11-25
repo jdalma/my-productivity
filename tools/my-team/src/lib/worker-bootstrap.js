@@ -129,15 +129,15 @@ function roleGuidance(workerRole, orchestratorNames, { solo = false, board = fal
  * decision, board-wait when the task cannot go on without it, board-ask otherwise.
  */
 function decisionGuidance(api) {
-    const decision = { question: '<A or B?>', context: '<why now, what it is for, what you checked, with paths>', options: [{ label: 'A', detail: '<what it means>', pros: ['<…>'], cons: ['<…>'] }, { label: 'B', detail: '<…>', pros: ['<…>'], cons: ['<…>'] }], recommendation: { option: 'A', reason: '<why>' }, impact: '<what it changes, the cost of a wrong pick>', refs: ['<path>'] };
     return [
+        '- A decision\'s fields (board-wait, board-ask): question (A or B?), context (why now, what it is for, what you checked, with paths), options (two or more, each {label, detail, pros, cons}), recommendation {option (a label), reason}, impact (what it changes, the cost of a wrong pick), refs (paths).',
         '- Every decision you ask the user goes on the board BEFORE you ask it in your pane, one board entry per decision. When several are queued, put them all on the board now, even if you ask the user one at a time. Write each so the user can decide from it alone.',
         '- Tie a decision to the task it serves: a plan or a migration approach is discussed for the work that will use it. When that task is not on the board yet (the next plan to write, the implementation), it goes on the board first, without an assignee if none is decided (pm adds tasks: ask pm for it); then the decision.',
-        `- The task cannot go on without the answer: put it in waiting — \`${api('board-wait', { id: '<task>', ...decision })}\`. Until pm records the answer, the task cannot be taken, landed or judged.`,
-        `- The task can go on, or it has several decisions open: ask without stopping it — \`${api('board-ask', { tasks: ['<task>'] })}\`, with the same decision fields as board-wait added. It gets an id D#1, D#2, …; a task may have several open.`,
+        `- The task cannot go on without the answer: put it in waiting — ${api('board-wait', { id: '<task>' })} with the decision's fields. Until pm records the answer, the task cannot be taken, landed or judged.`,
+        `- The task can go on, or it has several decisions open: ask without stopping it — ${api('board-ask', { tasks: ['<task>'] })} with the decision's fields. It gets an id D#1, D#2, …; a task may have several open.`,
         '- Only a decision that serves no task at all goes on with `board-ask` and no `tasks`. That is the exception.',
         '- pm records the answer; you see it in `decisions.answered` of your board-inbox.',
-        `- When the talk about an open decision you asked changes its question, options or recommendation, correct that entry instead of asking a new one, with only the fields that changed: \`${api('board-decision-edit', { id: '<D#… or the waiting task>', question: '<the question as it stands now>' })}\`. It takes question, context, options, recommendation, impact, refs, and tasks for a D#…; pm is told.`,
+        `- When the talk about an open decision you asked changes its question, options or recommendation, correct that entry instead of asking a new one, with only the fields that changed: ${api('board-decision-edit', { id: 'a D#… or the waiting task', question: '<…>' })}. It takes question, context, options, recommendation, impact, refs, and tasks for a D#…; pm is told.`,
     ];
 }
 
@@ -148,29 +148,34 @@ function decisionGuidance(api) {
  * a reviewer; an orchestrator, or anyone in a team that declares no roles, also gets the pm part.
  */
 function boardGuidance(teamName, workerName, workerRole, solo) {
-    const api = (command, input) => formatOmcCliInvocation(`team api ${command} --input "${JSON.stringify({ team_name: teamName, ...input }).replaceAll('"', '\\"')}" --json`);
+    // a command and the input it needs (T43, D16): how to run one is said once, team_name and you come from MY_TEAM_WORKER
+    // a field's name; with a hint where the name does not say what goes there (a value not written as <…>)
+    const fields = (input) => Object.entries(input).map(([k, v]) => v && typeof v === 'object' && !Array.isArray(v) ? `${k} {${Object.keys(v).join(', ')}}`
+        : typeof v === 'string' && !v.startsWith('<') ? `${k}: ${v}` : k).join(', ');
+    const api = (command, input) => `\`${command}\`${Object.keys(input).length ? ` (${fields(input)})` : ''}`;
     const lines = [
         '## Team Board',
         'This team keeps its work on a board (`my-team api board-*`). The board holds the state: who does what, what waits for review, which findings are open.',
+        `Run a command as \`${formatOmcCliInvocation("team api <command> --input '<json>' --json")}\`; the fields in parentheses are its input. Leave team_name and yourself (\`by\`, \`worker\`) out: MY_TEAM_WORKER gives them. \`${formatOmcCliInvocation('team api <command> --help')}\` lists every field.`,
         '',
         'As a worker:',
-        `- A message whose body starts with \`[board]\` is a notice: mark it delivered and read your board — \`${api('board-inbox', {})}\`. Pass the returned \`cursor\` as \`since\` next time. If you lose it, call board-inbox without "since": you only see items again.`,
-        `- Start a task assigned to you: \`${api('board-take', { id: '<task>' })}\`.`,
-        `- When it is done, record it: \`${api('board-land', { id: '<task>', commit: '<full hash>', check: { cmd: '<command>', result: '<result>' }, focus: ['<what to look at>'], closes: [], report: '<report path>' })}\`. You may suggest where the review goes with \`review_report\`; the reviewer decides. The board tells the reviewer. Report state on the board, never in a message body.`,
+        `- A message whose body starts with \`[board]\` is a notice: mark it delivered and read your board — ${api('board-inbox', {})}. Pass the returned \`cursor\` as \`since\` next time. If you lose it, call board-inbox without "since": you only see items again.`,
+        `- Start a task assigned to you: ${api('board-take', { id: '<task>' })}.`,
+        `- When it is done, record it: ${api('board-land', { id: '<task>', commit: '<full hash>', check: { cmd: '<command>', result: '<result>' }, focus: ['<what to look at>'], closes: [], report: '<report path>' })}. You may suggest where the review goes with \`review_report\`; the reviewer decides. The board tells the reviewer. Report state on the board, never in a message body.`,
         '- A document task (its row says `"deliverable": "document"`: the result is a report, no commit) lands the same way without `commit`: `check` says what you checked the report against, `report` is its path. A task that is not marked so cannot land without a commit: ask pm to mark it.',
         '- A `changes` verdict on your task: read its findings (`board-inbox`, `board-status` with "task") and start fixing with `board-take` without waiting for pm. Close what you fixed with `closes` in your next `board-land`; a finding of another task the same work fixed can go in `closes` too, open or backlog (a backlog one becomes fixed when that landing is approved: name it again if you resubmit).',
         ...decisionGuidance(api),
-        `- Leave progress on the board each time you finish one of the ticket's numbered items, and when you have been on one item for more than 30 minutes or are stuck: \`${api('board-progress', { id: '<task>', item: 1, note: '<what you did, what is left>', done: false })}\`. item is the item's number in the ticket's What list (0 for work outside it). Write the note as sentences a person can follow, not only a commit hash or a path.`,
-        `- After a context compaction, find your tasks again: board-inbox without "since" lists them, and \`${api('board-status', { task: '<task>' })}\` shows one with its progress and verdicts.`,
+        `- Leave progress on the board each time you finish one of the ticket's numbered items, and when you have been on one item for more than 30 minutes or are stuck: ${api('board-progress', { id: '<task>', item: 1, note: '<what you did, what is left>', done: false })}. item is the item's number in the ticket's What list (0 for work outside it). Write the note as sentences a person can follow, not only a commit hash or a path.`,
+        `- After a context compaction, find your tasks again: board-inbox without "since" lists them, and ${api('board-status', { task: '<task>' })} shows one with its progress and verdicts.`,
         '- Never run a my-team of another version than the installed one (a branch you work on or review) on a running team\'s board: one command of a newer schema migrates the board file, and the installed my-team then refuses it for every worker. Try it on a copy in a temporary folder: set `MY_TEAM_STATE_ROOT_BASE` to that folder AND change `state_root` in the copied manifest.json to the copy\'s own folder (it is an absolute path, so a copied manifest still names the running board).',
     ];
     if (!(solo && workerRole === 'orchestrator')) lines.push(
         '',
         'As a reviewer (the board names you on a task):',
-        `- Take review requests from \`${api('board-review-queue', {})}\`; each row carries the ticket, constraints, commits, focus and open findings.`,
+        `- Take review requests from ${api('board-review-queue', {})}; each row carries the ticket, constraints, commits, focus and open findings.`,
         '- If your CLI has sub-agents, give each review request to one: it reads the diff against the ticket and reruns the check. When the queue holds several requests (the result then carries a `hint`), start one sub-agent per request at the same time instead of judging them in turn. Run yourself what the verdict records (the rerun, the repro of each must finding) before you record it; the verdict is yours. A small change (a document, a line or two) you may read yourself.',
         '- Every rerun, yours or a sub-agent\'s, runs on a copy of the submitted commit in a folder of its own (`mktemp -d`, then `git archive <commit> | tar -x -C <that folder>`, then install the dependencies there if the check needs them), never in a working tree that a worker or another sub-agent uses: two checks in one tree overwrite each other, and a checkout there moves the files under the worker who owns it. The copy has no .git: a check that needs a git repository can fail there for that reason alone; name such a check in the verdict and do not count that failure against the landing. Say all of this in each sub-agent\'s brief.',
-        `- Judge with \`${api('board-verdict', { landing: '<task#n>', verdict: 'approve|changes|hold', verified_commit: '<commit>', report: '<review report path>', rerun: { cmd: '<command>', result: '<result>' }, findings: [] })}\`. Give each finding a code, severity and a repro command: \`{"code":"M1","severity":"must|should|low","summary":"…","repro":"…"}\`.`,
+        `- Judge with ${api('board-verdict', { landing: '<task#n>', verdict: 'approve|changes|hold', verified_commit: '<commit>', report: '<review report path>', rerun: { cmd: '<command>', result: '<result>' }, findings: [] })}; verdict is approve, changes or hold. Give each finding a code, severity and a repro command: \`{"code":"M1","severity":"must|should|low","summary":"…","repro":"…"}\`.`,
         '- A document task\'s landing has no commit (`commit` is `""`): read its `report_path` against the ticket, and leave `verified_commit` out of the verdict.',
         '- The review report path is yours to choose; a landing may suggest one (`review_report_path`), and `report` may then be left out.',
         '- Check `left_out` (rev-list commits the landing leaves out) before judging, and use the row\'s `next_verdict` as your report section\'s name.',
@@ -186,19 +191,19 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
         lines.push(
             '',
             'As pm:',
-            `- Put work on the board, not in a message: \`${api('board-add', { id: '<T…>', title: '<title>', goal: '<G…>', assignee: '<worker>', reviewer: '<worker>', ticket: '<ticket path>', constraints: '<limits or 없음>', base: '<commit>' })}\`. Give ticket, constraints, base and reviewer; write 없음 when a task has no constraints (a missing or blank one leaves its review request incomplete). A task with no \`parent\` names the request it serves, or board-add refuses it: \`"goal":"G<n>"\` with its \`id\` listed in that goal file's \`## 순서\`, or \`"single":true\` when the request is this one task.`,
-            `- Before you add or assign a task, read \`workers[].in_hand\` in \`${api('board-status', {})}\`: the tasks each worker has to move itself (ready, doing, changes). A \`warning\` in the result of board-add or board-assign that names a loaded worker and an idle one means the task went through anyway: split it, or move it with board-assign. A \`warning\` that says no other worker who has taken a task is free: decide whether the task can run in parallel with the work in hand (other files, no result of unfinished work needed, not expensive to undo, review not behind). If it can, and the warning names a worker with no task yet who is there to take tasks, move the task to that worker with board-assign; add a worker on its own git worktree (add-worker in Rules) and move the task to it only when there is no such worker. If it cannot, leave it.`,
+            `- Put work on the board, not in a message: ${api('board-add', { id: '<T…>', title: '<title>', goal: '<G…>', assignee: '<worker>', reviewer: '<worker>', ticket: '<ticket path>', constraints: '<limits or 없음>', base: '<commit>' })}. Give ticket, constraints, base and reviewer; write 없음 when a task has no constraints (a missing or blank one leaves its review request incomplete). A task with no \`parent\` names the request it serves, or board-add refuses it: \`"goal":"G<n>"\` with its \`id\` listed in that goal file's \`## 순서\`, or \`"single":true\` when the request is this one task.`,
+            `- Before you add or assign a task, read \`workers[].in_hand\` in ${api('board-status', {})}: the tasks each worker has to move itself (ready, doing, changes). A \`warning\` in the result of board-add or board-assign that names a loaded worker and an idle one means the task went through anyway: split it, or move it with board-assign. A \`warning\` that says no other worker who has taken a task is free: decide whether the task can run in parallel with the work in hand (other files, no result of unfinished work needed, not expensive to undo, review not behind). If it can, and the warning names a worker with no task yet who is there to take tasks, move the task to that worker with board-assign; add a worker on its own git worktree (add-worker in Rules) and move the task to it only when there is no such worker. If it cannot, leave it.`,
             '- Write a ticket\'s work as a numbered list in its What section: workers report progress by those numbers. To see how a task is going, read its progress on the board (`board-status` with "task") instead of asking by message.',
             `- When a request splits into two or more tasks, first write a goal file \`~/.my-team/docs/${teamName}/goals/G<n>-<slug>.md\` (the request, the goal, assumptions) with a \`## 순서\` section that names every task, then add the tasks with \`"goal":"G<n>"\`. The \`## 순서\` section holds only lines \`- <before> -> <after>\`, and \`- T1, T2\` for tasks with no order among them (never invent an order). Each side is a comma list of \`T177\` (the whole task, complete when approved) or \`T177:4-7\` / \`T181:1\` (numbered items of its ticket, complete when reported done with board-progress).`,
-            `- Each time a verdict or a progress report changes the board, read \`ready_now\` of the goal in \`${api('goal-order', {})}\` and choose the next assignments from it.`,
+            `- Each time a verdict or a progress report changes the board, read \`ready_now\` of the goal in ${api('goal-order', {})} and choose the next assignments from it.`,
             '- A goal with `cycle` or `errors` set, or a task waiting on a `blocked_by` entry whose state is `cancelled`, needs a new order: rewrite its `## 순서` section.',
             `- A task whose result is a report and no commit (advice, a design, a review of a plan): add it with \`"deliverable":"document"\`, so it can be landed and approved instead of cancelled when it is done.`,
-            `- Correct what an unfinished task says with board-edit, never in board.db: \`${api('board-edit', { id: '<task>', constraints: '<limits or 없음>' })}\`. It takes title, ticket, constraints, base, priority and deliverable (to mark a task already on the board as a document task, until it has landed a commit). deliverable changes only while the task is new, ready, doing or changes: not in review, held or waiting.`,
+            `- Correct what an unfinished task says with board-edit, never in board.db: ${api('board-edit', { id: '<task>', constraints: '<limits or 없음>' })}. It takes title, ticket, constraints, base, priority and deliverable (to mark a task already on the board as a document task, until it has landed a commit). deliverable changes only while the task is new, ready, doing or changes: not in review, held or waiting.`,
             '- Assignee and reviewer are never the same worker; if you assign yourself a task, name a reviewer, or it cannot be landed.',
             '- Do not relay review requests or fix requests by message: a land notifies the reviewer (you, on a task without one), and every verdict notifies you and the assignee.',
-            `- The decisions waiting for the user are \`decisions.open\` in your board-inbox. When the user answers, record it at once: \`${api('board-answer', { id: '<task or D#…>', chosen: '<option label or 기타>', answer: '<the user\'s words or a summary>' })}\`. A waiting task goes back to the state it waited from. Close a decision nobody needs any more with chosen \`철회\` and the reason in answer.`,
-            `- A decision the user made without being asked (or answered in a pane before it was on the board): record question and answer at once — \`${api('board-ask', { question: '<what was decided>', context: '<…>', options: [{ label: '<the choice>', detail: '<…>', pros: ['<…>'], cons: ['<…>'] }], recommendation: { option: null, reason: '<…>' }, impact: '<…>', tasks: ['<task>'], answered: { chosen: '<the choice>', answer: '<the user\'s words>' } })}\`.`,
-            `- When the talk with the user changes an open decision (the question, an option, the recommendation), correct that entry so it says what is asked now, instead of withdrawing it and asking again: \`${api('board-decision-edit', { id: '<D#… or the waiting task>', recommendation: { option: '<label>', reason: '<why, as it stands now>' } })}\`. Give only the fields that changed; the worker who asked is told. An answered decision is not edited.`,
+            `- The decisions waiting for the user are \`decisions.open\` in your board-inbox. When the user answers, record it at once: ${api('board-answer', { id: 'the task or D#…', chosen: 'an option\'s label or 기타', answer: '<…>' })}. A waiting task goes back to the state it waited from. Close a decision nobody needs any more with chosen \`철회\` and the reason in answer.`,
+            `- A decision the user made without being asked (or answered in a pane before it was on the board): record question and answer at once — ${api('board-ask', { tasks: ['<task>'], answered: { chosen: '<the choice>', answer: '<what the user said>' } })} with the decision's fields (the choice made as an option, recommendation option null).`,
+            `- When the talk with the user changes an open decision (the question, an option, the recommendation), correct that entry so it says what is asked now, instead of withdrawing it and asking again: ${api('board-decision-edit', { id: 'a D#… or the waiting task', recommendation: { option: '<label>', reason: '<…>' } })}. Give only the fields that changed; the worker who asked is told. An answered decision is not edited.`,
             '- `board-announce` is for notices to the team. It is not where a user decision is recorded.',
             '- Settle findings with `board-finding` (backlog, accepted-limit, rejected); reopening one needs an unfinished task in its family. A fix an approved landing made without naming the finding in `closes`, of an open or a backlog finding: `board-finding` with state `fixed` and that `landing`.',
         );
@@ -230,10 +235,12 @@ export function generateWorkerOverlay(params) {
 
     const statusPath = join(params.instructionStateRoot, 'workers', workerName, 'status.json').replaceAll('\\', '/');
 
-    const mailboxListCommand = formatOmcCliInvocation(`team api mailbox-list --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\"}" --json`);
-    const mailboxDeliveredCommand = formatOmcCliInvocation(`team api mailbox-mark-delivered --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\",\\"message_id\\":\\"<id>\\"}" --json`);
-    const archiveLookupCommand = formatOmcCliInvocation(`team api archive-lookup --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\",\\"message_id\\":\\"<id>\\"}" --json`);
-    const sendWithReplyExpectedCommand = formatOmcCliInvocation(`team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName}\\",\\"to_worker\\":\\"<other-worker>\\",\\"body\\":\\"<question>\\",\\"expects_reply\\":true}" --json`);
+    // team_name and the worker acting come from MY_TEAM_WORKER (T43): an input names only what the command is about
+    const apiCall = (command, input) => formatOmcCliInvocation(`team api ${command} --input '${JSON.stringify(input)}' --json`);
+    const mailboxListCommand = apiCall('mailbox-list', {});
+    const mailboxDeliveredCommand = apiCall('mailbox-mark-delivered', { message_id: '<id>' });
+    const archiveLookupCommand = apiCall('archive-lookup', { message_id: '<id>' });
+    const sendWithReplyExpectedCommand = apiCall('send-message', { to_worker: '<other-worker>', body: '<question>', expects_reply: true });
     const teamApiCommand = formatOmcCliInvocation('team api');
     const teamCommand = formatOmcCliInvocation('team');
 
@@ -292,7 +299,7 @@ Talk to the user: surface output in this pane via your normal stdout. Permission
 or confirmation requests use your CLI's native prompt.${workerRole ? ' This team uses\nORCHESTRATOR/WORKER roles — see your Team Role section above; send-message\nenforces those routing rules.' : ' There is no orchestrator\nor leader role in this team, every worker (including you) is a peer.'}
 
 Talk to other workers via CLI API:
-- Send a one-way notice (no answer expected): \`${formatOmcCliInvocation(`team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName}\\",\\"to_worker\\":\\"<other-worker>\\",\\"body\\":\\"<message>\\"}" --json`)}\`
+- Send a one-way notice (no answer expected): \`${apiCall('send-message', { to_worker: '<other-worker>', body: '<message>' })}\`
 - Ask a question that needs an answer (sets expects_reply): \`${sendWithReplyExpectedCommand}\`
 - Reply to a peer's message: same command, add \`"reply_to":"<original message_id>"\`. Replies never set expects_reply=true.
 - List unread inbox + your outstanding questions: \`${mailboxListCommand}\`
@@ -305,12 +312,12 @@ Workers in other running teams are reachable by adding \`to_team\` — the targe
 TEAM NAME (stable across restarts, e.g. \`payments\`). Without \`to_team\` the
 recipient is looked up in your own team, exactly as before.
 
-- Send across teams: \`${formatOmcCliInvocation(`team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName}\\",\\"to_team\\":\\"<team-name>\\",\\"to_worker\\":\\"<worker-in-that-team>\\",\\"body\\":\\"<message>\\"}" --json`)}\`
+- Send across teams: \`${apiCall('send-message', { to_team: '<team-name>', to_worker: '<worker-in-that-team>', body: '<message>' })}\`
 - Prefer \`to_team\` for every cross-team send — team names are stable across
   restarts; tmux session names are not addressable.
 
 - Look up that team's current workers (names, roles, one-line descriptions):
-  \`${formatOmcCliInvocation('team api roster --input "{\\"team_name\\":\\"<team-name>\\"}" --json')}\`
+  \`${apiCall('roster', { team_name: '<team-name>' })}\`
 
 Rules:
 - **Only message teams your Role Context or the user names.** You MUST NOT run

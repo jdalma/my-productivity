@@ -19,21 +19,22 @@ import { MAILBOX_SCHEMA_VERSION } from './tmux-comm.js';
  * A worker process acts only as itself (T7, T58's rule): with MY_TEAM_WORKER
  * (`<team>/<worker>`, set by start and add-worker) the input must name that
  * team and worker, so it cannot absorb another worker's spool or consume its
- * mail. Without the variable (the user's shell) the input stands. Catches
- * mistakes, not intent: a process can run with the variable changed.
+ * mail; left out, the worker is that one (T43). Without the variable (the user's shell) the input stands.
+ * Catches mistakes, not intent: a process can run with the variable changed.
  */
 export function requireTeamAndWorker(input, opts = {}) {
     const { workerKey = 'worker', env = process.env } = opts;
     const teamName = input?.team_name;
-    const worker = input?.[workerKey];
+    const pinned = env.MY_TEAM_WORKER;
+    const slash = pinned ? pinned.indexOf('/') : -1;
+    const pinnedTeam = pinned?.slice(0, slash), pinnedWorker = pinned?.slice(slash + 1);
+    // a worker process may leave itself out (T43): it can only be the worker MY_TEAM_WORKER names
+    const worker = input?.[workerKey] ?? pinnedWorker;
     if (!teamName) throw new Error('team_name is required');
     if (!worker) throw new Error(`${workerKey} is required`);
     validateTeamName(teamName);
     const safeWorker = sanitizeName(worker);
-    const pinned = env.MY_TEAM_WORKER;
     if (pinned) {
-        const slash = pinned.indexOf('/');
-        const pinnedTeam = pinned.slice(0, slash), pinnedWorker = pinned.slice(slash + 1);
         if (pinnedTeam !== teamName) {
             throw forbidden(`This process is worker '${pinnedWorker}' of team '${pinnedTeam}' (MY_TEAM_WORKER=${pinned}), not of '${teamName}'`);
         }

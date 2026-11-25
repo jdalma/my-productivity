@@ -77,9 +77,9 @@ export function boardFor({ store, roster, manifest, actor }) {
 
 /**
  * The worker asking (T58's rule): the one MY_TEAM_WORKER names, in its own team only; without the variable
- * (the user's shell) the worker the input names. Catches mistakes, not intent.
+ * (the user's shell) the worker the input names, in `field` (board writes read `by`). Catches mistakes, not intent.
  */
-export function actorOf(env, teamName, roster, named) {
+export function actorOf(env, teamName, roster, named, field = 'worker') {
     const pinned = env.MY_TEAM_WORKER;
     let worker = named;
     if (pinned) {
@@ -89,7 +89,7 @@ export function actorOf(env, teamName, roster, named) {
         if (team !== teamName) fail('forbidden', `this process is worker '${worker}' of team '${team}' (MY_TEAM_WORKER=${pinned}), not of '${teamName}'`);
         if (named && named !== worker) fail('forbidden', `this process is '${worker}' (MY_TEAM_WORKER=${pinned}); it cannot ask as '${named}'`);
     }
-    if (!worker) fail('invalid', 'name the worker: "worker" in the input (no MY_TEAM_WORKER here)');
+    if (!worker) fail('invalid', `name the worker: "${field}" in the input (no MY_TEAM_WORKER here)`);
     if (!roster.some((w) => w.name === worker)) fail('invalid', `'${worker}' is not in team '${teamName}'`);
     return worker;
 }

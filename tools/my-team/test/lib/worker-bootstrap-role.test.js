@@ -156,3 +156,40 @@ test('a roleless peer team keeps the old peer-initiation wording', () => {
     assert.match(text, /send that peer a message instead of solving it/);
     assert.doesNotMatch(text, /Do not police file overlap/);
 });
+
+test('T42 B7: the Spawn protocol tells a worker to tell pm, and never tells pm to tell itself', () => {
+    const board = { store: 'sqlite' };
+    const line = /Tell the orchestrator \(pm\) in ONE message that you spawned this peer/;
+    assert.match(overlayFor('dev', 'worker'), line);
+    assert.doesNotMatch(overlayFor('pm', 'orchestrator'), line);
+    assert.doesNotMatch(generateWorkerOverlay({
+        teamName: 'demo', workerName: 'pm', agentType: 'claude', workerRole: 'orchestrator', teamRoster: roster,
+        bootstrapInstructions: '', instructionStateRoot: '/s/demo', board,
+    }), line);
+});
+
+test('T42 B8: on succession a worker asks pm to move its tasks; pm moves its own with board-assign', () => {
+    const render = (workerName, workerRole) => generateWorkerOverlay({
+        teamName: 'demo', workerName, agentType: 'claude', workerRole, teamRoster: roster,
+        bootstrapInstructions: '', instructionStateRoot: '/s/demo', board: { store: 'sqlite' },
+    });
+    assert.match(render('dev', 'worker'), /ask pm to board-assign them to the successor/);
+    const pm = render('pm', 'orchestrator');
+    assert.doesNotMatch(pm, /ask pm to board-assign/);
+    assert.match(pm, /\*\*Succession[^\n]*board-assign them to the successor yourself/);
+});
+
+test('T42 E20: every board role, solo ones included, is told how to find its tasks again after a compaction', () => {
+    const board = { store: 'sqlite' };
+    const render = (workerName, workerRole, extra = {}) => generateWorkerOverlay({
+        teamName: 'demo', workerName, agentType: 'claude', workerRole, teamRoster: workerRole ? roster : [],
+        bootstrapInstructions: '', instructionStateRoot: '/s/demo', board, ...extra,
+    });
+    for (const text of [render('dev', 'worker'), render('pm', 'orchestrator'), render('solo', null),
+        render('pm', 'orchestrator', { solo: true }), render('dev', 'worker', { solo: true })]) {
+        const lines = text.split('\n').filter((l) => /compaction/.test(l) && /board-status/.test(l));
+        assert.equal(lines.length, 1, 'one recovery line');
+        assert.match(lines[0], /board-inbox/);
+    }
+    assert.doesNotMatch(render('dev', 'worker', { board: undefined }), /After a context compaction/, 'no board, no board recovery');
+});

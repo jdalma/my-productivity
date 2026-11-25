@@ -1,2 +1,5 @@
 .build/
 .swiftpm/
+
+# the editor page, built by editor-web (npm run build) and never committed (D#11 b)
+Sources/TowerCore/Resources/editor/

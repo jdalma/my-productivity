@@ -113,3 +113,31 @@ private func host(_ view: some View, width: CGFloat) -> NSWindow {
     await state.loadCommitTree()
     #expect(state.commitTree?.mode == .all && state.commitTree?.nodes == nil)  // a new mode is read, and fails
 }
+
+/// G4 W5: an open finding's place is marked in the file shown, whether the findings came before the file or after.
+@MainActor @Test func theOpenFindingsAreMarkedInTheFileShownWhicheverCameFirst() async throws {
+    let state = IdeState(lockable: false, page: try page())
+    let work = try folder(), file = work + "/area.swift"
+    try "a\nb\nc\n".write(toFile: file, atomically: true, encoding: .utf8)
+    // the window works the marks out of the task's open findings itself, as the task board does
+    let finding = FindingPlace(id: "R1 M1", severity: "must", summary: "`area.swift:2` rounds", repo: work)
+    let w = host(TaskCodeSplit(state: state, source: .worktree(work), at: "0", findings: [finding], workerCwd: work) { Text("detail") },
+                 width: 900)
+    defer { w.contentView = nil }
+    try await until { state.editor != nil }
+    func marked() -> [EditorMarker]? {
+        state.editor?.waiting.reversed().lazy.compactMap { c -> [EditorMarker]? in
+            if case .setMarkers(file, let m) = c { m } else { nil }
+        }.first
+    }
+
+    await state.openDocument(file, in: .worktree(work))
+    let expected = [EditorMarker(line: 2, severity: .error, message: "R1 M1 `area.swift:2` rounds")]
+    try await until { marked() == expected }
+    #expect(marked() == expected)
+
+    // findings read again after the file was shown
+    state.findingMarks = [FindingMark(target: .file(path: file, line: 3), severity: "should", id: "R1 S1", summary: "later", changed: true)]
+    try await until { marked()?.first?.severity == .hint }
+    #expect(marked()?.map(\.line) == [3])
+}

@@ -47,7 +47,8 @@ async function main() {
   const app = new EditorApp({ codeResources: { modified: { text: '', uri: '/untitled.txt' } } })
   await app.start(document.getElementById('root')!)
   const editor = app.getEditor()!
-  editor.updateOptions({ readOnly: true })
+  // the default ('editable') draws no marker in a read-only editor, and every file opens read-only here (T34)
+  editor.updateOptions({ readOnly: true, renderValidationDecorations: 'on' })
   const configuration = await getService(IConfigurationService)
 
   const files = new Map<string, OpenFile>()

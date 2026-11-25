@@ -49,7 +49,7 @@ final class EditorPageView: WKWebView {
     let files: EditorFiles
     let web: EditorPageView
     private var ready = false
-    private var waiting: [EditorCommand] = []
+    private(set) var waiting: [EditorCommand] = []
     /// The file the page shows, opened again when the page has to load again: one read from the roots by its path,
     /// or one Swift read itself (a commit's, a document) by the command that showed it.
     private enum Shown { case file(path: String, line: Int?), command(EditorCommand) }

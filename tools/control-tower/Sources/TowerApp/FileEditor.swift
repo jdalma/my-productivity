@@ -44,12 +44,6 @@ func openRefusal(_ path: String, documentType: Bool = true) -> String? {
     return nil
 }
 
-/// A path the task board window shows in its own read-only editor (G4 I6, D#7 b): a text document R54 would open.
-/// A PDF or an image still goes to the outside app.
-func opensInIde(_ path: String) -> Bool {
-    openRefusal(path) == nil && (UTType(filenameExtension: URL(fileURLWithPath: path).resolvingSymlinksInPath().pathExtension)?.conforms(to: .text) ?? false)
-}
-
 /// Why `path` is not handed to the macOS default app, nil when it may be (R54a L1). That app is whatever the system
 /// gives the type: for HTML a browser, for a calendar or contact file an import, for a profile its install screen. So
 /// only what it shows as a document: plain text (Markdown among it), PDF, and an image that is not also text (an SVG
@@ -159,7 +153,6 @@ struct OpenPath: View {
     var mono = false
     @AppStorage(fileEditorKey) private var stored = ""
     @State private var note: String?
-    @Environment(\.openInIde) private var openInIde
 
     var body: some View {
         let name = (path as NSString).lastPathComponent
@@ -174,7 +167,6 @@ struct OpenPath: View {
                 .accessibilityLabel("\(what) 열기: \(name)")
                 .contextMenu {
                     Button("열기", action: open)
-                    if openInIde != nil { Button("에디터 앱으로 열기", action: openOutside) }
                     Button("경로 복사") { copy(path) }
                 }
                 Button { copy(path) } label: { Image(systemName: "doc.on.doc").scaledFont(.caption1) }
@@ -189,17 +181,7 @@ struct OpenPath: View {
         }
     }
 
-    /// A text document opens beside the detail where the window has an editor; anything else in the chosen app.
     private func open() {
-        if let openInIde, opensInIde(path) {
-            note = nil
-            openInIde(path)
-        } else {
-            openOutside()
-        }
-    }
-
-    private func openOutside() {
         let shown = $note
         note = openFile(path, stored: stored) { why in Task { @MainActor in shown.wrappedValue = why } }
     }

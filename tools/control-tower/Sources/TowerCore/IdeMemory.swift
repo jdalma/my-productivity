@@ -1,7 +1,6 @@
 import Foundation
 
-// What the IDE area remembers beyond a file's buffer (G4 I14, plan §2.3 W3, §2.4 W4): the files a worker wrote lately,
-// and the files each task had open.
+// What the IDE area remembers beyond a file's buffer (G4 I14, plan §2.3 W3): the files a worker wrote lately.
 
 // MARK: - W3: a worker's writes
 
@@ -41,62 +40,4 @@ public struct WorkerWrites: Equatable, Sendable {
 /// The line that warns before an edit of a file a worker just wrote.
 public func workerWriteWarning(worker: String?, age: TimeInterval) -> String {
     "\(worker ?? "워커")가 \(Int(age))초 전에 이 파일을 썼습니다"
-}
-
-// MARK: - W4: a task's open files
-
-/// The files a task's editor had open, the one shown and its cursor line.
-public struct TaskEditorTabs: Codable, Equatable, Sendable {
-    public var tabs: [String]
-    public var active: String?
-    public var line: Int?
-
-    public init(tabs: [String], active: String?, line: Int?) {
-        self.tabs = tabs
-        self.active = active
-        self.line = line
-    }
-}
-
-/// Every task's open files, by team and task, kept as one stored string as the panel prefs are (`readPanelPrefs`).
-public struct TaskEditorMemory: Codable, Equatable, Sendable {
-    /// The most tasks kept; the one left longest ago goes first.
-    public static let limit = 50
-
-    private struct Entry: Codable, Equatable, Sendable {
-        var tabs: TaskEditorTabs
-        var at: Date
-    }
-
-    private var tasks: [String: Entry] = [:]
-
-    public init() {}
-
-    public var count: Int { tasks.count }
-
-    private static func key(_ team: String, _ task: String) -> String { team + "\u{1f}" + task }
-
-    public func tabs(team: String, task: String) -> TaskEditorTabs? { tasks[Self.key(team, task)]?.tabs }
-
-    /// Keeps what `task` has open as it is left; no tabs forgets it.
-    public mutating func remember(_ tabs: TaskEditorTabs, team: String, task: String, at now: Date) {
-        let key = Self.key(team, task)
-        guard !tabs.tabs.isEmpty else {
-            tasks[key] = nil
-            return
-        }
-        tasks[key] = Entry(tabs: tabs, at: now)
-        while tasks.count > Self.limit, let oldest = tasks.min(by: { $0.value.at < $1.value.at })?.key { tasks[oldest] = nil }
-    }
-}
-
-/// The stored memory; one that does not read is no memory.
-public func readTaskEditorMemory(_ stored: String) -> TaskEditorMemory {
-    (try? JSONDecoder().decode(TaskEditorMemory.self, from: Data(stored.utf8))) ?? TaskEditorMemory()
-}
-
-public func storedTaskEditorMemory(_ memory: TaskEditorMemory) -> String {
-    let e = JSONEncoder()
-    e.outputFormatting = .sortedKeys
-    return (try? e.encode(memory)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
 }

@@ -18,6 +18,7 @@ import { MonacoVscodeApiWrapper } from 'monaco-languageclient/vscodeApiWrapper'
 import { configureDefaultWorkerFactory } from 'monaco-languageclient/workerFactory'
 import { EditorApp } from 'monaco-languageclient/editorApp'
 import { call, fire, type Reply } from './bridge'
+import { keepEditorKeys } from './keys'
 
 const theme = (dark: boolean) => (dark ? 'Default Dark Modern' : 'Default Light Modern')
 
@@ -89,6 +90,7 @@ async function main() {
   }
 
   editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => void save())
+  keepEditorKeys(editor)
   editor.onDidChangeModelContent(() => {
     const f = shown === undefined ? undefined : files.get(shown)
     if (shown !== undefined && f) reportDirty(shown, f)

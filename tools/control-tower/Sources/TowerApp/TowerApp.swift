@@ -195,7 +195,7 @@ struct TowerCommands: Commands {
                 ForEach(DiffLayout.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
             }
             .pickerStyle(.inline)
-            Button("변경 보기") { nav?.openDiff?() }.keyboardShortcut("d").disabled(nav?.openDiff == nil)
+            Button("변경 보기") { if appTakes(.openDiff) { nav?.openDiff?() } }.keyboardShortcut("d").disabled(nav?.openDiff == nil)
             Button("작업판 보기") { nav?.openTaskBoard?() }.keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(nav?.openTaskBoard == nil)
             // T214 (goal-order-view §1): the task board window in front's view; off for other windows, gone for an
@@ -225,14 +225,16 @@ struct TowerCommands: Commands {
             .disabled(arrange == nil)
             Divider()
         }
+        // an editor or a pane terminal keeps its own keys (KeyRouting.swift); WebKit offers them to the page first,
+        // and these items stand aside for one the page left
         CommandMenu("이동") {
-            Button(nav?.escape?.label ?? "닫기") { if !clearSearchForEscape(in: NSApp.keyWindow) { nav?.escape?.run() } }
+            Button(nav?.escape?.label ?? "닫기") { if appTakes(.escape), !clearSearchForEscape(in: NSApp.keyWindow) { nav?.escape?.run() } }
                 .keyboardShortcut(.escape, modifiers: [])
                 .disabled(nav?.escape == nil)
-            Button("뒤로") { nav?.back?() }.keyboardShortcut("[").disabled(nav?.back == nil)
-            Button("앞으로") { nav?.forward?() }.keyboardShortcut("]").disabled(nav?.forward == nil)
+            Button("뒤로") { if appTakes(.back) { nav?.back?() } }.keyboardShortcut("[").disabled(nav?.back == nil)
+            Button("앞으로") { if appTakes(.forward) { nav?.forward?() } }.keyboardShortcut("]").disabled(nav?.forward == nil)
             Divider()
-            Button("검색") { nav?.search?() }.keyboardShortcut("f").disabled(nav?.search == nil)
+            Button("검색") { if appTakes(.find) { nav?.search?() } }.keyboardShortcut("f").disabled(nav?.search == nil)
         }
     }
 }

@@ -66,8 +66,10 @@ struct BoardView: View {
         .background {
             FontScaleAlias(stored: $storedScale)
             // ⌘K, the menu's ⌘F under another key: it also leaves a pane terminal, which keeps ⌘F
+            // not while the editor has the keyboard: ⌘K starts its chords (⌘K ⌘C), and a disabled button lets it pass
             Button("검색") { searchFocus += 1 }
                 .keyboardShortcut("k")
+                .disabled(EditorKeyFocus.shared.inKeyWindow)
                 .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
         }
         .focusedSceneValue(\.windowNavigation, WindowNavigation(

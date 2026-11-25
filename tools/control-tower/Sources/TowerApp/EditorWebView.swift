@@ -66,6 +66,17 @@ final class EditorPageView: WKWebView {
         self.shown = nil
         shown()
     }
+
+    // the board's ⌘K steps aside while the editor has the keyboard (KeyRouting.swift)
+    override func becomeFirstResponder() -> Bool {
+        defer { EditorKeyFocus.shared.update() }
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        defer { EditorKeyFocus.shared.update() }
+        return super.resignFirstResponder()
+    }
 }
 
 /// One editor: the page, its files, and the commands waiting for the page to be ready.

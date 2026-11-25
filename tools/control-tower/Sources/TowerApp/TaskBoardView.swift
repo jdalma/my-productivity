@@ -1080,7 +1080,7 @@ struct TaskBoardSplit<List: View, Detail: View>: NSViewRepresentable {
 
 /// A task's detail and its code (G4 I6): side by side where both fit, else a 상세 | 코드 switch in the detail's place.
 /// Text documents the detail names open in the code's read-only editor.
-private struct TaskCodeSplit<Detail: View>: View {
+struct TaskCodeSplit<Detail: View>: View {
     @Bindable var state: IdeState
     let source: TaskCodeSource?
     let at: String
@@ -1110,7 +1110,7 @@ private struct TaskCodeSplit<Detail: View>: View {
                 }
             }
         }
-        .environment(\.openInIde) { state.openDocument($0) }
+        .environment(\.openInIde) { [source] path in Task { await state.openDocument(path, in: source) } }
     }
 
     private var code: some View {

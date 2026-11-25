@@ -23,9 +23,9 @@ final class IdeSession {
     /// buffer shows.
     private(set) var outside: String?
 
-    init(root: String?) {
+    init(root: String?, page: URL? = editorPageFolder) {
         self.root = root
-        editor = editorPageFolder.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
+        editor = page.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
         guard let editor, let root else { return }
         editor.onDirty = { [weak self] path, dirty in
             guard let self else { return }
@@ -226,9 +226,9 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
     private static let all = NSHashTable<IdeSession>.weakObjects()
 
     /// The waiting editor of `root`, or a new one.
-    static func session(for root: String) -> IdeSession {
+    static func session(for root: String, page: URL? = editorPageFolder) -> IdeSession {
         if let waiting = parked.removeValue(forKey: root) { return waiting }
-        let session = IdeSession(root: root)
+        let session = IdeSession(root: root, page: page)
         all.add(session)
         return session
     }

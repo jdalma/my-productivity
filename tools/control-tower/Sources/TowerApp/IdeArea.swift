@@ -25,14 +25,22 @@ final class IdeState {
     /// Narrow, the code is a tab beside the detail: shown, or the detail is.
     var codeShown = false
 
-    init(lockable: Bool = true) { self.lockable = lockable }
+    /// The built editor page; nil without one (the editor is off).
+    @ObservationIgnored private let page: URL?
+
+    init(lockable: Bool = true, page: URL? = editorPageFolder) {
+        self.lockable = lockable
+        self.page = page
+    }
 
     var editor: EditorController? { session?.editor }
     var buffers: EditorBuffers { session?.buffers ?? EditorBuffers() }
     /// The real path of the file the editor shows: a worktree's file, or one Swift read itself (a commit's, a document).
     var shown: String? { session?.outside ?? buffers.shown }
     var readOnly: Bool { session?.outside != nil ? true : shown.flatMap { buffers.files[$0]?.readOnly } ?? true }
-    var status: String { session?.status ?? "" }
+    var status: String { (session?.status).flatMap { $0.isEmpty ? nil : $0 } ?? note }
+    /// What the area says when its session cannot: no editor page for a document.
+    private var note = ""
 
     /// The worktree the editor reads and may save in; nil for a commit or no source.
     var root: String? { if case .worktree(let r) = source { r } else { nil } }
@@ -49,7 +57,12 @@ final class IdeState {
         commitTree = nil
         if let root { changes.select(workspace: root) }
         // A window that never unlocks takes no waiting editor: its files may be unlocked and edited (D#8 b).
-        session = if lockable, let root { IdeParking.session(for: root) } else { IdeSession(root: root) }
+        session = if lockable, let root { IdeParking.session(for: root, page: page) } else { IdeSession(root: root, page: page) }
+        note = ""
+        if let waiting = waitingDocument, waiting.source == source {
+            waitingDocument = nil
+            Task { await openDocument(waiting.path, in: source) }
+        }
     }
 
     /// The area left the window (a row with no terminal, the window closed): an editor with edits that are not saved
@@ -82,16 +95,28 @@ final class IdeState {
         await changes.loadFullTree()
     }
 
-    /// A ticket or report the task board names, read-only in this editor (D#7 b); narrow, the code tab comes forward.
-    func openDocument(_ path: String) {
+    /// A document asked for while the code of `source` had no editor yet: opened when `show(source)` makes it.
+    @ObservationIgnored private var waitingDocument: (path: String, source: TaskCodeSource?)?
+
+    /// A ticket or report the task board names, read-only in this editor (D#7 b), for the task whose code is `source`;
+    /// narrow, the code tab comes forward. The editor is made by `IdeArea` once the code shows (a web view loaded
+    /// out of a window stays blank), so until it is there for `source` the document waits for it (R27 S1).
+    func openDocument(_ path: String, in source: TaskCodeSource?) async {
         codeShown = true
-        Task { await session?.show(await Task.detached { readOnlyOpen(path) }.value) }
+        guard started, source == self.source, let session, session.editor != nil else {
+            waitingDocument = (path, source)
+            if started, source == self.source { note = "편집기 페이지가 없어 열지 못함" }
+            return
+        }
+        await session.show(await Task.detached { readOnlyOpen(path) }.value)
     }
 
     /// The commit source's tree in `commitMode`: every file of the commit, or those the task changed from its base.
     func loadCommitTree() async {
         guard case .commit(let repo, let base, let commit)? = source else { return }
         let mode = commitMode
+        // a commit does not change: the window's 15 s refresh reads nothing again, a failed read is tried again (R27 L1)
+        if let tree = commitTree, tree.mode == mode, tree.nodes != nil { return }
         let nodes = await Task.detached { () -> [ChangeTreeNode]? in
             switch mode {
             case .all: filesAt(dir: repo, rev: commit).map { folderTree(files: $0) }

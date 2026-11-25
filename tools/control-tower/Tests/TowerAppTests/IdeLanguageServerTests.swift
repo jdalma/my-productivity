@@ -98,3 +98,21 @@ import Testing
     while !done(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
     #expect(done())
 }
+
+/// R40 M1: a server started again under the key of one just stopped (parked, then shown at once) is not taken for
+/// the old one: the old process's end and output do not touch it, and the app does not stop.
+@MainActor @Test func aServerStartedAgainAtOnceOutlivesTheEndOfTheOldOne() async throws {
+    let f = try folders()
+    let host = LanguageServerHost()
+    defer { host.stopAll() }
+    let key = LanguageServerKey(editor: 4101, server: "echo", root: f.a)
+    var exits = 0
+    _ = host.start(key, executable: "/bin/cat", arguments: [], onMessage: { _ in }, onExit: { exits += 1 })
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(host.suspend(editor: 4101) == [key])
+    host.resume(editor: 4101)  // before the old process's end is reported
+    try await Task.sleep(for: .seconds(1))
+    #expect(host.isRunning(key), "the new server still runs")
+    #expect(exits == 0, "a stop is no end by itself")
+    #expect(host.send(key, #"{"jsonrpc":"2.0","method":"x"}"#))
+}

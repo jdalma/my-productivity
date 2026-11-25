@@ -86,6 +86,9 @@ public enum EditorReply: Equatable, Sendable, Encodable {
 /// JavaScript assembled from strings.
 public enum EditorCommand: Equatable, Sendable, Encodable {
     case openFile(path: String, text: String, hash: String, line: Int?, readOnly: Bool)
+    /// A file Swift read itself (a task board link's, D#17): a read-only document of its own in the page, apart from
+    /// any buffer of the same path, so nothing done to that buffer reaches it (R34a L3).
+    case showFile(path: String, text: String, line: Int?)
     /// The disk's text for a buffer held clean: the page takes it unless the buffer was edited meanwhile, and says
     /// which (`applied`).
     case fileChangedOnDisk(path: String, text: String?, hash: String?)
@@ -120,6 +123,11 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
             try c.encode(hash, forKey: .hash)
             try c.encodeIfPresent(line, forKey: .line)
             try c.encode(readOnly, forKey: .readOnly)
+        case .showFile(let path, let text, let line):
+            try c.encode("showFile", forKey: .kind)
+            try c.encode(path, forKey: .path)
+            try c.encode(text, forKey: .text)
+            try c.encodeIfPresent(line, forKey: .line)
         case .fileChangedOnDisk(let path, let text, let hash):
             try c.encode("fileChangedOnDisk", forKey: .kind)
             try c.encode(path, forKey: .path)

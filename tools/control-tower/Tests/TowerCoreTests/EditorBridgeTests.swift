@@ -275,3 +275,10 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     // the same text: no lines
     #expect(try #require(bufferDiff(path: a, text: "one\ntwo\nthree\n")).lines.isEmpty)
 }
+
+/// R34a L3: a task board link's file goes to the page as a document of its own, never a buffer's.
+@Test func aLinksFileEncodesAsShowFile() throws {
+    let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(EditorCommand.showFile(path: "/w/a.swift", text: "x", line: 2))) as! [String: Any]
+    #expect(json["kind"] as? String == "showFile" && json["path"] as? String == "/w/a.swift" && json["text"] as? String == "x"
+            && json["line"] as? Int == 2)
+}

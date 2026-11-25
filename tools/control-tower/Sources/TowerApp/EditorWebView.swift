@@ -121,10 +121,12 @@ final class EditorPageView: WKWebView {
         return (real, hash, readOnly)
     }
 
-    /// Shows a file Swift read outside `EditorFiles` (`targetOpen`): read-only, never saved.
+    /// Shows a file Swift read outside `EditorFiles` (`targetOpen`): read-only, never saved, a document of its own in
+    /// the page (R34a L3).
     func show(_ command: EditorCommand) async {
+        guard case .openFile(let path, let text, _, let line, _) = command else { return }
         shown = .command(command)
-        await send(command)
+        await send(.showFile(path: path, text: text, line: line))
     }
 
     /// The page's process ended (a crash, memory pressure): its buffers are gone. Load it again, open the shown file

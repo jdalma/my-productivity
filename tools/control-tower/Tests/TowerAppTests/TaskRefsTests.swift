@@ -44,7 +44,8 @@ import TowerCore
 
     let lists = FileLists()
     #expect(lists.filesIfRead(dir) == nil)  // not read yet: no wait here
-    let deadline = Date().addingTimeInterval(10)
+    // long: another test may hold every GCD worker for 30 s (FocusRunnerTests), and the read waits for one
+    let deadline = Date().addingTimeInterval(60)
     while lists.foldersRead == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
     #expect(lists.foldersRead == 1)
     #expect(lists.filesIfRead(dir) == ["shapes.swift"])

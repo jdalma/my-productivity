@@ -52,6 +52,9 @@ async function main() {
   const configuration = await getService(IConfigurationService)
 
   const files = new Map<string, OpenFile>()
+  /** Files Swift read itself (a task board link's), by path: read-only models of their own, apart from the buffers
+   * of the same paths, so a buffer's reload, lock or save never reaches them (R34a L3). */
+  const links = new Map<string, monacoEditor.ITextModel>()
   let shown: string | undefined
   const model = (f: OpenFile) => f.ref.object.textEditorModel!
   const isDirty = (f: OpenFile) => model(f).getAlternativeVersionId() !== f.savedVersion
@@ -116,6 +119,25 @@ async function main() {
         editor.setPosition({ lineNumber: m.line, column: 1 })
       }
       return { result: 'ok', language: model(f).getLanguageId() }
+    },
+    showFile(m) {
+      let text = links.get(m.path)
+      if (!text) {
+        // its own scheme: the buffer of this path, if open, keeps its model (a file URI names one model only)
+        text = monacoEditor.createModel(m.text, undefined, Uri.from({ scheme: 'ctlink', path: m.path }))
+        links.set(m.path, text)
+      } else if (text.getValue() !== m.text) {
+        text.setValue(m.text)
+      }
+      editor.setModel(text)
+      // no buffer shows: a save, a lock or a buffer's state change has nothing on screen to act on
+      shown = undefined
+      editor.updateOptions({ readOnly: true, readOnlyMessage: { value: '작업판 링크로 연 파일은 읽기 전용입니다.' } })
+      if (m.line) {
+        editor.revealLineInCenter(m.line)
+        editor.setPosition({ lineNumber: m.line, column: 1 })
+      }
+      return { result: 'ok', language: text.getLanguageId() }
     },
     fileChangedOnDisk(m) {
       const f = files.get(m.path)
@@ -182,18 +204,21 @@ async function main() {
     },
     save: () => save(),
     /** The open findings beside their lines (G4 W5), on the file's model: they stay while it is open. */
+    /** On the path's buffer and its link document alike. */
     setMarkers(m) {
       const f = files.get(m.path)
-      if (!f) return { result: 'refused', reason: 'notOpen' }
-      const text = model(f)
+      const models = [f && model(f), links.get(m.path)].filter((t): t is monacoEditor.ITextModel => t !== undefined)
+      if (models.length === 0) return { result: 'refused', reason: 'notOpen' }
       const severity: Record<string, MarkerSeverity> = {
         error: MarkerSeverity.Error, warning: MarkerSeverity.Warning, info: MarkerSeverity.Info, hint: MarkerSeverity.Hint,
       }
-      monacoEditor.setModelMarkers(text, 'findings', m.markers.map((k: { line: number; severity: string; message: string }) => {
-        const line = Math.max(1, Math.min(k.line, text.getLineCount()))
-        return { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: text.getLineMaxColumn(line),
-                 severity: severity[k.severity] ?? MarkerSeverity.Info, message: k.message }
-      }))
+      for (const text of models) {
+        monacoEditor.setModelMarkers(text, 'findings', m.markers.map((k: { line: number; severity: string; message: string }) => {
+          const line = Math.max(1, Math.min(k.line, text.getLineCount()))
+          return { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: text.getLineMaxColumn(line),
+                   severity: severity[k.severity] ?? MarkerSeverity.Info, message: k.message }
+        }))
+      }
       return { result: 'ok' }
     },
   }

@@ -46,7 +46,7 @@ private func until(_ done: () -> Bool) async throws {
     state.show(root: work)  // the board selects the worker's row
     try await until { marked(state, file) != nil }
     #expect(state.shown == file && state.readOnly)
-    #expect(state.editor?.waiting.contains { if case .openFile(file, _, _, 2, true) = $0 { true } else { false } } == true)
+    #expect(state.editor?.waiting.contains(.showFile(path: file, text: "a\nb\nc\n", line: 2)) == true)
     #expect(marked(state, file) == [EditorMarker(line: 2, severity: .error, message: "R1 M1 `area.swift:2` rounds")])
 
     // never unlocked: it is no buffer of the editor's
@@ -65,4 +65,27 @@ private func until(_ done: () -> Bool) async throws {
     // a commit that is not there: nothing shown in its place
     await state.take(IdeOpenRequest(root: work, target: .commit(repo: work, commit: "abc1234", path: "a.md", line: 1), findings: []))
     #expect(state.status == "열 수 없음")
+}
+
+/// R34a L3: a link's file is a document of its own in the page, not the buffer of the same path. What the buffer
+/// goes through (unlocked before, the disk changing it, its lock sent again) never reaches what the link shows.
+@MainActor @Test func aLinkToAnUnlockedBuffersFileIsADocumentOfItsOwn() async throws {
+    let state = IdeState(page: try page())
+    let work = try folder(), file = work + "/a.swift"
+    try "a\nb\n".write(toFile: file, atomically: true, encoding: .utf8)
+    state.show(root: work)
+    await state.session?.open(file)
+    await state.session?.toggleLock()
+    #expect(!state.readOnly)
+
+    await state.take(IdeOpenRequest(root: work, target: .file(path: file, line: 2), findings: []))
+    let sent = state.editor?.waiting ?? []
+    // shown as its own document; the buffer's file is not opened again over it
+    #expect(sent.last(where: { if case .showFile = $0 { true } else { false } }) == .showFile(path: file, text: "a\nb\n", line: 2))
+    #expect(sent.filter { if case .openFile(file, _, _, _, _) = $0 { true } else { false } }.count == 1)
+    #expect(state.readOnly && state.shown == file)
+
+    // a link's document is no buffer: the lock does nothing to it
+    await state.session?.toggleLock()
+    #expect(state.readOnly)
 }

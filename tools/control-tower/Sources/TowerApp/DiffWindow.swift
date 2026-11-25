@@ -198,11 +198,17 @@ struct FolderTreeList<Rows: View>: View {
 }
 
 /// A tree line and, while it is an open folder, the lines under it; a closed folder builds nothing below it.
+extension EnvironmentValues {
+    /// The IDE tree's paths (from its top) of files a worker wrote lately (G4 I14 W3); empty in the diff window.
+    @Entry var workerWritten: Set<String> = []
+}
+
 struct TreeNodeRow: View {
     let node: ChangeTreeNode
     let part: DiffPart?
     let openByDefault: (String) -> Bool
     let tree: FolderTreeState
+    @Environment(\.workerWritten) private var workerWritten
 
     var body: some View {
         let line = TreeLine(node, part: part)
@@ -224,6 +230,10 @@ struct TreeNodeRow: View {
                 Text(node.name).lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(change == .unchanged ? .secondary : .primary)
                 Spacer(minLength: 4)
+                if workerWritten.contains(node.path) {
+                    Image(systemName: "pencil").foregroundStyle(.orange).help("워커가 최근 \(Int(WorkerWrites.window))초 안에 쓴 파일")
+                        .accessibilityLabel("워커가 최근에 씀")
+                }
                 marker(change).foregroundStyle(.secondary)
             }
             .scaledFont(.caption1, design: .monospaced)

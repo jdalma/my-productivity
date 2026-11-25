@@ -736,7 +736,7 @@ private struct DetailView: View {
             workspace: s.cwd,
             conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)],
             ide: s.tmux != nil,
-            tasks: workerTaskLine(row, team: team))
+            tasks: workerTaskLine(row, team: team), worker: row.worker?.workerName)
     }
 
     private func past(_ h: HistorySession) -> some View {
@@ -766,7 +766,7 @@ private struct DetailView: View {
     /// recent conversation under the head.
     private func detailBody(title: String, @ViewBuilder badges: () -> some View,
                             facts: [(String, String)], workspace: String, conversation: [(String, String)],
-                            ide: Bool, tasks: WorkerTaskLine?) -> some View {
+                            ide: Bool, tasks: WorkerTaskLine?, worker: String? = nil) -> some View {
         let head = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(title).scaledFont(.title2, weight: .bold).lineLimit(1)
@@ -790,7 +790,7 @@ private struct DetailView: View {
             if ide {
                 VStack(alignment: .leading, spacing: 12) {
                     head
-                    IdeArea(root: workspace, at: board.at, state: self.ide)
+                    IdeArea(root: workspace, worker: worker, at: board.at, state: self.ide)
                         .frame(maxHeight: .infinity)
                 }
                 .padding(16)

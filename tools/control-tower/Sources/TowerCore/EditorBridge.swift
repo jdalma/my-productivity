@@ -214,8 +214,6 @@ public actor EditorFiles {
     public let roots: [String]
     private var opened: [String: TextEncoding] = [:]
     private var unlocked: Set<String> = []
-    /// The hash of each file's last save by this editor: the disk still holding it is the app's own write (W3).
-    private var saved: [String: String] = [:]
     /// Making, renaming and trashing files is refused until the user unlocks it (D#5 b), as editing a file is.
     private var fileOpsLocked = true
     private let writer: WorkingFileWriter
@@ -314,17 +312,11 @@ public actor EditorFiles {
         return await writer.trash(path, roots: roots)
     }
 
-    /// Which of `paths` (real paths) are this editor's own writes: a file operation within the last moment
-    /// (`SelfWriteRegistry.ttl`), or a save whose bytes the disk still holds. A watch event of one of them is the
-    /// app's, not a worker's write (W3).
+    /// Which of `paths` (real paths) are this editor's own writes (`WorkingFileWriter.isSelfWrite`): a watch event of
+    /// one of them is the app's, not a worker's write (W3).
     public func ownWrites(_ paths: [String]) async -> Set<String> {
         var own: Set<String> = []
-        for p in paths {
-            // the window covers file operations; a save is the app's while the disk still holds its bytes, however
-            // late the watch reports it (a loaded machine runs past 750 ms)
-            if await writer.isSelfWrite(p) { own.insert(p) } else if let h = saved[p], let data = FileManager.default.contents(atPath: p),
-                                                                     sha256(data) == h { own.insert(p) }
-        }
+        for p in paths where await writer.isSelfWrite(p) { own.insert(p) }
         return own
     }
 
@@ -365,9 +357,7 @@ public actor EditorFiles {
         guard let encoding = opened[real] else { return .refused(.notOpen) }
         guard unlocked.contains(real) else { return .refused(.readOnly) }
         switch await writer.write(text, encoding: encoding, to: real, roots: roots, expected: baseHash) {
-        case .written(let hash), .unchanged(let hash):
-            saved[real] = hash
-            return .written(hash: hash)
+        case .written(let hash), .unchanged(let hash): return .written(hash: hash)
         case .conflict(let current): return .conflict(diskHash: current)
         case .refused(let why): return .refused(EditorRefusal(why))
         case .failed(let message): return .failed(message: message)

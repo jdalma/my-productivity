@@ -29,7 +29,9 @@ but the app binary links SwiftTerm alone; the others serve SwiftTerm's own tools
     Python, JSON, Markdown, shell and YAML, and the default themes
   - `monaco-languageclient` 11.0.3 (https://github.com/TypeFox/monaco-languageclient)
 - Every production package of the lockfile, with its license text: `editor/THIRD-PARTY-LICENSES.md`, written by the
-  build (`editor-web/scripts/licenses.mjs`) and shipped in the app bundle beside this file. All are MIT except
+  build (`editor-web/scripts/licenses.mjs`) and shipped in the app bundle beside this file. The `@codingame/monaco-vscode-*`
+  packages ship no license file; the build gives them CodinGame's MIT text and VS Code's MIT text (Microsoft), kept in
+  `editor-web/licenses/`. A package with no license text at all stops the build. All are MIT except
   `jschardet` (LGPL-2.1+, file encoding detection, its own files in `editor/assets/`), `dompurify` (MPL-2.0 or
   Apache-2.0), `minimatch` (BlueOak-1.0.0) and `semver` (ISC).
 - No web extension code runs in the page (extension host off): grammars and themes are data only.

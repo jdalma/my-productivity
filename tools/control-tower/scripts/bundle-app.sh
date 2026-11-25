@@ -26,6 +26,11 @@ if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     echo "  install them (e.g. brew install node), then rerun. Only the build needs them: the editor runs in the app's web view." >&2
     exit 1
 fi
+# vite 8 needs 22.12 or later (editor-web/package.json engines); an older node fails deep in npm or vite without saying so
+if ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)'; then
+    echo "bundle-app.sh: node $(node -v) is too old for the editor page (editor-web): it needs Node.js 22.12 or later. Update node, then rerun." >&2
+    exit 1
+fi
 (cd editor-web && npm ci --no-audit --no-fund && npm run build)
 swift build -c release --product TowerApp
 app=.build/ControlTower.app

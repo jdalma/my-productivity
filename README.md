@@ -41,7 +41,7 @@
    ```
    bash scripts/statusline/install.sh --yes
    ```
-7. control-tower 빌드 (macOS 14+, Swift). `~/Applications/ControlTower.app`에 설치한다.
+7. control-tower 빌드 (macOS 14+, Swift, Node.js 22.12+와 npm). `~/Applications/ControlTower.app`에 설치한다. 스크립트가 먼저 에디터 페이지(`tools/control-tower/editor-web`)를 `npm ci && npm run build`로 만든다. node가 없거나 22.12 미만이면 그 사실을 말하고 멈춘다.
    ```
    cd tools/control-tower && scripts/bundle-app.sh
    ```

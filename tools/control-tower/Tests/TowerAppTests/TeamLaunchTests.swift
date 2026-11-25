@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 import TowerCore
 @testable import TowerApp
@@ -488,14 +489,40 @@ private final class Stubs {
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(atPath: dir) }
     let bin = "\(dir)/my-team"
-    try "#!/bin/sh\nexec sleep 30\n".write(toFile: bin, atomically: true, encoding: .utf8)
+    try "#!/bin/sh\necho $$ > \"$(dirname \"$0\")/pid\"\nexec sleep 30\n".write(toFile: bin, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin)
     let started = Date()
+    // T44: the stub's death is timed on a thread of its own, as T228 did for FocusRunnerTests. Timing `run`'s throw
+    // also timed the wait for a cooperative thread, which tests run side by side held: 25 to 140 s for a 1 s timeout.
+    let died = OSAllocatedUnfairLock<Date?>(initialState: nil), thrown = OSAllocatedUnfairLock(initialState: false)
+    let watched = DispatchSemaphore(value: 0)
+    Thread {
+        func pid() -> pid_t {
+            (try? String(contentsOfFile: "\(dir)/pid", encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+        }
+        var stub = pid()
+        // `run` throws only once the stub has ended: read once more after that, then stop looking
+        while stub == 0, Date().timeIntervalSince(started) < 40 {
+            let ended = thrown.withLock { $0 }
+            stub = pid()
+            if ended { break }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        while stub != 0, kill(stub, 0) == 0, Date().timeIntervalSince(started) < 40 { Thread.sleep(forTimeInterval: 0.01) }
+        // no pid: it was stopped before its first line ran (a loaded machine), so before any of its 30 s
+        let at = stub != 0 ? Date() : started
+        died.withLock { $0 = at }
+        watched.signal()
+    }.start()
     do {
         try await FocusRunner.run([shutdownTeamArgv(team: "t", myTeam: bin)], timeout: 1, dryRun: nil)
+        thrown.withLock { $0 = true }
         Issue.record("a command past its timeout must fail")
     } catch {
-        #expect(Date().timeIntervalSince(started) < 25)  // well before the stub's own 30 s, with room for a loaded machine
+        thrown.withLock { $0 = true }
+        await withCheckedContinuation { c in Thread { watched.wait(); c.resume() }.start() }
+        let took = died.withLock { $0 }.map { $0.timeIntervalSince(started) } ?? .infinity
+        #expect(took < 25, "the stub died after \(took) s")  // well before the stub's own 30 s, with room for a loaded machine
         // the alert says so; the line's spinner goes (Tower.confirmShutdown calls `failed`) and 팀 종료 is back
         #expect(shutdownFailure(team: "t", error).reason.hasPrefix("1초 안에 끝나지 않아 멈췄습니다.\n"))
     }

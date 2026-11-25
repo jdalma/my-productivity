@@ -34,20 +34,28 @@ import TowerTestSupport
     defer { release() }
     let start = Date()
     let died = OSAllocatedUnfairLock<Date?>(initialState: nil), watched = DispatchSemaphore(value: 0)
+    let returned = OSAllocatedUnfairLock(initialState: false)
     Thread {
         var pid: pid_t = 0
+        // T44: `run` returns only once the child has ended: read once more after that, then stop looking
         while pid == 0, Date().timeIntervalSince(start) < 30 {
+            let ended = returned.withLock { $0 }
             pid = (try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            if ended { break }
             Thread.sleep(forTimeInterval: 0.01)
         }
         while pid != 0, kill(pid, 0) == 0, Date().timeIntervalSince(start) < 30 { Thread.sleep(forTimeInterval: 0.01) }
-        died.withLock { $0 = Date() }
+        // no pid though `run` returned: the child was stopped before its first line ran (a loaded machine: 30 s here
+        // before T44), so the timeout fired
+        let at = pid == 0 && returned.withLock { $0 } ? start : Date()
+        died.withLock { $0 = at }
         release()
         watched.signal()
     }.start()
     await #expect(throws: CommandError.self) {
         try await FocusRunner.run([["/bin/sh", "-c", "echo $$ > \(pidFile); exec /bin/sleep 300"]], timeout: 1, dryRun: nil)
     }
+    returned.withLock { $0 = true }
     await withCheckedContinuation { c in Thread { watched.wait(); c.resume() }.start() }
     let took = died.withLock { $0 }.map { $0.timeIntervalSince(start) } ?? .infinity
     #expect(took < 10, "the child died after \(took) s")

@@ -52,13 +52,20 @@ private func until(_ done: () -> Bool) async throws {
     let files = try #require(state.editor?.files)
     guard case .file(_, let hash) = await files.handle(.readFile(path: work + "/mine.swift")) else { Issue.record("no read"); return }
     _ = await files.setReadOnly(work + "/mine.swift", false)
-    try await Task.sleep(for: .milliseconds(300))  // the watch starts
+    // The setup's writes above are not the app's, and on a loaded machine their events can come after the watch has
+    // started (T45: the cause of the R40a failure, which slept 300 ms for them). Events come in order: once a file
+    // written now is seen, theirs have come too. The save must then add nothing for mine.swift.
+    try "s\n".write(toFile: work + "/sentinel.txt", atomically: true, encoding: .utf8)
+    try await until { state.session?.writes.last[work + "/sentinel.txt"] != nil }
+    let before = state.session?.writes.last[work + "/mine.swift"]
+    let saved = Date()
     guard case .written = await files.handle(.writeFile(path: work + "/mine.swift", text: "saved\n", baseHash: hash)) else {
         Issue.record("not saved"); return
     }
+    // a worker's write after the save: once it is seen, so is the save's event
     try "y\n".write(toFile: work + "/theirs.swift", atomically: true, encoding: .utf8)
-    try await until { state.session?.writes.last[work + "/theirs.swift"] != nil }
-    #expect(state.session?.writes.last[work + "/mine.swift"] == nil)
+    try await until { (state.session?.writes.last[work + "/theirs.swift"]).map { $0 >= saved } == true }
+    #expect(state.session?.writes.last[work + "/mine.swift"] == before)
     state.areaGone()
 }
 

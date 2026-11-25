@@ -59,7 +59,8 @@ test('every --input example is one single-quoted JSON a shell passes as is (R71 
         const text = overlay(w, role, { board: { store: 'sqlite' } });
         const inputs = [...text.matchAll(/--input '([^'\n]*)'/g)].map((m) => m[1]);
         assert.ok(inputs.length >= 5, 'the mailbox and send-message examples');
-        for (const input of inputs) if (input !== '<json>') assert.doesNotThrow(() => JSON.parse(input), input);
+        // '<json>' and '…' stand for an input, they are not one
+        for (const input of inputs) if (input !== '<json>' && input !== '…') assert.doesNotThrow(() => JSON.parse(input), input);
         assert.doesNotMatch(text, /--input "/, 'no double-quoted input to escape');
         assert.doesNotMatch(text, /\\"없음\\"/);
     }
@@ -208,5 +209,14 @@ test('T226: every render forbids creating tmux panes or sessions; a board team\'
         assert.match(mailbox, /"direction: out" is a message you sent, "in" one you received/, name);
         assert.match(mailbox, /no hit, say so\s+in this pane/, name);
         assert.match(mailbox, /`expects_reply: false` is a notice: act on it, no reply/, name);
+    }
+});
+
+test('T46, T47 (R44 L1, R46 S1): every overlay says how to write a quote inside a single-quoted --input, by closing and reopening the quote only', () => {
+    const board = { board: { store: 'sqlite' } };
+    for (const text of [overlay('pm', 'orchestrator', board), overlay('dev', 'worker', board), overlay('solo', null, board),
+        overlay('pm', 'orchestrator'), overlay('dev', 'worker'), overlay('solo', null)]) {
+        assert.match(text, /--input '[^\n]*single-quoted[^\n]*as `'\\''`\./);
+        assert.doesNotMatch(text, /\\u0027/, 'R46 S1: an escape a tool layer may turn into a quote');
     }
 });

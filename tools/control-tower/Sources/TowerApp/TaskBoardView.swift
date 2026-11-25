@@ -408,8 +408,6 @@ struct TaskBoardView: View {
     @State private var documentNotice: String?
     @AppStorage(fileEditorKey) private var storedEditor = ""
     @State private var listHeight: CGFloat = 0
-    /// The window's read-only editor and tree beside a task's detail (G4 I6, D#8 b).
-    @State private var ide = IdeState(lockable: false)
     @Environment(\.undoManager) private var undoManager
     @Environment(\.boardFontScale) private var scale
 
@@ -673,25 +671,15 @@ struct TaskBoardView: View {
         } else if let decision {
             DecisionDetailView(decision: decision, tasks: s.tasks, team: team, now: now, pick: pick)
         } else if let line {
-            let shownFamily = family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil
-            TaskCodeSplit(state: ide, source: codeSource(line.task, family: shownFamily), at: "\(now.timeIntervalSince1970)") {
-                TaskDetailView(team: team, line: line, family: shownFamily,
-                               decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
-                               now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
-                               goalLinks: goalLinks(of: line.task.id, in: goals),
-                               boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-                               showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
-            }
+            TaskDetailView(team: team, line: line, family: family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil,
+                           decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
+                           now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
+                           goalLinks: goalLinks(of: line.task.id, in: goals),
+                           boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                           showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
         } else {
             overview(s, now: now)
         }
-    }
-
-    /// Where the task's code is read (D#6 a): its worker's worktree, or its last landing's commit.
-    private func codeSource(_ t: TaskBoardTask, family: TaskFamilyState?) -> TaskCodeSource? {
-        let detail = family?.family.flatMap { taskDetail($0, task: t.id) }
-        return taskCodeSource(state: detail?.task.state ?? t.state, workerCwd: workerRow(t.assignee)?.session.cwd,
-                              taskBase: t.baseCommit, landings: detail?.submissions.map(\.landing) ?? [])
     }
 
     /// The detail's 목표 line (design §4): the 순서 view, the task's card scrolled into view. Narrow, the detail has the
@@ -1075,45 +1063,5 @@ struct TaskBoardSplit<List: View, Detail: View>: NSViewRepresentable {
             place = nil
             p()
         }
-    }
-}
-
-/// A task's detail and its code (G4 I6): side by side where both fit, else a 상세 | 코드 switch in the detail's place.
-/// Text documents the detail names open in the code's read-only editor.
-private struct TaskCodeSplit<Detail: View>: View {
-    @Bindable var state: IdeState
-    let source: TaskCodeSource?
-    let at: String
-    @ViewBuilder let detail: Detail
-    /// The detail's and the code's least widths, side by side.
-    private static var detailWidth: CGFloat { 360 }
-    private static var codeWidth: CGFloat { 420 }
-
-    var body: some View {
-        GeometryReader { geo in
-            if geo.size.width >= Self.detailWidth + Self.codeWidth {
-                HSplitView {
-                    detail.frame(minWidth: Self.detailWidth, maxHeight: .infinity)
-                    code.frame(minWidth: Self.codeWidth, maxHeight: .infinity)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    Picker("보기", selection: $state.codeShown) {
-                        Text("상세").tag(false)
-                        Text("코드").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .padding(.horizontal, 16).padding(.vertical, 6)
-                    Divider()
-                    if state.codeShown { code } else { detail }
-                }
-            }
-        }
-        .environment(\.openInIde) { state.openDocument($0) }
-    }
-
-    private var code: some View {
-        IdeArea(source: source, at: at, state: state).padding(8)
     }
 }

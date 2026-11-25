@@ -65,7 +65,7 @@ struct BoardView: View {
         }
         .background {
             FontScaleAlias(stored: $storedScale)
-            // ⌘K, the menu's ⌘F under another key: it also leaves a pane terminal, which keeps ⌘F
+            // ⌘K, the menu's ⌘F under another key
             Button("검색") { searchFocus += 1 }
                 .keyboardShortcut("k")
                 .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
@@ -74,7 +74,7 @@ struct BoardView: View {
             // nil where there is nowhere to go, so the menu items are off as the toolbar's are (R3 L1)
             back: WindowNavigation.step(nav.canGoBack) { nav.back() },
             forward: WindowNavigation.step(nav.canGoForward) { nav.forward() },
-            search: { if PaneTerminalView.focused() == nil { searchFocus += 1 } },
+            search: { searchFocus += 1 },
             reload: {
                 tower.reloadTaskBoards()
                 if nav.current.row == .dashboard { Task { await tower.usage.refresh() } }
@@ -731,7 +731,7 @@ private struct DetailView: View {
             ],
             workspace: s.cwd,
             conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)],
-            terminal: s.tmux,
+            ide: s.tmux != nil,
             tasks: workerTaskLine(row, team: team))
     }
 
@@ -747,11 +747,10 @@ private struct DetailView: View {
             ],
             workspace: h.workspace,
             conversation: [("최근 프롬프트", h.lastPrompt ?? "")],
-            terminal: nil,
+            ide: false,
             tasks: nil)
     }
 
-    /// `terminal`: the tmux pane a live session runs in, shown in place of the recent conversation.
     /// The worker's unfinished tasks on its team's board (design §1, pm decision 6); nil without a board or a read.
     private func workerTaskLine(_ row: LiveRow, team: Team?) -> WorkerTaskLine? {
         guard let team, team.hasTaskBoard, let name = row.worker?.workerName,
@@ -759,10 +758,11 @@ private struct DetailView: View {
         return WorkerTaskLine(team: team.name, tasks: workerTasks(name, in: status))
     }
 
-    /// A live session's detail is its head over its terminal, which fills the rest; a session without one scrolls.
+    /// `ide`: a session in a tmux pane has its head over the IDE area, which fills the rest; another scrolls, its
+    /// recent conversation under the head.
     private func detailBody(title: String, @ViewBuilder badges: () -> some View,
                             facts: [(String, String)], workspace: String, conversation: [(String, String)],
-                            terminal: TmuxRef?, tasks: WorkerTaskLine?) -> some View {
+                            ide: Bool, tasks: WorkerTaskLine?) -> some View {
         let head = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(title).scaledFont(.title2, weight: .bold).lineLimit(1)
@@ -783,10 +783,10 @@ private struct DetailView: View {
             DetailInfoView(facts: facts.filter { !$0.1.isEmpty })
         }
         return Group {
-            if let terminal {
+            if ide {
                 VStack(alignment: .leading, spacing: 12) {
                     head
-                    IdeArea(source: .worktree(workspace), terminal: terminal, at: board.at, state: ide)
+                    IdeArea(root: workspace, at: board.at, state: self.ide)
                         .frame(maxHeight: .infinity)
                 }
                 .padding(16)

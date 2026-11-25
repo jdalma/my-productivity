@@ -6,11 +6,10 @@ import TowerCore
 // banner for a disk change under an edit, the tabs, and where an editor with edits that are not saved waits while no
 // window shows it.
 
-/// One editor: the page and, for a worktree, its files' state and the watch on it. Without a worktree (a commit's
-/// files, documents) it shows only what Swift read itself, read-only.
+/// One worktree's editor: the page, its files' state and the watch on the worktree.
 @MainActor @Observable
 final class IdeSession {
-    let root: String?
+    let root: String
     let editor: EditorController?
     @ObservationIgnored private var watch: FileWatch?
     private(set) var buffers = EditorBuffers()
@@ -19,14 +18,11 @@ final class IdeSession {
     var comparing: FileDiff?
     /// Making, renaming and trashing from the tree: locked until the user unlocks it for this worktree (D#5 b).
     private(set) var fileOpsLocked = true
-    /// The path of a file Swift read itself and the page shows (`show`), in place of the shown buffer; nil when a
-    /// buffer shows.
-    private(set) var outside: String?
 
-    init(root: String?) {
+    init(root: String) {
         self.root = root
-        editor = editorPageFolder.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
-        guard let editor, let root else { return }
+        editor = editorPageFolder.map { EditorController(roots: [root], page: $0) }
+        guard let editor else { return }
         editor.onDirty = { [weak self] path, dirty in
             guard let self else { return }
             let effect = buffers.setDirty(path, dirty)
@@ -46,24 +42,14 @@ final class IdeSession {
         guard let editor else { return }
         if let opened = await editor.open(path, line: line) {
             buffers.open(opened.path, hash: opened.hash, readOnly: opened.readOnly)
-            outside = nil
             status = ""
         } else {
             status = "열 수 없음"
         }
     }
 
-    /// Shows a file Swift read itself (a commit's, a document), always read-only and no buffer of this editor's.
-    func show(_ command: EditorCommand?) async {
-        guard let editor else { return }
-        guard let command, case .openFile(let path, _, _, _, _) = command else { return status = "열 수 없음" }
-        await editor.show(command)
-        outside = path
-        status = ""
-    }
-
     func toggleLock() async {
-        guard let editor, outside == nil, let shown = buffers.shown, let f = buffers.files[shown] else { return }
+        guard let editor, let shown = buffers.shown, let f = buffers.files[shown] else { return }
         buffers.setReadOnly(shown, !f.readOnly)
         await editor.setReadOnly(shown, !f.readOnly)
     }
@@ -185,8 +171,7 @@ final class IdeSession {
     /// The page's process ended: its buffers are gone, the edits in them too. The shown file opens again from disk.
     private func restarted() {
         let lost = buffers.unsaved.count
-        // a file Swift read itself is shown again by the controller
-        let was = outside == nil ? buffers.shown : nil
+        let was = buffers.shown
         buffers = EditorBuffers()
         Task {
             if let was { await open(was) }
@@ -222,7 +207,7 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
 /// when its area stops showing it (another worktree's row, the window closed), and shown again with the next area
 /// for that worktree (R24 S1). One without such edits is dropped as before.
 @MainActor enum IdeParking {
-    private static var parked: [String: IdeSession] = [:]   // only the board window's area parks: one per worktree (R28 L1)
+    private static var parked: [String: IdeSession] = [:]
     private static let all = NSHashTable<IdeSession>.weakObjects()
 
     /// The waiting editor of `root`, or a new one.
@@ -235,8 +220,8 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
 
     /// The area stopped showing `session`: true when it waits here, and the area must let go of it.
     static func park(_ session: IdeSession) -> Bool {
-        guard let root = session.root, !session.buffers.unsaved.isEmpty else { return false }
-        parked[root] = session
+        guard !session.buffers.unsaved.isEmpty else { return false }
+        parked[session.root] = session
         return true
     }
 

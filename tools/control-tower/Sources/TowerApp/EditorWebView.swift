@@ -50,10 +50,8 @@ final class EditorPageView: WKWebView {
     let web: EditorPageView
     private var ready = false
     private var waiting: [EditorCommand] = []
-    /// The file the page shows, opened again when the page has to load again: one read from the roots by its path,
-    /// or one Swift read itself (a commit's, a document) by the command that showed it.
-    private enum Shown { case file(path: String, line: Int?), command(EditorCommand) }
-    private var shown: Shown?
+    /// The file the page shows, opened again when the page has to load again.
+    private var shown: (path: String, line: Int?)?
     /// What the page last said of each file it shows.
     var onDirty: ((String, Bool) -> Void)?
     /// The answer to each save the page asked for (its ⌘S and the save command alike), by the file's path.
@@ -85,15 +83,9 @@ final class EditorPageView: WKWebView {
     /// is outside the roots or not a text file.
     func open(_ path: String, line: Int? = nil) async -> (path: String, hash: String, readOnly: Bool)? {
         guard let command = await files.open(path, line: line), case .openFile(let real, _, let hash, _, let readOnly) = command else { return nil }
-        shown = .file(path: real, line: line)
+        shown = (real, line)
         await send(command)
         return (real, hash, readOnly)
-    }
-
-    /// Shows a file Swift read outside the roots (`commitOpen`, `readOnlyOpen`): read-only, never saved.
-    func show(_ command: EditorCommand) async {
-        shown = .command(command)
-        await send(command)
     }
 
     /// The page's process ended (a crash, memory pressure): its buffers are gone. Load it again, open the shown file
@@ -104,13 +96,9 @@ final class EditorPageView: WKWebView {
         waiting = []
         loadPage()
         onRestart?()
-        switch shown {
-        case .file(let path, let line)?:
-            onDirty?(path, false)
-            Task { _ = await open(path, line: line) }
-        case .command(let command)?: Task { await show(command) }
-        case nil: break
-        }
+        guard let shown else { return }
+        onDirty?(shown.path, false)
+        Task { _ = await open(shown.path, line: shown.line) }
     }
 
     func setReadOnly(_ path: String, _ readOnly: Bool) async {

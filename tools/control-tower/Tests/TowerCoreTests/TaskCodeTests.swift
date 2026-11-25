@@ -2,39 +2,7 @@ import Foundation
 import Testing
 @testable import TowerCore
 
-// The task board's code (G4 I6): where a task's code is read, the files of a commit, and what the page gets to show
-// a file read-only.
-
-private func landings(_ json: String) throws -> [TaskBoardLanding] {
-    let d = JSONDecoder()
-    d.keyDecodingStrategy = .convertFromSnakeCase
-    return try d.decode([TaskBoardLanding].self, from: Data(json.utf8))
-}
-
-private let two = """
-[{"id":"T5#1","task_id":"T5","repo":"/w/dev","commit":"1111111","base_commit":"0000000","commits":["1111111"]},
- {"id":"T5#2","task_id":"T5","repo":"/w/dev","commit":"2222222","base_commit":"1111111","commits":["2222222"]}]
-"""
-
-@Test func anUnfinishedTaskWithARunningWorkerIsReadInItsWorktree() throws {
-    #expect(taskCodeSource(state: "doing", workerCwd: "/w/dev", taskBase: "0000000", landings: try landings(two)) == .worktree("/w/dev"))
-    #expect(taskCodeSource(state: "changes", workerCwd: "/w/dev", taskBase: nil, landings: []) == .worktree("/w/dev"))
-}
-
-@Test func aDoneTaskIsReadAtItsLastLandingFromTheTasksBase() throws {
-    // the worktree serves the worker's next task now: the landing's commit, its changes from the task's base
-    #expect(taskCodeSource(state: "done", workerCwd: "/w/dev", taskBase: "0000000", landings: try landings(two))
-            == .commit(repo: "/w/dev", base: "0000000", commit: "2222222"))
-    // no task base: the landing's own
-    #expect(taskCodeSource(state: "review", workerCwd: nil, taskBase: nil, landings: try landings(two))
-            == .commit(repo: "/w/dev", base: "1111111", commit: "2222222"))
-}
-
-@Test func aTaskWithNeitherHasNoCode() throws {
-    let document = try landings(#"[{"id":"T9#1","task_id":"T9","repo":"","commit":"","base_commit":"","commits":[]}]"#)
-    #expect(taskCodeSource(state: "done", workerCwd: "/w/dev", taskBase: nil, landings: document) == nil)
-    #expect(taskCodeSource(state: "ready", workerCwd: nil, taskBase: nil, landings: []) == nil)
-}
+// What a task board link shows read-only (G4 I12, D#17): a file at a commit, a file on disk, at a line.
 
 private func git(_ dir: String, _ args: String...) throws {
     let r = try runCommand(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", dir] + args, timeout: 30,
@@ -57,14 +25,6 @@ private func repo() throws -> (dir: String, first: String) {
     return (top, first)
 }
 
-@Test func aCommitsFilesAreItsTreeNotTheWorkTree() throws {
-    let (dir, first) = try repo()
-    try "new\n".write(toFile: dir + "/untracked.txt", atomically: true, encoding: .utf8)
-    #expect(filesAt(dir: dir, rev: first) == ["README.md", "src/a.swift"])
-    #expect(filesAt(dir: dir, rev: "no-such-rev") == nil)
-    #expect(filesAt(dir: dir, rev: "--output=/tmp/x") == nil)  // a revision is never an option
-}
-
 @Test func aFileAtACommitOpensReadOnlyWithItsTextThen() throws {
     let (dir, first) = try repo()
     #expect(commitOpen(dir: dir, rev: first, path: "src/a.swift")
@@ -82,7 +42,7 @@ private func repo() throws -> (dir: String, first: String) {
     let binary = dir + "/b.bin"
     try Data([0, 1, 2]).write(to: URL(fileURLWithPath: binary))
     #expect(readOnlyOpen(binary) == nil)
-    // the task board's editor has no root: whatever the page sends back is refused
+    // outside every root: whatever the page sends back is refused
     let files = EditorFiles(roots: [])
     #expect(await files.handle(.writeFile(path: doc, text: "x", baseHash: sha256(Data("two\n".utf8)))) == .refused(.outside))
 }

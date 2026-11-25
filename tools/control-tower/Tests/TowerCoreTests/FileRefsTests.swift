@@ -190,3 +190,16 @@ private struct Disk {
     ])
     #expect(editorMarkers(for: "/w/c.swift", marks: marks).isEmpty)
 }
+
+// MARK: - D#17: a done task's place is read at the commit its landing was reviewed at
+
+@Test func aDoneTasksFileUnderTheRepoOpensAtTheLandingsCommit() {
+    #expect(atCommit(.file(path: "/w/r/lib/a.swift", line: 2), repo: "/w/r", commit: "abc1234")
+            == .commit(repo: "/w/r", commit: "abc1234", path: "lib/a.swift", line: 2))
+    // outside the repo (the worker's folder, ~/), no commit, or a commit place already: as it was
+    #expect(atCommit(.file(path: "/w/other/a.swift", line: 2), repo: "/w/r", commit: "abc1234") == .file(path: "/w/other/a.swift", line: 2))
+    #expect(atCommit(.file(path: "/w/r/a.swift", line: 2), repo: "/w/r", commit: "") == .file(path: "/w/r/a.swift", line: 2))
+    #expect(atCommit(.file(path: "/w/r/a.swift", line: 2), repo: nil, commit: "abc1234") == .file(path: "/w/r/a.swift", line: 2))
+    let at = FileTarget.commit(repo: "/w/r", commit: "1111111", path: "a.swift", line: 1)
+    #expect(atCommit(at, repo: "/w/r", commit: "abc1234") == at)
+}

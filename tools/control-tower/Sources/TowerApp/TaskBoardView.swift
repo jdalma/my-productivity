@@ -365,6 +365,8 @@ struct TaskBoardView: View {
     let family: TaskFamilyState?
     let pick: (String?) -> Void
     let select: (RowID) -> Void
+    /// A link's file for the board window's editor of that row's worktree (D#17).
+    let openInBoard: (IdeOpenRequest, RowID) -> Void
     let reload: () -> Void
     /// The window's menu actions, published again inside the split's sides.
     var navigation: WindowNavigation?
@@ -408,8 +410,8 @@ struct TaskBoardView: View {
     @State private var documentNotice: String?
     @AppStorage(fileEditorKey) private var storedEditor = ""
     @State private var listHeight: CGFloat = 0
-    /// The window's read-only editor and tree beside a task's detail (G4 I6, D#8 b).
-    @State private var ide = IdeState(lockable: false)
+    /// The open findings' places of the task shown, for the markers a link's file gets in the board window (G4 W5).
+    @State private var linkMarks: [FindingMark] = []
     @Environment(\.undoManager) private var undoManager
     @Environment(\.boardFontScale) private var scale
 
@@ -674,28 +676,28 @@ struct TaskBoardView: View {
             DecisionDetailView(decision: decision, tasks: s.tasks, team: team, now: now, pick: pick)
         } else if let line {
             let shownFamily = family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil
-            TaskCodeSplit(state: ide, source: codeSource(line.task, family: shownFamily), at: "\(now.timeIntervalSince1970)",
-                          findings: findingPlaces(line.task, family: shownFamily), workerCwd: workerRow(line.task.assignee)?.session.cwd) {
-                TaskDetailView(team: team, line: line, family: shownFamily,
-                               decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
-                               now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
-                               goalLinks: goalLinks(of: line.task.id, in: goals),
-                               boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-                               showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
-            }
+            // the board window has an editor for a worker in a tmux pane: links open there, else they stay text (D#17)
+            let row = workerRow(line.task.assignee).flatMap { $0.session.tmux == nil ? nil : $0 }
+            let places = findingPlaces(line.task, family: shownFamily)
+            TaskDetailView(team: team, line: line, family: shownFamily,
+                           decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
+                           now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
+                           goalLinks: goalLinks(of: line.task.id, in: goals),
+                           boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                           showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
+                .environment(\.openTargetInIde, row.map { row in
+                    { target in openInBoard(IdeOpenRequest(root: row.session.cwd, target: target, marks: linkMarks), row.id) }
+                })
+                // the markers' places run git: off the main actor, again when the findings or the worker's folder change
+                .task(id: places.map(\.id) + [row?.session.cwd ?? ""]) { [cwd = row?.session.cwd] in
+                    linkMarks = await Task.detached { findingMarks(places, workerCwd: cwd) }.value
+                }
         } else {
             overview(s, now: now)
         }
     }
 
-    /// Where the task's code is read (D#6 a): its worker's worktree, or its last landing's commit.
-    private func codeSource(_ t: TaskBoardTask, family: TaskFamilyState?) -> TaskCodeSource? {
-        let detail = family?.family.flatMap { taskDetail($0, task: t.id) }
-        return taskCodeSource(state: detail?.task.state ?? t.state, workerCwd: workerRow(t.assignee)?.session.cwd,
-                              taskBase: t.baseCommit, landings: detail?.submissions.map(\.landing) ?? [])
-    }
-
-    /// The task's open findings and the landings they were raised on: the editor's markers (G4 W5).
+    /// The task's open findings and the landings they were raised on: the board editor's markers (G4 W5).
     private func findingPlaces(_ t: TaskBoardTask, family: TaskFamilyState?) -> [FindingPlace] {
         guard let d = family?.family.flatMap({ taskDetail($0, task: t.id) }) else { return [] }
         return d.findings.filter { $0.pile == .open }.map { f in
@@ -1086,52 +1088,5 @@ struct TaskBoardSplit<List: View, Detail: View>: NSViewRepresentable {
             place = nil
             p()
         }
-    }
-}
-
-/// A task's detail and its code (G4 I6): side by side where both fit, else a 상세 | 코드 switch in the detail's place.
-/// Text documents the detail names open in the code's read-only editor.
-struct TaskCodeSplit<Detail: View>: View {
-    @Bindable var state: IdeState
-    let source: TaskCodeSource?
-    let at: String
-    var findings: [FindingPlace] = []
-    var workerCwd: String?
-    @ViewBuilder let detail: Detail
-    /// The detail's and the code's least widths, side by side.
-    private static var detailWidth: CGFloat { 360 }
-    private static var codeWidth: CGFloat { 420 }
-
-    var body: some View {
-        GeometryReader { geo in
-            if geo.size.width >= Self.detailWidth + Self.codeWidth {
-                HSplitView {
-                    detail.frame(minWidth: Self.detailWidth, maxHeight: .infinity)
-                    code.frame(minWidth: Self.codeWidth, maxHeight: .infinity)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    Picker("보기", selection: $state.codeShown) {
-                        Text("상세").tag(false)
-                        Text("코드").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .padding(.horizontal, 16).padding(.vertical, 6)
-                    Divider()
-                    if state.codeShown { code } else { detail }
-                }
-            }
-        }
-        .environment(\.openInIde) { [source] path in Task { await state.openDocument(path, in: source) } }
-        .environment(\.openTargetInIde) { [source] target in Task { await state.openTarget(target, in: source) } }
-        // the markers' places run git: off the main actor, again when the findings or the worker's folder change
-        .task(id: findings.map(\.id) + [workerCwd ?? ""]) { [findings, workerCwd] in
-            state.findingMarks = await Task.detached { findingMarks(findings, workerCwd: workerCwd) }.value
-        }
-    }
-
-    private var code: some View {
-        IdeArea(source: source, at: at, state: state).padding(8)
     }
 }

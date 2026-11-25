@@ -71,15 +71,3 @@ import TowerCore
     #expect(Set(all.map(fileOpRefusalText)).count == all.count)
     #expect(fileOpRefusalText(.locked) == "파일 작업이 잠겨 있음")
 }
-
-/// The task board window's area reads only: no file operation runs from it.
-@MainActor @Test func theReadOnlyWindowsAreaRunsNoFileOperation() async throws {
-    let dir = FileManager.default.temporaryDirectory.appending(path: "ct-ide-readonly-\(UUID().uuidString)").path
-    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(atPath: dir) }
-    let state = IdeState(lockable: false)
-    state.show(root: dir)
-    await state.session?.toggleFileOps()
-    await state.fileOp(.newFile(dir + "/x.txt"))
-    #expect(!FileManager.default.fileExists(atPath: dir + "/x.txt"))
-}

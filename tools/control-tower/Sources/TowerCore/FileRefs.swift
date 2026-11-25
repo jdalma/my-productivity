@@ -126,6 +126,13 @@ public func fileTarget(_ ref: FileRef, repo: String?, workerCwd: String?, home: 
     return named.count == 1 ? .file(path: named[0], line: ref.lineStart) : nil
 }
 
+/// `t` as a done task's landing holds it (D#17): a file under the landing's repo read at `commit`, not as the worktree
+/// has it now (the worker went on to other tasks). Anything else stays.
+public func atCommit(_ t: FileTarget, repo: String?, commit: String?) -> FileTarget {
+    guard case .file(let path, let line) = t, let repo, let commit, !commit.isEmpty, path.hasPrefix(repo + "/") else { return t }
+    return .commit(repo: repo, commit: commit, path: String(path.dropFirst(repo.count + 1)), line: line)
+}
+
 /// A regular file (links followed).
 public func isRegularFile(_ path: String) -> Bool {
     var folder: ObjCBool = false

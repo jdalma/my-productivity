@@ -51,7 +51,7 @@ final class EditorPageView: WKWebView {
     private var ready = false
     private(set) var waiting: [EditorCommand] = []
     /// The file the page shows, opened again when the page has to load again: one read from the roots by its path,
-    /// or one Swift read itself (a commit's, a document) by the command that showed it.
+    /// or one Swift read itself (a task board link's, D#17) by the command that showed it.
     private enum Shown { case file(path: String, line: Int?), command(EditorCommand) }
     private var shown: Shown?
     /// What the page last said of each file it shows.
@@ -90,7 +90,7 @@ final class EditorPageView: WKWebView {
         return (real, hash, readOnly)
     }
 
-    /// Shows a file Swift read outside the roots (`commitOpen`, `readOnlyOpen`): read-only, never saved.
+    /// Shows a file Swift read outside `EditorFiles` (`targetOpen`): read-only, never saved.
     func show(_ command: EditorCommand) async {
         shown = .command(command)
         await send(command)

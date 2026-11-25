@@ -646,11 +646,13 @@ private struct TaskDetailBody: View {
         }
     }
 
-    /// Where a text of the landing `landingId` places a file:line: its repo, then the worker's folder (G4 I12).
+    /// Where a text of the landing `landingId` places a file:line: its repo, then the worker's folder (G4 I12). A done
+    /// task's file under the repo is read at that landing's commit (D#17).
     private func refs(_ landingId: String?, _ d: TaskDetail) -> (FileRef) -> FileTarget? {
-        let repo = landingId.flatMap { id in d.cards.first { $0.landing.id == id }?.landing.repo }
+        let landing = landingId.flatMap { id in d.cards.first { $0.landing.id == id }?.landing }
         let cwd = workerRow(d.task.assignee)?.session.cwd
-        return { refTargetNow($0, repo: repo, workerCwd: cwd) }
+        let commit = ["done", "cancelled"].contains(d.task.state) ? landing?.commit : nil
+        return { refTargetNow($0, repo: landing?.repo, workerCwd: cwd).map { atCommit($0, repo: landing?.repo, commit: commit) } }
     }
 
     private func findingRow(_ f: DetailFinding, _ d: TaskDetail) -> some View {

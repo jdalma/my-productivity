@@ -6,11 +6,10 @@ import TowerCore
 // banner for a disk change under an edit, the tabs, and where an editor with edits that are not saved waits while no
 // window shows it.
 
-/// One editor: the page and, for a worktree, its files' state and the watch on it. Without a worktree (a commit's
-/// files, documents) it shows only what Swift read itself, read-only.
+/// One worktree's editor: the page, its files' state and the watch on the worktree.
 @MainActor @Observable
 final class IdeSession {
-    let root: String?
+    let root: String
     let editor: EditorController?
     @ObservationIgnored private var watch: FileWatch?
     private(set) var buffers = EditorBuffers()
@@ -19,14 +18,14 @@ final class IdeSession {
     var comparing: FileDiff?
     /// Making, renaming and trashing from the tree: locked until the user unlocks it for this worktree (D#5 b).
     private(set) var fileOpsLocked = true
-    /// The path of a file Swift read itself and the page shows (`show`), in place of the shown buffer; nil when a
-    /// buffer shows.
+    /// The path of a file Swift read itself and the page shows (`show`: a task board link's, D#17), in place of the
+    /// shown buffer; nil when a buffer shows. Never unlocked: it is no file of the editor's.
     private(set) var outside: String?
 
-    init(root: String?, page: URL? = editorPageFolder) {
+    init(root: String, page: URL? = editorPageFolder) {
         self.root = root
-        editor = page.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
-        guard let editor, let root else { return }
+        editor = page.map { EditorController(roots: [root], page: $0) }
+        guard let editor else { return }
         editor.onDirty = { [weak self] path, dirty in
             guard let self else { return }
             let effect = buffers.setDirty(path, dirty)
@@ -53,7 +52,7 @@ final class IdeSession {
         }
     }
 
-    /// Shows a file Swift read itself (a commit's, a document), always read-only and no buffer of this editor's.
+    /// Shows a file Swift read itself (a task board link's, D#17): read-only, no buffer of this editor's.
     func show(_ command: EditorCommand?) async {
         guard let editor else { return }
         guard let command, case .openFile(let path, _, _, _, _) = command else { return status = "열 수 없음" }
@@ -222,7 +221,7 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
 /// when its area stops showing it (another worktree's row, the window closed), and shown again with the next area
 /// for that worktree (R24 S1). One without such edits is dropped as before.
 @MainActor enum IdeParking {
-    private static var parked: [String: IdeSession] = [:]   // only the board window's area parks: one per worktree (R28 L1)
+    private static var parked: [String: IdeSession] = [:]
     private static let all = NSHashTable<IdeSession>.weakObjects()
 
     /// The waiting editor of `root`, or a new one.
@@ -235,8 +234,8 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
 
     /// The area stopped showing `session`: true when it waits here, and the area must let go of it.
     static func park(_ session: IdeSession) -> Bool {
-        guard let root = session.root, !session.buffers.unsaved.isEmpty else { return false }
-        parked[root] = session
+        guard !session.buffers.unsaved.isEmpty else { return false }
+        parked[session.root] = session
         return true
     }
 

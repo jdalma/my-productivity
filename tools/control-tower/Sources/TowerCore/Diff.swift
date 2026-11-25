@@ -21,9 +21,24 @@ enum GitRead: String, CaseIterable {
 /// `-C dir` with the argument list as argv elements, never a shell. `--no-optional-locks` keeps
 /// a status-like read from taking the index lock; `core.quotepath=off` (set through the environment,
 /// so argv has no config flag) keeps paths unescaped.
-func git(_ cmd: GitRead, _ args: [String], in dir: String) throws -> CommandResult {
+func git(_ cmd: GitRead, _ args: [String], in dir: String, input: Data? = nil) throws -> CommandResult {
     try runCommand(["git", "--no-optional-locks", "-C", dir, cmd.rawValue] + args,
-                   timeout: 20, env: ["GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.quotepath", "GIT_CONFIG_VALUE_0": "off"])
+                   timeout: 20, env: ["GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.quotepath", "GIT_CONFIG_VALUE_0": "off"],
+                   input: input)
+}
+
+/// The file at `path` on disk against `text`, an editor's buffer that is not saved (G4 I7, the banner's 비교): the
+/// disk's lines removed, the buffer's added. `git diff --no-index` reads the text from its standard input and writes
+/// nothing. No lines when the two are the same; nil when git fails.
+public func bufferDiff(path: String, text: String) -> FileDiff? {
+    let url = URL(fileURLWithPath: path)
+    let name = url.lastPathComponent
+    // 0: the same, 1: they differ
+    guard let r = try? git(.diff, ["--no-index", "--no-color", "--", name, "-"], in: url.deletingLastPathComponent().path, input: Data(text.utf8)),
+          r.status == 0 || r.status == 1 else { return nil }
+    var file = parseUnifiedDiff(r.stdout).first ?? FileDiff(path: name, added: 0, removed: 0, binary: false, lines: [])
+    file.path = name
+    return file
 }
 
 /// Stdout of a successful run; nil when git is missing or exits non-zero.

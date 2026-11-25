@@ -4,26 +4,21 @@ import TowerCore
 
 // The IDE area (G4 I5, plan K4; I6, K5): the editor with the code's folder tree on its right, in the board window
 // the session's terminal under both, the whole width. The editor's files are the worktree's only (D#6 a), read-only
-// until unlocked (D#5 b), and each window's own (D#8 b). The task board window's are read-only, never unlocked.
+// until unlocked (D#5 b), and each window's own (D#8 b) while it shows them. The task board window's are read-only,
+// never unlocked.
 
-/// One window's editor, its folder tree and the watch on its worktree. Kept across the detail's redraws and rows;
-/// made again when another code source shows.
-// ponytail: one editor per window, its buffers lost on a switch of worktree; keep one per worktree if switching back and forth costs too much
+/// One window's IDE area: the code it shows, that code's editor (IdeBuffers.swift) and its folder tree. Kept across
+/// the detail's redraws and rows. Another source shows another editor; the board window's editor waits in
+/// `IdeParking` while it holds edits that are not saved, and is dropped otherwise.
 @MainActor @Observable
 final class IdeState {
     /// Whether a file can be unlocked for editing: the board window's; the task board window's never (D#8 b).
     let lockable: Bool
     private(set) var source: TaskCodeSource?
     @ObservationIgnored private var started = false
-    private(set) var editor: EditorController?
-    @ObservationIgnored private var watch: FileWatch?
+    private(set) var session: IdeSession?
     /// The tree's diff and file list, read as the diff window reads them.
     let changes = ChangesState()
-    /// The real path of the file the editor shows.
-    private(set) var shown: String?
-    private(set) var readOnly = true
-    private(set) var dirty: Set<String> = []
-    private(set) var status = ""
     /// A commit source's tree: its mode, and its lines; nil lines when git could not read them.
     var commitMode = TreeMode.changed
     private(set) var commitTree: (mode: TreeMode, nodes: [ChangeTreeNode]?)?
@@ -38,46 +33,46 @@ final class IdeState {
         self.page = page
     }
 
+    var editor: EditorController? { session?.editor }
+    var buffers: EditorBuffers { session?.buffers ?? EditorBuffers() }
+    /// The real path of the file the editor shows: a worktree's file, or one Swift read itself (a commit's, a document).
+    var shown: String? { session?.outside ?? buffers.shown }
+    var readOnly: Bool { session?.outside != nil ? true : shown.flatMap { buffers.files[$0]?.readOnly } ?? true }
+    var status: String { session?.status ?? "" }
+
     /// The worktree the editor reads and may save in; nil for a commit or no source.
     var root: String? { if case .worktree(let r) = source { r } else { nil } }
 
     func show(root: String) { show(.worktree(root)) }
 
-    /// Shows `source`'s files; another source drops the editor's files, its tree and its watch. With no source the
-    /// editor still shows documents (`openDocument`).
+    /// Shows `source`'s files: a worktree's waiting editor, edits and all (the board window), or a new one. With no
+    /// source the editor still shows documents (`openDocument`).
     func show(_ source: TaskCodeSource?) {
         guard !started || source != self.source else { return }
         started = true
+        if lockable, let session { _ = IdeParking.park(session) }
         self.source = source
-        shown = nil
-        readOnly = true
-        dirty = []
-        status = ""
         commitTree = nil
-        watch = nil
-        let root = root
         if let root { changes.select(workspace: root) }
-        editor = page.map { EditorController(roots: root.map { [$0] } ?? [], page: $0) }
+        // A window that never unlocks takes no waiting editor: its files may be unlocked and edited (D#8 b).
+        session = if lockable, let root { IdeParking.session(for: root, page: page) } else { IdeSession(root: root, page: page) }
         if let waiting, waiting.source == source {
             self.waiting = nil
             Task { await openRead(waiting.read, in: source) }
         }
-        guard let editor, let root else { return }
-        editor.onDirty = { [weak self] path, dirty in
-            if dirty { self?.dirty.insert(path) } else { self?.dirty.remove(path) }
-        }
-        let files = editor.files
-        // a clean buffer takes what a worker wrote; a dirty one keeps the user's edit (its banner is I7's)
-        watch = FileWatch(root: root) { [weak editor] batch in
-            Task { @MainActor in
-                for command in await files.diskChanged(batch, root: root) { await editor?.send(command) }
-            }
-        }
+    }
+
+    /// The area left the window (a row with no terminal, the window closed): an editor with edits that are not saved
+    /// waits for the next area of its worktree; one without stays here, as before.
+    func areaGone() {
+        guard lockable, let session, IdeParking.park(session) else { return }
+        self.session = nil
+        started = false
     }
 
     /// A tree line picked: a file opens in the editor, a folder does nothing. A commit's file is read from git.
     func pick(_ line: TreeLine) {
-        guard !line.isFolder else { return }
+        guard !line.isFolder, session != nil else { return }
         switch source {
         case .worktree(let root)?:
             guard let top = changes.diff(for: root)?.toplevel else { return }
@@ -87,6 +82,14 @@ final class IdeState {
             Task { await show(await Task.detached { commitOpen(dir: repo, rev: commit, path: path) }.value) }
         case nil: break
         }
+    }
+
+    /// A file operation from the tree's menu (I9), then the tree read again. The board window's only.
+    func fileOp(_ op: IdeSession.FileOp) async {
+        guard lockable, let session, let root else { return }
+        await session.run(op)
+        await changes.load(workspace: root)
+        await changes.loadFullTree()
     }
 
     /// A file asked for while the code of `source` had no editor yet: opened when `show(source)` makes it.
@@ -110,28 +113,31 @@ final class IdeState {
     /// of a window stays blank), so until it is there for `source` the file waits for it (R27 S1).
     private func openRead(_ read: @escaping @Sendable () -> EditorCommand?, in source: TaskCodeSource?) async {
         codeShown = true
-        guard started, source == self.source, editor != nil else {
+        guard started, source == self.source, let session, session.editor != nil else {
             waiting = (read, source)
-            if started, source == self.source { status = "편집기 페이지가 없어 열지 못함" }
             return
         }
-        await show(await Task.detached { read() }.value)
+        await session.show(await Task.detached { read() }.value)
+        await sendMarkers()
     }
 
+    /// Opens `path` of the worktree, then marks the findings in it.
+    private func open(_ path: String) async {
+        await session?.open(path)
+        await sendMarkers()
+    }
+
+    /// Shows a file Swift read itself (a commit's), then marks the findings in it.
+    private func show(_ command: EditorCommand?) async {
+        await session?.show(command)
+        await sendMarkers()
+    }
+
+    // ponytail: the shown file's markers only; a tab shown again keeps the ones it had, which is stale only if the
+    // findings changed meanwhile. Send them on a tab switch too if that matters.
     private func sendMarkers() async {
         guard let editor, let shown else { return }
         await editor.send(.setMarkers(path: shown, markers: editorMarkers(for: shown, marks: findingMarks)))
-    }
-
-    /// Shows a file Swift read itself (a commit's, a document), always read-only.
-    private func show(_ command: EditorCommand?) async {
-        guard let editor else { return }
-        guard let command, case .openFile(let path, _, _, _, _) = command else { status = "열 수 없음"; return }
-        await editor.show(command)
-        shown = path
-        readOnly = true
-        status = ""
-        await sendMarkers()
     }
 
     /// The commit source's tree in `commitMode`: every file of the commit, or those the task changed from its base.
@@ -148,35 +154,6 @@ final class IdeState {
         }.value
         guard !Task.isCancelled, case .commit(repo, base, commit)? = source, mode == commitMode else { return }
         commitTree = (mode, nodes)
-    }
-
-    func open(_ path: String) async {
-        guard let editor else { return }
-        if let opened = await editor.open(path) {
-            shown = opened.path
-            readOnly = opened.readOnly
-            status = ""
-            await sendMarkers()
-        } else {
-            status = "열 수 없음"
-        }
-    }
-
-    func toggleLock() async {
-        guard lockable, let editor, let shown else { return }
-        readOnly.toggle()
-        await editor.setReadOnly(shown, readOnly)
-    }
-
-    func save() async {
-        guard let editor else { return }
-        let r = await editor.send(.save)
-        status = switch r?["result"] as? String {
-        case "ok": "저장함"
-        case "conflict": "저장 안 함: 디스크의 파일이 바뀜"
-        case "refused": "저장 안 함: \(r?["reason"] as? String ?? "")"
-        case let other: "저장 실패" + (other.map { ": \($0)" } ?? "")
-        }
     }
 }
 
@@ -223,13 +200,19 @@ struct IdeArea: View {
             case nil: break
             }
         }
+        .onDisappear { state.areaGone() }
+        .sheet(isPresented: Binding { state.session?.comparing != nil } set: { if !$0 { state.session?.comparing = nil } }) {
+            if let file = state.session?.comparing { IdeCompare(file: file) { state.session?.comparing = nil } }
+        }
     }
 
     @ViewBuilder
     private var tree: some View {
         switch source {
         case .worktree(let root)?:
-            DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick)
+            // the tree's file menu (I9): the board window's only, the task board window reads
+            DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick,
+                            menu: state.lockable ? { line in AnyView(IdeTreeMenu(line: line, state: state)) } : nil)
         case .commit(_, _, let commit)?:
             CommitTreeSidebar(commit: commit, state: state)
         case nil:
@@ -249,6 +232,15 @@ struct IdeArea: View {
         VStack(spacing: 0) {
             bar.padding(.horizontal, 8).padding(.vertical, 4)
             Divider()
+            // buffers (I7): the open files once there are two, and the shown file's banner
+            if state.buffers.tabs.count > 1, state.session?.outside == nil {
+                IdeTabs(buffers: state.buffers) { path in Task { await state.session?.open(path) } }
+                Divider()
+            }
+            if let banner = state.buffers.banner {
+                IdeBanner(banner: banner) { choice in Task { await state.session?.choose(choice) } }
+                Divider()
+            }
             if let editor = state.editor {
                 // another source is another editor: without the identity SwiftUI keeps the first one's web view
                 EditorWebView(controller: editor).id(ObjectIdentifier(editor))
@@ -269,7 +261,7 @@ struct IdeArea: View {
     private var bar: some View {
         HStack(spacing: 8) {
             if let shown = state.shown {
-                Text(abbreviate(shown, home: homeDirectory()) + (state.dirty.contains(shown) ? " •" : ""))
+                Text(abbreviate(shown, home: homeDirectory()) + (state.buffers.files[shown]?.dirty == true ? " •" : ""))
                     .scaledFont(.caption1, design: .monospaced).lineLimit(1).truncationMode(.head).help(shown)
             } else {
                 Text("편집기").scaledFont(.headline, weight: .semibold)
@@ -278,11 +270,11 @@ struct IdeArea: View {
             Text(state.status).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
             if state.lockable {
                 Button(state.readOnly ? "잠금 해제" : "잠그기", systemImage: state.readOnly ? "lock" : "lock.open") {
-                    Task { await state.toggleLock() }
+                    Task { await state.session?.toggleLock() }
                 }
-                .disabled(state.shown == nil)
+                .disabled(state.buffers.shown == nil || state.session?.outside != nil)
                 .help("작업 트리 파일은 읽기 전용으로 열립니다. 풀면 이 파일을 고쳐 저장할 수 있습니다")
-                Button("저장", systemImage: "square.and.arrow.down") { Task { await state.save() } }
+                Button("저장", systemImage: "square.and.arrow.down") { Task { await state.session?.save() } }
                     .disabled(state.shown == nil || state.readOnly)
                     .help("저장 (편집기 안에서 ⌘S)")
             } else {
@@ -382,4 +374,68 @@ extension EnvironmentValues {
     @Entry var openInIde: ((String) -> Void)?
     /// Opens a file:line a task board text names in the window's read-only editor (G4 I12); nil where there is none.
     @Entry var openTargetInIde: ((FileTarget) -> Void)?
+}
+
+// MARK: - The tree's file menu (G4 I9)
+
+/// The absolute path of a new file or folder `name` made from `line`'s menu: in the line's folder, beside a file's
+/// line, or in `root` where no line is. `name` may hold folders (`a/b.swift`); `toplevel` is what the tree's paths are from.
+func newPath(_ name: String, from line: TreeLine?, toplevel: String, root: String) -> String {
+    let folder = line.map { toplevel + "/" + ($0.isFolder ? $0.path : String(splitPath($0.path).dir.dropLast())) } ?? root
+    return (folder.hasSuffix("/") ? String(folder.dropLast()) : folder) + "/" + name
+}
+
+/// Asks for a name in a dialog; nil when cancelled or left empty.
+@MainActor func askName(_ title: String, initial: String = "", note: String = "") -> String? {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = note
+    let field = NSTextField(string: initial)
+    field.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
+    alert.accessoryView = field
+    alert.addButton(withTitle: "확인")
+    alert.addButton(withTitle: "취소")
+    alert.window.initialFirstResponder = field
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+    return name.isEmpty ? nil : name
+}
+
+/// The context menu of the board window's worktree tree: make, rename, trash. Everything but the lock is off until
+/// the user unlocks file operations for this worktree (D#5 b).
+struct IdeTreeMenu: View {
+    let line: TreeLine?
+    let state: IdeState
+
+    var body: some View {
+        let locked = state.session?.fileOpsLocked ?? true
+        Button(locked ? "파일 작업 잠금 해제" : "파일 작업 잠그기") { Task { await state.session?.toggleFileOps() } }
+        Divider()
+        Group {
+            Button("새 파일…") { make(folder: false) }
+            Button("새 폴더…") { make(folder: true) }
+            if let line {
+                Button("이름 변경…") {
+                    guard let path = absolute(line), let name = askName("이름 변경", initial: splitPath(line.path).name) else { return }
+                    Task { await state.fileOp(.rename(path, to: name)) }
+                }
+                Button("휴지통으로 이동") {
+                    guard let path = absolute(line) else { return }
+                    Task { await state.fileOp(.trash(path)) }
+                }
+            }
+        }
+        .disabled(locked)
+    }
+
+    private var toplevel: String? { state.root.flatMap { state.changes.diff(for: $0)?.toplevel } }
+
+    private func absolute(_ line: TreeLine) -> String? { toplevel.map { $0 + "/" + line.path } }
+
+    private func make(folder: Bool) {
+        guard let root = state.root, let toplevel,
+              let name = askName(folder ? "새 폴더" : "새 파일", note: folder ? "폴더는 파일이 생긴 뒤에 트리에 보입니다 (git이 빈 폴더를 세지 않음)" : "이름에 /를 넣으면 폴더도 만듭니다") else { return }
+        let path = newPath(name, from: line, toplevel: toplevel, root: root)
+        Task { await state.fileOp(folder ? .newFolder(path) : .newFile(path)) }
+    }
 }

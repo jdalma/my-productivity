@@ -126,6 +126,8 @@ struct DiffTreeSidebar: View {
     @Bindable var state: ChangesState
     /// What a picked line does; the diff window's `state.pick` when nil.
     var pick: ((TreeLine) -> Void)?
+    /// The context menu of a line, or of the list where no line is (nil); no menu when nil, as in the diff window.
+    var menu: ((TreeLine?) -> AnyView)?
 
     private struct FullTreeKey: Equatable {
         var mode: TreeMode
@@ -133,7 +135,7 @@ struct DiffTreeSidebar: View {
     }
 
     var body: some View {
-        FolderTreeList(tree: state.tree, pick: pick ?? state.pick) {
+        FolderTreeList(tree: state.tree, pick: pick ?? state.pick, menu: menu) {
             if let diff = state.diff(for: workspace) {
                 switch state.treeMode {
                 case .changed:
@@ -180,6 +182,7 @@ struct DiffTreeSidebar: View {
 struct FolderTreeList<Rows: View>: View {
     @Bindable var tree: FolderTreeState
     let pick: (TreeLine) -> Void
+    var menu: ((TreeLine?) -> AnyView)?
     @ViewBuilder let rows: Rows
     @FocusState private var focused: Bool
 
@@ -190,7 +193,7 @@ struct FolderTreeList<Rows: View>: View {
             .focused($focused)
             .onAppear { focused = true }
             .onChange(of: tree.picked) { _, line in if let line { pick(line) } }
-            .contextMenu(forSelectionType: TreeLine.self) { _ in } primaryAction: { lines in lines.first.map(pick) }
+            .contextMenu(forSelectionType: TreeLine.self) { lines in menu?(lines.first) } primaryAction: { lines in lines.first.map(pick) }
     }
 }
 

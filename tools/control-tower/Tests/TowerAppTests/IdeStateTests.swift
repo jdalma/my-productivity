@@ -23,7 +23,8 @@ private func page() throws -> URL {
 
 @MainActor
 private func until(_ done: () -> Bool) async throws {
-    let deadline = Date().addingTimeInterval(10)
+    // long: another test may hold every GCD worker for 30 s (FocusRunnerTests; on CI this wait gave up 60 s into the test), and a link's detached read waits for one
+    let deadline = Date().addingTimeInterval(120)
     while !done(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
 }
 
@@ -131,4 +132,34 @@ private func until(_ done: () -> Bool) async throws {
     // a link's document is no buffer: the lock does nothing to it
     await state.session?.toggleLock()
     #expect(state.readOnly)
+}
+
+/// T39: ⌘P and ⌘⇧F open the search panel of the worktree the area shows; a result opens its file read-only (D#5 b)
+/// at its line. A file picked by name closes the panel; text results stay for the next hit.
+@MainActor @Test func aSearchResultOpensItsFileReadOnlyAtItsLine() async throws {
+    let state = IdeState(page: try page())
+    let work = try folder(), file = work + "/src/a.swift"
+    try FileManager.default.createDirectory(atPath: work + "/src", withIntermediateDirectories: true)
+    try "a\nb\n".write(toFile: file, atomically: true, encoding: .utf8)
+    state.search(.files)
+    #expect(state.searching == nil)  // no worktree shown: nowhere to search
+
+    state.show(root: work)
+    state.search(.text)
+    #expect(state.searching == .text)
+    await state.openFound("src/a.swift", line: 2)
+    #expect(state.shown == file && state.readOnly)
+    #expect(state.editor?.waiting.contains { if case .openFile(file, _, _, 2, true) = $0 { true } else { false } } == true)
+    #expect(state.searching == .text)
+
+    state.search(.files)
+    await state.openFound("src/a.swift", line: nil)
+    #expect(state.searching == nil)
+
+    // the editor's ⌘P and ⌘⇧F, which the page sends on instead of keeping them
+    state.editor?.onSearch?(.text)
+    #expect(state.searching == .text)
+    state.areaGone()
+    state.search(.files)
+    #expect(state.searching == .text)  // the area left the window: no panel to open
 }

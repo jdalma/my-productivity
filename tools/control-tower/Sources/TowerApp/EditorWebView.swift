@@ -98,6 +98,8 @@ final class EditorPageView: WKWebView {
     var onDirty: ((String, Bool) -> Void)?
     /// A language server notice for the user: not installed (once per server), or ended.
     var onLanguageNotice: ((String) -> Void)?
+    /// The editor's ⌘P or ⌘⇧F: the page sends them here rather than open its own quick open (T39).
+    var onSearch: ((SearchMode) -> Void)?
 
     /// This editor's language servers (D#14 a: one client per server), by the channel the page names them with.
     let editorID = EditorController.nextID()
@@ -226,6 +228,8 @@ final class EditorPageView: WKWebView {
         switch request {
         case .ready: becomeReady()
         case .dirtyChanged(let path, let dirty): onDirty?(path, dirty)
+        case .quickOpen: onSearch?(.files)
+        case .findInFiles: onSearch?(.text)
         case .log(let text): Self.log.error("editor page: \(text, privacy: .public)")
         case .lspSend(let channel, let message):
             // answered here, not in a Task: the client's messages reach the server in the order it sent them

@@ -34,6 +34,8 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     #expect(try request(#"{"kind":"cursor","path":"/w/a.swift","line":3,"col":7}"#) == .cursor(path: "/w/a.swift", line: 3, col: 7))
     #expect(try request(#"{"kind":"ready"}"#) == .ready)
     #expect(try request(#"{"kind":"log","message":"worker failed"}"#) == .log(message: "worker failed"))
+    #expect(try request(#"{"kind":"quickOpen"}"#) == .quickOpen)
+    #expect(try request(#"{"kind":"findInFiles"}"#) == .findInFiles)
     #expect(throws: DecodingError.self) { try request(#"{"kind":"runCommand","cmd":"rm"}"#) }
     #expect(throws: DecodingError.self) { try request(#"{"kind":"writeFile","path":"/w/a.swift"}"#) }
 }

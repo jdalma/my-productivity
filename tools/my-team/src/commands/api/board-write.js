@@ -44,7 +44,7 @@ function requireGoal(team, { id, goal, single }) {
 export function runApiBoardWrite(command) {
     return (input = {}, env = process.env) => withBoard(input.team_name, async ({ store, roster, manifest }) => {
         const { team_name, by, ...args } = input;
-        const actor = actorOf(env, team_name, roster, by);
+        const actor = actorOf(env, team_name, roster, by, 'by');
         // a derived task serves its parent's request; anyone else's add is refused by the board as before
         if (command === 'add' && !args.parent && pmsOf(roster).includes(actor)) requireGoal(team_name, args);
         // a document task lands no commit, so its worker need not be in a repository (T158)

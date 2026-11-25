@@ -25,15 +25,17 @@ const render = (workerName, workerRole, extra = {}) => Buffer.byteLength(generat
 // T221/T222 added the goal declaration to board-add (orchestrator+board 30,070, solo dev 22,019), so both bounds rose by 500.
 // T229 cut four sentences that repeated another (peer+board 24,973 -> 24,299) and raised peer+board by 400, so the next
 // rule fits with 1,000 bytes to spare: what is left there says one thing once.
+// T43 wrote each command as its name and input fields, without team_name and escaped JSON, and the decision fields once
+// (pm+board 29,607 -> 27,645, dev+board 19,610 -> 18,581): each bound is now the next 500 above its size with 150 to spare.
 const COMBOS = {
-    peer: [13_500, () => render('solo', null)],
-    'peer+board': [25_400, () => render('solo', null, { board })],
-    worker: [14_000, () => render('dev', 'worker')],
-    'worker+board': [20_000, () => render('dev', 'worker', { board })],
-    orchestrator: [18_500, () => render('pm', 'orchestrator')],
-    'orchestrator+board': [30_500, () => render('pm', 'orchestrator', { board })],
-    'solo dev': [22_500, () => render('pm', 'orchestrator', { board, solo: true })],
-    'solo reviewer': [20_000, () => render('dev', 'worker', { board, solo: true })],
+    peer: [12_500, () => render('solo', null)],
+    'peer+board': [23_000, () => render('solo', null, { board })],
+    worker: [13_500, () => render('dev', 'worker')],
+    'worker+board': [19_000, () => render('dev', 'worker', { board })],
+    orchestrator: [18_000, () => render('pm', 'orchestrator')],
+    'orchestrator+board': [28_000, () => render('pm', 'orchestrator', { board })],
+    'solo dev': [20_000, () => render('pm', 'orchestrator', { board, solo: true })],
+    'solo reviewer': [19_000, () => render('dev', 'worker', { board, solo: true })],
 };
 
 test('E7: the overlay of each role and board combination stays under its size bound', () => {

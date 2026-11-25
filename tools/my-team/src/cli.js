@@ -55,11 +55,19 @@ function parseApiInput(opts) {
     if (!opts.input) {
         throw new Error('--input <json> is required for api subcommands');
     }
+    let input;
     try {
-        return JSON.parse(opts.input);
+        input = JSON.parse(opts.input);
     } catch (err) {
         throw new Error(`--input is not valid JSON: ${err.message}`);
     }
+    // a worker process names its own team by MY_TEAM_WORKER (T43): team_name may be left out; each command still
+    // refuses a team_name that is not that team, and the user's shell (no variable) still has to give it
+    const pinned = process.env.MY_TEAM_WORKER;
+    if (pinned && input && typeof input === 'object' && input.team_name === undefined) {
+        input.team_name = pinned.slice(0, pinned.indexOf('/'));
+    }
+    return input;
 }
 
 /**
@@ -197,28 +205,28 @@ async function main() {
         });
 
     // api ... (peer messaging only)
-    const api = program.command('api').description('Internal API used by worker LLMs for peer messaging');
+    const api = program.command('api').description('Internal API used by worker LLMs for peer messaging. Each command\'s --help names its --input fields: required ones, then after ";" optional ones. In a worker process MY_TEAM_WORKER gives team_name and the worker it acts as (worker, from_worker, by): leave them out');
 
     api.command('send-message')
-        .description('[mutating] Send a peer message — drops a spool file, appends sender archive, records sent_pending. Add "to_team":"<team name>" to reach a worker in another running team.')
+        .description('[mutating] Send a peer message — drops a spool file, appends sender archive, records sent_pending. Add "to_team":"<team name>" to reach a worker in another running team. Input: to_worker, body; reply_to, expects_reply, to_team')
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiSendMessage(parseApiInput(opts)), opts.json));
 
     api.command('mailbox-list')
-        .description('[mutating] List unread inbox — absorbs the incoming-spool into the mailbox first (this absorption is the polling side effect: skip the poll and new messages are never absorbed)')
+        .description('[mutating] List unread inbox — absorbs the incoming-spool into the mailbox first (this absorption is the polling side effect: skip the poll and new messages are never absorbed). Optional input: unread_only')
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiMailboxList(parseApiInput(opts)), opts.json));
 
     api.command('mailbox-mark-delivered')
-        .description('[mutating] Mark an inbox entry consumed — moves it to the archive jsonl and removes it from the inbox')
+        .description('[mutating] Mark an inbox entry consumed — moves it to the archive jsonl and removes it from the inbox. Input: message_id')
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output')
         .action((opts) => emit(runApiMailboxMarkDelivered(parseApiInput(opts)), opts.json));
 
     api.command('archive-lookup')
-        .description('[pure] Look up an archived message by id — read-only, no side effects')
+        .description('[pure] Look up an archived message by id — read-only, no side effects. Input: message_id')
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output')
         .action((opts) => emit(runApiArchiveLookup(parseApiInput(opts)), opts.json));
@@ -234,8 +242,8 @@ async function main() {
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output (errors too: {ok:false, code, message})')
         .action((opts) => boardRun(opts, fn));
-    board('board-status', '[pure] The team board: every task, each worker\'s load, open findings, recent changes; with "task", that task\'s family', runApiBoardStatus);
-    board('board-inbox', '[pure] Your unfinished tasks, your review requests, notes to you and announcements after "since" (pass back "cursor")', runApiBoardInbox);
+    board('board-status', '[pure] The team board: every task, each worker\'s load, open findings, recent changes; with "task", that task\'s family. Optional input: task, open', runApiBoardStatus);
+    board('board-inbox', '[pure] Your unfinished tasks, your review requests, notes to you and announcements after "since" (pass back "cursor"). Optional input: since', runApiBoardInbox);
     const WRITES = {
         add: 'Add a task (pm): title; id, parent, ticket, assignee, reviewer, priority, base, constraints, deliverable (document: a task that lands a report and no commit)',
         edit: 'Correct what an unfinished task says (pm): id; title, ticket, constraints, base, priority, deliverable (commits|document, until a commit was landed)',
@@ -255,7 +263,7 @@ async function main() {
     };
     for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name));
     board('board-pushable', '[pure] Whether every outgoing commit has an approved review on the board or is within the baseline: commit, upstream (or remote, for a new branch); repo, baseline', runApiBoardPushable);
-    board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle; goal for one', runApiGoalOrder);
+    board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle. Optional input: goal', runApiGoalOrder);
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
 
     try {

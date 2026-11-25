@@ -39,7 +39,9 @@ test('a worker of a board team: inbox on a [board] notice, take, land instead of
     assert.match(text, /give each review request to one[^\n]*one sub-agent per request at the same time[^\n]*the verdict is yours/);
     assert.match(text, /Every rerun[^\n]*on a copy of the submitted commit in a folder of its own[^\n]*git archive[^\n]*install the dependencies[^\n]*never in a working tree that a worker or another sub-agent uses[^\n]*The copy has no \.git/);
     assert.doesNotMatch(text, /board-add/, 'adding tasks is pm\'s');
-    assert.match(text, /"team_name\\":\\"demo\\"/, 'commands are written out for this team');
+    // T43 (D15, D16): how to run a command is said once; team_name and the worker come from MY_TEAM_WORKER
+    assert.match(text, /Run a command as `my-team api <command> --input '<json>' --json`[^\n]*Leave team_name and yourself[^\n]*MY_TEAM_WORKER gives them[^\n]*--help` lists every field/);
+    assert.doesNotMatch(text, /"team_name\\?":\\?"demo/, 'no command repeats the team');
     assert.match(text, /without "since"/, 'R71 R3: a lost cursor');
     // R71 R1: the reviewer's rules after a verdict
     assert.match(text, /Do not send pm or the assignee a message about a verdict/);
@@ -52,10 +54,13 @@ test('a worker of a board team: inbox on a [board] notice, take, land instead of
     assert.match(text, /`hold`[^\n]*cannot verify[^\n]*not `changes`/);
 });
 
-test('no example in the board section nests double quotes inside its double-quoted --input (R71 L1)', () => {
+test('every --input example is one single-quoted JSON a shell passes as is (R71 L1, T43)', () => {
     for (const [w, role] of [['pm', 'orchestrator'], ['dev', 'worker']]) {
         const text = overlay(w, role, { board: { store: 'sqlite' } });
-        for (const cmd of text.match(/--input "(?:[^"\\]|\\.)*"/g) ?? []) assert.doesNotMatch(cmd, /\\\\"/, cmd);
+        const inputs = [...text.matchAll(/--input '([^'\n]*)'/g)].map((m) => m[1]);
+        assert.ok(inputs.length >= 5, 'the mailbox and send-message examples');
+        for (const input of inputs) if (input !== '<json>') assert.doesNotThrow(() => JSON.parse(input), input);
+        assert.doesNotMatch(text, /--input "/, 'no double-quoted input to escape');
         assert.doesNotMatch(text, /\\"없음\\"/);
     }
 });
@@ -163,7 +168,7 @@ test('T158: a worker lands a document task without a commit, a reviewer judges i
     assert.doesNotMatch(dev, /board-edit/);
     const pm = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
     assert.match(pm, /"deliverable":"document"[^\n]*instead of cancelled/);
-    assert.match(pm, /board-edit, never in board\.db[^\n]*board-edit --input[^\n]*until it has landed a commit/);
+    assert.match(pm, /board-edit, never in board\.db[^\n]*`board-edit` \(id, constraints\)[^\n]*until it has landed a commit/);
     assert.match(pm, /deliverable changes only while the task is new, ready, doing or changes/);
 });
 
@@ -181,7 +186,7 @@ test('pm of a board team: goal files with an order section, ready_now from goal-
     assert.match(text, /holds only lines `- <before> -> <after>`, and `- T1, T2` for tasks with no order among them/);
     assert.match(text, /first write a goal file[^\n]*names every task, then add the tasks with `"goal":"G<n>"`/);
     assert.match(text, /A task with no `parent`[^\n]*board-add refuses it[^\n]*`"single":true`/);
-    assert.match(text, /read `ready_now`[^\n]*team api goal-order --input "\{\\"team_name\\":\\"demo\\"\}" --json/);
+    assert.match(text, /read `ready_now`[^\n]*`goal-order`/);
     assert.match(text, /`cycle` or `errors`[^\n]*`cancelled`[^\n]*rewrite its `## 순서` section/);
     assert.doesNotMatch(text, /<team>/, 'the team name is filled in, not left as a placeholder');
     assert.doesNotMatch(overlay('dev', 'worker', { board: { store: 'sqlite' } }), /goal-order/, 'pm guidance only');

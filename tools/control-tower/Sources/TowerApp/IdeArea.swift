@@ -2,107 +2,77 @@ import AppKit
 import SwiftUI
 import TowerCore
 
-// The board's IDE area (G4 I5, plan K4): the editor with the worktree's folder tree on its right, the session's
-// terminal under both, the whole width. The editor's files are the worktree's only (D#6 a), read-only until
-// unlocked (D#5 b), and the board window's own (D#8 b).
+// The board's IDE area (G4 I5, plan K4): the editor with the worktree's folder tree on its right. The editor's files are the worktree's only (D#6 a), read-only until
+// unlocked (D#5 b), and the board window's own (D#8 b) while it shows them.
 
-/// One board window's editor, its folder tree and the watch on its worktree. Kept across the detail's redraws and
-/// rows; made again when a row of another worktree shows.
-// ponytail: one editor per window, its buffers lost on a switch of worktree; keep one per worktree if switching back and forth costs too much
+/// One board window's IDE area: the worktree it shows, that worktree's editor (IdeBuffers.swift) and its folder tree.
+/// Kept across the detail's redraws and rows. A row of another worktree shows that worktree's editor; the one left
+/// waits in `IdeParking` while it holds edits that are not saved, and is dropped otherwise.
 @MainActor @Observable
 final class IdeState {
-    private(set) var root: String?
-    private(set) var editor: EditorController?
-    @ObservationIgnored private var watch: FileWatch?
+    private(set) var session: IdeSession?
     /// The tree's diff and file list, read as the diff window reads them.
     let changes = ChangesState()
-    /// The real path of the file the editor shows.
-    private(set) var shown: String?
-    private(set) var readOnly = true
-    private(set) var dirty: Set<String> = []
-    private(set) var status = ""
     /// The editor for a root: the built page's, nil when editor-web was not built. Tests give their own.
-    @ObservationIgnored private let makeEditor: (String) -> EditorController?
+    @ObservationIgnored private let makeEditor: @MainActor (String) -> EditorController?
 
-    init(makeEditor: @escaping (String) -> EditorController? = { root in editorPageFolder.map { EditorController(roots: [root], page: $0) } }) {
+    init(makeEditor: @escaping @MainActor (String) -> EditorController? = builtEditor) {
         self.makeEditor = makeEditor
     }
 
-    /// Shows `root`'s files; another root drops the editor's files and watch, and stops the old editor's language
-    /// servers (K12: a root no longer shown has none).
+    var editor: EditorController? { session?.editor }
+    var buffers: EditorBuffers { session?.buffers ?? EditorBuffers() }
+    /// The real path of the file the editor shows.
+    var shown: String? { buffers.shown }
+    var readOnly: Bool { shown.flatMap { buffers.files[$0]?.readOnly } ?? true }
+    var status: String { session?.status ?? "" }
+
+    /// Shows `root`'s files: its waiting editor, edits and all, or a new one. The editor left goes as in `leave`.
     func show(root: String) {
-        guard root != self.root else { return }
-        self.root = root
-        shown = nil
-        readOnly = true
-        dirty = []
-        status = ""
+        guard root != session?.root else { return }
+        leave()
         changes.select(workspace: root)
-        watch = nil
-        editor?.close()
-        editor = makeEditor(root)
-        guard let editor else { return }
-        editor.onDirty = { [weak self] path, dirty in
-            if dirty { self?.dirty.insert(path) } else { self?.dirty.remove(path) }
-        }
-        editor.onLanguageNotice = { [weak self] notice in self?.status = notice }
-        let files = editor.files
-        // a clean buffer takes what a worker wrote; a dirty one keeps the user's edit (its banner is I7's)
-        watch = FileWatch(root: root) { [weak editor] batch in
-            Task { @MainActor in
-                for command in await files.diskChanged(batch, root: root) { await editor?.send(command) }
-            }
-        }
+        session = IdeParking.session(for: root, makeEditor: makeEditor)
     }
 
-    /// The window closed: its editor and watch go, its language servers stop. A later `show` starts afresh.
+    /// The area left the window (a row with no tmux pane, the window closed): an editor with edits that are not saved
+    /// waits for the next area of its worktree; one without stays here, as before.
+    func areaGone() {
+        if let session, IdeParking.park(session) { self.session = nil }
+    }
+
+    /// The window closed: its editor goes as in `leave`. A later `show` starts afresh.
     func close() {
-        editor?.close()
-        editor = nil
-        watch = nil
-        root = nil
-        shown = nil
+        leave()
+        session = nil
+    }
+
+    /// Lets go of the editor: one with edits that are not saved waits in `IdeParking`; any other is gone, and its
+    /// language servers stop (K12: a root no longer shown has none).
+    // ponytail: a waiting editor keeps its servers, as its page keeps their clients; stop them and tell the page (lspClosed) if idle servers cost too much
+    private func leave() {
+        guard let session else { return }
+        if !IdeParking.park(session) { session.editor?.close() }
     }
 
     /// A tree line picked: a file opens in the editor, a folder does nothing.
     func pick(_ line: TreeLine) {
-        guard !line.isFolder, let root, let top = changes.diff(for: root)?.toplevel else { return }
-        Task { await open(top + "/" + line.path) }
+        guard !line.isFolder, let session, let top = changes.diff(for: session.root)?.toplevel else { return }
+        Task { await session.open(top + "/" + line.path) }
     }
 
-    func open(_ path: String) async {
-        guard let editor else { return }
-        if let opened = await editor.open(path) {
-            shown = opened.path
-            readOnly = opened.readOnly
-            status = ""
-        } else {
-            status = "열 수 없음"
-        }
-    }
-
-    func toggleLock() async {
-        guard let editor, let shown else { return }
-        readOnly.toggle()
-        await editor.setReadOnly(shown, readOnly)
-    }
-
-    func save() async {
-        guard let editor else { return }
-        let r = await editor.send(.save)
-        status = switch r?["result"] as? String {
-        case "ok": "저장함"
-        case "conflict": "저장 안 함: 디스크의 파일이 바뀜"
-        case "refused": "저장 안 함: \(r?["reason"] as? String ?? "")"
-        case let other: "저장 실패" + (other.map { ": \($0)" } ?? "")
-        }
+    /// A file operation from the tree's menu (I9), then the tree read again.
+    func fileOp(_ op: IdeSession.FileOp) async {
+        guard let session else { return }
+        await session.run(op)
+        await changes.load(workspace: session.root)
+        await changes.loadFullTree()
     }
 }
 
-/// The editor over the terminal; `at` is the board's refresh, which reads the tree's diff again.
+/// The editor with its folder tree; `at` is the board's refresh, which reads the tree's diff again.
 struct IdeArea: View {
     let root: String
-    let terminal: TmuxRef
     let at: String
     @Bindable var state: IdeState
     @AppStorage(IdeLayout.storageKey) private var stored = ""
@@ -110,29 +80,24 @@ struct IdeArea: View {
     var body: some View {
         let layout = IdeLayout(stored: stored)
         GeometryReader { geo in
-            let h = IdeLayout.heights(total: geo.size.height, ratio: layout.ratio(for: root))
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    editorColumn.frame(maxWidth: .infinity)
-                    if layout.treeShown {
-                        let width = IdeLayout.treeWidth(layout.treeWidth, total: geo.size.width)
-                        DragLine(axis: .vertical, at: width, total: geo.size.width) { change($0) { $0.treeWidth = $1 } }
-                        DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick).frame(width: width)
-                    }
+            HStack(spacing: 0) {
+                editorColumn.frame(maxWidth: .infinity)
+                if layout.treeShown {
+                    let width = IdeLayout.treeWidth(layout.treeWidth, total: geo.size.width)
+                    DragLine(at: width) { change($0) { $0.treeWidth = $1 } }
+                    DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick,
+                                    menu: { line in AnyView(IdeTreeMenu(line: line, state: state)) })
+                        .frame(width: width)
                 }
-                .frame(height: h.editor)
-                DragLine(axis: .horizontal, at: h.editor, total: geo.size.height) { editor in
-                    change(editor) { $0.setRatio(IdeLayout.ratio(editor: $1, total: geo.size.height), for: root) }
-                }
-                // a new terminal, and a new tmux client, for each pane
-                PaneTerminal(ref: terminal).id("\(terminal.session) \(terminal.pane)")
-                    .padding(.top, 8)
-                    .frame(height: h.terminal)
             }
         }
         .task(id: "\(root) \(at)") {
             state.show(root: root)
             await state.changes.load(workspace: root)
+        }
+        .onDisappear { state.areaGone() }
+        .sheet(isPresented: Binding { state.session?.comparing != nil } set: { if !$0 { state.session?.comparing = nil } }) {
+            if let file = state.session?.comparing { IdeCompare(file: file) { state.session?.comparing = nil } }
         }
     }
 
@@ -146,6 +111,15 @@ struct IdeArea: View {
         VStack(spacing: 0) {
             bar.padding(.horizontal, 8).padding(.vertical, 4)
             Divider()
+            // buffers (I7): the open files once there are two, and the shown file's banner
+            if state.buffers.tabs.count > 1 {
+                IdeTabs(buffers: state.buffers) { path in Task { await state.session?.open(path) } }
+                Divider()
+            }
+            if let banner = state.buffers.banner {
+                IdeBanner(banner: banner) { choice in Task { await state.session?.choose(choice) } }
+                Divider()
+            }
             if let editor = state.editor {
                 EditorSlot(editor: editor)
                     .overlay {
@@ -165,7 +139,7 @@ struct IdeArea: View {
     private var bar: some View {
         HStack(spacing: 8) {
             if let shown = state.shown {
-                Text(abbreviate(shown, home: homeDirectory()) + (state.dirty.contains(shown) ? " •" : ""))
+                Text(abbreviate(shown, home: homeDirectory()) + (state.buffers.files[shown]?.dirty == true ? " •" : ""))
                     .scaledFont(.caption1, design: .monospaced).lineLimit(1).truncationMode(.head).help(shown)
             } else {
                 Text("편집기").scaledFont(.headline, weight: .semibold)
@@ -173,11 +147,11 @@ struct IdeArea: View {
             Spacer(minLength: 8)
             Text(state.status).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
             Button(state.readOnly ? "잠금 해제" : "잠그기", systemImage: state.readOnly ? "lock" : "lock.open") {
-                Task { await state.toggleLock() }
+                Task { await state.session?.toggleLock() }
             }
             .disabled(state.shown == nil)
             .help("작업 트리 파일은 읽기 전용으로 열립니다. 풀면 이 파일을 고쳐 저장할 수 있습니다")
-            Button("저장", systemImage: "square.and.arrow.down") { Task { await state.save() } }
+            Button("저장", systemImage: "square.and.arrow.down") { Task { await state.session?.save() } }
                 .disabled(state.shown == nil || state.readOnly)
                 .help("저장 (편집기 안에서 ⌘S)")
             Button("트리", systemImage: "sidebar.right") { change(0) { l, _ in l.treeShown.toggle() } }
@@ -188,36 +162,32 @@ struct IdeArea: View {
     }
 }
 
-/// A line between two parts of the area that a drag moves: `at` is the first part's size along `axis` when the
-/// drag began, `moved` gets the size it asks for. A vertical line sizes the part right of it (the tree).
+/// The line between the editor and the tree, which a drag moves: `at` is the tree's width when the drag began,
+/// `moved` gets the width it asks for.
 private struct DragLine: View {
-    enum Axis { case horizontal, vertical }
-    let axis: Axis
     let at: Double
-    let total: Double
     let moved: (Double) -> Void
     @State private var dragFrom: Double?
 
     var body: some View {
-        let horizontal = axis == .horizontal
         Rectangle()
             .fill(Color(nsColor: .separatorColor))
-            .frame(width: horizontal ? nil : IdeLayout.line, height: horizontal ? IdeLayout.line : nil)
+            .frame(width: IdeLayout.line)
             .overlay {
                 Color.clear
-                    .frame(width: horizontal ? nil : 7, height: horizontal ? 7 : nil)
+                    .frame(width: 7)
                     .contentShape(.rect)
-                    .background(horizontal ? AnyView(ResizeUpDownCursor()) : AnyView(ResizeLeftRightCursor()))
+                    .background(ResizeLeftRightCursor())
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { drag in
                                 let from = dragFrom ?? at
                                 dragFrom = from
-                                moved(horizontal ? from + drag.translation.height : from - drag.translation.width)
+                                moved(from - drag.translation.width)
                             }
                             .onEnded { _ in dragFrom = nil }
                     )
-                    .help(horizontal ? "끌어서 편집기와 터미널의 높이 조절" : "끌어서 트리 폭 조절")
+                    .help("끌어서 트리 폭 조절")
             }
             .zIndex(1)
     }
@@ -231,5 +201,69 @@ private struct ResizeLeftRightCursor: NSViewRepresentable {
     final class Area: NSView {
         override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+// MARK: - The tree's file menu (G4 I9)
+
+/// The absolute path of a new file or folder `name` made from `line`'s menu: in the line's folder, beside a file's
+/// line, or in `root` where no line is. `name` may hold folders (`a/b.swift`); `toplevel` is what the tree's paths are from.
+func newPath(_ name: String, from line: TreeLine?, toplevel: String, root: String) -> String {
+    let folder = line.map { toplevel + "/" + ($0.isFolder ? $0.path : String(splitPath($0.path).dir.dropLast())) } ?? root
+    return (folder.hasSuffix("/") ? String(folder.dropLast()) : folder) + "/" + name
+}
+
+/// Asks for a name in a dialog; nil when cancelled or left empty.
+@MainActor func askName(_ title: String, initial: String = "", note: String = "") -> String? {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = note
+    let field = NSTextField(string: initial)
+    field.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
+    alert.accessoryView = field
+    alert.addButton(withTitle: "확인")
+    alert.addButton(withTitle: "취소")
+    alert.window.initialFirstResponder = field
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+    return name.isEmpty ? nil : name
+}
+
+/// The context menu of the board window's worktree tree: make, rename, trash. Everything but the lock is off until
+/// the user unlocks file operations for this worktree (D#5 b).
+struct IdeTreeMenu: View {
+    let line: TreeLine?
+    let state: IdeState
+
+    var body: some View {
+        let locked = state.session?.fileOpsLocked ?? true
+        Button(locked ? "파일 작업 잠금 해제" : "파일 작업 잠그기") { Task { await state.session?.toggleFileOps() } }
+        Divider()
+        Group {
+            Button("새 파일…") { make(folder: false) }
+            Button("새 폴더…") { make(folder: true) }
+            if let line {
+                Button("이름 변경…") {
+                    guard let path = absolute(line), let name = askName("이름 변경", initial: splitPath(line.path).name) else { return }
+                    Task { await state.fileOp(.rename(path, to: name)) }
+                }
+                Button("휴지통으로 이동") {
+                    guard let path = absolute(line) else { return }
+                    Task { await state.fileOp(.trash(path)) }
+                }
+            }
+        }
+        .disabled(locked)
+    }
+
+    private var toplevel: String? { state.session.flatMap { state.changes.diff(for: $0.root)?.toplevel } }
+
+    private func absolute(_ line: TreeLine) -> String? { toplevel.map { $0 + "/" + line.path } }
+
+    private func make(folder: Bool) {
+        guard let root = state.session?.root, let toplevel,
+              let name = askName(folder ? "새 폴더" : "새 파일", note: folder ? "폴더는 파일이 생긴 뒤에 트리에 보입니다 (git이 빈 폴더를 세지 않음)" : "이름에 /를 넣으면 폴더도 만듭니다") else { return }
+        let path = newPath(name, from: line, toplevel: toplevel, root: root)
+        Task { await state.fileOp(folder ? .newFolder(path) : .newFile(path)) }
     }
 }

@@ -3,7 +3,7 @@ import Testing
 import WebKit
 @testable import TowerApp
 
-// Who takes a shortcut both the app and the editor (or a pane terminal) know (G4 I8, T14 §5): the app's menu acts
+// Who takes a shortcut both the app and the editor know (G4 I8, T14 §5): the app's menu acts
 // only when the key is the app's for the focus it comes from.
 
 @Test func theEditorKeepsItsOwnKeysAndLeavesTheWindowsToTheApp() {
@@ -12,14 +12,6 @@ import WebKit
     }
     for key in [SharedKey.close, .fontBigger, .fontSmaller, .fontReset] {
         #expect(keyConsumer(key, focus: .editor) == .app, "\(key)")
-    }
-}
-
-@Test func aPaneTerminalKeepsFindAndLeavesItWithK() {
-    #expect(keyConsumer(.find, focus: .terminal) == .terminal)
-    #expect(keyConsumer(.searchK, focus: .terminal) == .app)  // ⌘K is the way out of a pane terminal
-    for key in [SharedKey.escape, .back, .forward, .openDiff, .close, .fontBigger] {
-        #expect(keyConsumer(key, focus: .terminal) == .app, "\(key)")
     }
 }
 

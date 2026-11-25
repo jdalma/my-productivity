@@ -18,6 +18,7 @@ import { MonacoVscodeApiWrapper } from 'monaco-languageclient/vscodeApiWrapper'
 import { configureDefaultWorkerFactory } from 'monaco-languageclient/workerFactory'
 import { EditorApp } from 'monaco-languageclient/editorApp'
 import { call, fire, type Reply } from './bridge'
+import { closed, connectLanguageServer, receive } from './lsp-transport'
 
 const theme = (dark: boolean) => (dark ? 'Default Dark Modern' : 'Default Light Modern')
 
@@ -47,7 +48,9 @@ async function main() {
   const app = new EditorApp({ codeResources: { modified: { text: '', uri: '/untitled.txt' } } })
   await app.start(document.getElementById('root')!)
   const editor = app.getEditor()!
-  editor.updateOptions({ readOnly: true })
+  // squiggles for LSP diagnostics in a read-only editor too: Monaco's default ('editable') hides them there, and this
+  // editor starts read-only (D#5 b)
+  editor.updateOptions({ readOnly: true, renderValidationDecorations: 'on' })
   const configuration = await getService(IConfigurationService)
 
   const files = new Map<string, OpenFile>()
@@ -115,6 +118,8 @@ async function main() {
         editor.revealLineInCenter(m.line)
         editor.setPosition({ lineNumber: m.line, column: 1 })
       }
+      // completion, definitions and diagnostics, if the app has a server for this language (not awaited: the file shows now)
+      void connectLanguageServer(model(f).getLanguageId(), m.path)
       return { result: 'ok', language: model(f).getLanguageId() }
     },
     fileChangedOnDisk(m) {
@@ -147,6 +152,14 @@ async function main() {
       return { result: 'ok' }
     },
     save,
+    lspReceive(m) {
+      receive(m.channel, m.message)
+      return { result: 'ok' }
+    },
+    lspClosed(m) {
+      closed(m.channel)
+      return { result: 'ok' }
+    },
   }
   ;(window as any).ctBridge = {
     receive: async (m: { kind: string }) => {

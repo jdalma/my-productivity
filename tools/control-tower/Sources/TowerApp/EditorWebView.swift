@@ -83,13 +83,30 @@ final class EditorPageView: WKWebView {
     private var shown: (path: String, line: Int?)?
     /// What the page last said of each file it shows.
     var onDirty: ((String, Bool) -> Void)?
+    /// A language server notice for the user: not installed (once per server), or ended.
+    var onLanguageNotice: ((String) -> Void)?
+
+    /// This editor's language servers (D#14 a: one client per server), by the channel the page names them with.
+    let editorID = EditorController.nextID()
+    private let servers: LanguageServerHost
+    private var channels: [String: LanguageServerKey] = [:]
+    private var noticed: Set<String> = []
+    /// Server messages go to the page one after another, in the order the server wrote them.
+    private var lspTail: Task<Void, Never>?
+
+    private static var lastID = 0
+    private static func nextID() -> Int {
+        lastID += 1
+        return lastID
+    }
 
     var fontSize = baseFontSize {
         didSet { if fontSize != oldValue { Task { _ = await send(.setFontSize(fontSize)) } } }
     }
 
-    init(roots: [String], page: URL) {
+    init(roots: [String], page: URL, servers: LanguageServerHost = .shared) {
         files = EditorFiles(roots: roots)
+        self.servers = servers
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(EditorPageScheme(folder: page.path), forURLScheme: Self.scheme)
         web = EditorPageView(frame: .zero, configuration: config)
@@ -119,12 +136,20 @@ final class EditorPageView: WKWebView {
     /// from disk, and hold commands until the new page is ready. An unsaved edit is lost.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Self.log.error("editor page ended; loading it again")
+        // the new page has no language client: its servers stop, and its files start them again when they open
+        close()
         ready = false
         waiting = []
         loadPage()
         guard let shown else { return }
         onDirty?(shown.path, false)
         Task { _ = await open(shown.path, line: shown.line) }
+    }
+
+    /// The editor goes away: its language servers stop.
+    func close() {
+        servers.release(editor: editorID)
+        channels = [:]
     }
 
     func setReadOnly(_ path: String, _ readOnly: Bool) async {
@@ -159,12 +184,58 @@ final class EditorPageView: WKWebView {
         case .ready: becomeReady()
         case .dirtyChanged(let path, let dirty): onDirty?(path, dirty)
         case .log(let text): Self.log.error("editor page: \(text, privacy: .public)")
+        case .lspSend(let channel, let message):
+            // answered here, not in a Task: the client's messages reach the server in the order it sent them
+            let sent = channels[channel].map { servers.send($0, message) } ?? false
+            replyHandler(Self.object(sent ? .ok : .refused(.noChannel)), nil)
+            return
+        case .lspStart(let languageId, let path):
+            Task { replyHandler(Self.object(await startLanguageServer(languageId, path)), nil) }
+            return
         case .readFile, .writeFile, .cursor: break
         }
-        Task {
-            let reply = await files.handle(request)
-            let object = (try? JSONEncoder().encode(reply)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
-            replyHandler(object, nil)
+        Task { replyHandler(Self.object(await files.handle(request)), nil) }
+    }
+
+    private static func object(_ reply: EditorReply) -> Any? {
+        (try? JSONEncoder().encode(reply)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
+    }
+
+    /// The page opened a file: its language's server from the fixed table (D#9 a), in the root the file is in.
+    private func startLanguageServer(_ languageId: String, _ path: String) async -> EditorReply {
+        guard let spec = languageServer(for: languageId) else { return .refused(.noLanguageServer) }
+        guard let root = await files.root(of: path) else { return .refused(.outside) }
+        let key = LanguageServerKey(editor: editorID, server: spec.id, root: root)
+        if !servers.isRunning(key) {
+            // xcrun --find may take a moment: off the main actor
+            switch await Task.detached { launch(spec) }.value {
+            case .notInstalled(let notice):
+                if noticed.insert(spec.id).inserted { onLanguageNotice?(notice) }
+                return .refused(.languageServerMissing)
+            case .run(let executable, let arguments):
+                let channel = key.channel
+                if let failure = servers.start(key, executable: executable, arguments: arguments,
+                                               onMessage: { [weak self] in self?.forward(.lspReceive(channel: channel, message: $0)) },
+                                               onExit: { [weak self] in self?.serverEnded(key, label: spec.label) }) {
+                    return .failed(message: failure)
+                }
+            }
+        }
+        channels[key.channel] = key
+        return .lspStarted(channel: key.channel, root: root, languages: spec.languages)
+    }
+
+    private func serverEnded(_ key: LanguageServerKey, label: String) {
+        channels[key.channel] = nil
+        forward(.lspClosed(channel: key.channel))
+        onLanguageNotice?("\(label) 언어 서버가 종료됐습니다. 그 언어의 파일을 다시 열면 새로 시작합니다.")
+    }
+
+    private func forward(_ command: EditorCommand) {
+        let previous = lspTail
+        lspTail = Task {
+            await previous?.value
+            await send(command)
         }
     }
 

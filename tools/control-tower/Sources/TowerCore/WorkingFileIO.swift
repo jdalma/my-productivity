@@ -124,6 +124,8 @@ public struct SelfWriteRegistry: Sendable {
 // ponytail: one actor serializes every save, of any file. Per-file queues if saving many files at once ever waits.
 public actor WorkingFileWriter {
     private var selfWrites = SelfWriteRegistry()
+    /// Each file's last save by this writer, by real path: its bytes' hash (T45).
+    private var saved: [String: String] = [:]
     private let now: @Sendable () -> Date
     /// What `trash` does with a file: the user's trash, or a test's stand-in for it.
     let toTrash: @Sendable (URL) throws -> Void
@@ -152,6 +154,10 @@ public actor WorkingFileWriter {
         if current == wanted { return .unchanged(hash: wanted) }
         guard current == expected else { return .conflict(current: current) }
         let mode = (try? FileManager.default.attributesOfItem(atPath: real))?[.posixPermissions]
+        // Noted before the bytes reach the disk, in this synchronous write: a watch check of the file, which waits for
+        // this actor, comes after it and finds it. Kept in a caller across its `await` of this write, it could be read
+        // before it was set (T45: the app's save marked as a worker's).
+        saved[real] = wanted
         do {
             // `.atomic` (a new file renamed over the name) is what keeps a hard link inside the roots from writing
             // through to a file outside them, which `writeTarget` cannot see: never write in place here (R15 L1,
@@ -159,14 +165,21 @@ public actor WorkingFileWriter {
             try bytes.write(to: url, options: .atomic)
             if let mode { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: real) }
         } catch {
+            saved[real] = nil
             return .failed(error.localizedDescription)
         }
         wrote(real)
         return .written(hash: wanted)
     }
 
-    /// Whether `realPath` was written by this writer within the last 750 ms.
-    public func isSelfWrite(_ realPath: String) -> Bool { selfWrites.contains(realPath, at: now()) }
+    /// Whether the change at `realPath` is this writer's: anything it did there within the last 750 ms (a save, a file
+    /// made, moved or trashed), or its last save while the disk still holds those bytes, however late a watch asks
+    /// (a loaded machine runs past the window).
+    public func isSelfWrite(_ realPath: String) -> Bool {
+        if selfWrites.contains(realPath, at: now()) { return true }
+        guard let hash = saved[realPath], let data = FileManager.default.contents(atPath: realPath) else { return false }
+        return sha256(data) == hash
+    }
 }
 
 // MARK: - Creating, renaming and trashing (G4 I9)

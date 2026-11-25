@@ -42,8 +42,12 @@ final class IdeState {
     func take(_ request: IdeOpenRequest) async {
         guard let session, session.root == request.root else { return pending = request }
         pending = nil
-        findingMarks = request.marks
-        await session.show(await Task.detached { targetOpen(request.target) }.value)
+        // the markers' places run git: off the main actor, with the file's read
+        let (found, command) = await Task.detached {
+            (marks(of: request.findings, workerCwd: request.root), targetOpen(request.target))
+        }.value
+        findingMarks = found
+        await session.show(command)
         await sendMarkers()
     }
 
@@ -276,12 +280,12 @@ struct IdeTreeMenu: View {
     }
 }
 
-/// A file:line a task board text names, for the board window's editor of `root` to show read-only (G4 I12, D#17),
-/// with the open findings of its task.
+/// A file:line a task board text names, for the board window's editor of `root` (the assignee's worktree) to show
+/// read-only (G4 I12, D#17), with its task's open findings to mark (W5).
 struct IdeOpenRequest: Equatable, Sendable {
     var root: String
     var target: FileTarget
-    var marks: [FindingMark]
+    var findings: [FindingPlace]
 }
 
 extension EnvironmentValues {

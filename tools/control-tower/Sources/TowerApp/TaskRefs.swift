@@ -59,7 +59,7 @@ struct FindingPlace: Hashable, Sendable {
 
 /// The places the open findings name, each marked faint when its file changed after the reviewed commit. Runs git:
 /// off the main actor.
-func findingMarks(_ places: [FindingPlace], workerCwd: String?) -> [FindingMark] {
+func marks(of places: [FindingPlace], workerCwd: String?) -> [FindingMark] {
     places.flatMap { p in
         let targets = (fileRefs(in: p.summary) + fileRefs(in: p.repro ?? "")).compactMap { refTarget($0, repo: p.repo, workerCwd: workerCwd) }
         return targets.reduce(into: [FileTarget]()) { if !$0.contains($1) { $0.append($1) } }.map { t in

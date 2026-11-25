@@ -410,8 +410,6 @@ struct TaskBoardView: View {
     @State private var documentNotice: String?
     @AppStorage(fileEditorKey) private var storedEditor = ""
     @State private var listHeight: CGFloat = 0
-    /// The open findings' places of the task shown, for the markers a link's file gets in the board window (G4 W5).
-    @State private var linkMarks: [FindingMark] = []
     @Environment(\.undoManager) private var undoManager
     @Environment(\.boardFontScale) private var scale
 
@@ -686,12 +684,8 @@ struct TaskBoardView: View {
                            boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                            showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
                 .environment(\.openTargetInIde, row.map { row in
-                    { target in openInBoard(IdeOpenRequest(root: row.session.cwd, target: target, marks: linkMarks), row.id) }
+                    { target in openInBoard(IdeOpenRequest(root: row.session.cwd, target: target, findings: places), row.id) }
                 })
-                // the markers' places run git: off the main actor, again when the findings or the worker's folder change
-                .task(id: places.map(\.id) + [row?.session.cwd ?? ""]) { [cwd = row?.session.cwd] in
-                    linkMarks = await Task.detached { findingMarks(places, workerCwd: cwd) }.value
-                }
         } else {
             overview(s, now: now)
         }

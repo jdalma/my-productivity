@@ -39,15 +39,15 @@ private func until(_ done: () -> Bool) async throws {
     try "a\nb\nc\n".write(toFile: file, atomically: true, encoding: .utf8)
     state.show(root: other)  // the board window shows another worker
 
-    let mark = FindingMark(target: .file(path: file, line: 2), severity: "must", id: "R1 M1", summary: "rounds", changed: false)
-    await state.take(IdeOpenRequest(root: work, target: .file(path: file, line: 2), marks: [mark]))
+    let finding = FindingPlace(id: "R1 M1", severity: "must", summary: "`area.swift:2` rounds", repo: work)
+    await state.take(IdeOpenRequest(root: work, target: .file(path: file, line: 2), findings: [finding]))
     #expect(state.shown == nil && state.session?.root == other)  // not in another worktree's editor
 
     state.show(root: work)  // the board selects the worker's row
     try await until { marked(state, file) != nil }
     #expect(state.shown == file && state.readOnly)
     #expect(state.editor?.waiting.contains { if case .openFile(file, _, _, 2, true) = $0 { true } else { false } } == true)
-    #expect(marked(state, file) == [EditorMarker(line: 2, severity: .error, message: "R1 M1 rounds")])
+    #expect(marked(state, file) == [EditorMarker(line: 2, severity: .error, message: "R1 M1 `area.swift:2` rounds")])
 
     // never unlocked: it is no buffer of the editor's
     await state.session?.toggleLock()
@@ -59,10 +59,10 @@ private func until(_ done: () -> Bool) async throws {
     let work = try folder()
     state.show(root: work)
     try "x\n".write(toFile: work + "/a.md", atomically: true, encoding: .utf8)
-    await state.take(IdeOpenRequest(root: work, target: .file(path: work + "/a.md", line: 1), marks: []))
+    await state.take(IdeOpenRequest(root: work, target: .file(path: work + "/a.md", line: 1), findings: []))
     #expect(state.shown == work + "/a.md")
 
     // a commit that is not there: nothing shown in its place
-    await state.take(IdeOpenRequest(root: work, target: .commit(repo: work, commit: "abc1234", path: "a.md", line: 1), marks: []))
+    await state.take(IdeOpenRequest(root: work, target: .commit(repo: work, commit: "abc1234", path: "a.md", line: 1), findings: []))
     #expect(state.status == "열 수 없음")
 }

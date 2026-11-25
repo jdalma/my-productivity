@@ -22,6 +22,11 @@ final class IdeSession {
     /// The path of a file Swift read itself and the page shows (`show`), in place of the shown buffer; nil when a
     /// buffer shows.
     private(set) var outside: String?
+    /// The files a worker wrote lately (W3): marked in the tree and the tabs, and warned of before an edit.
+    private(set) var writes = WorkerWrites()
+    /// The worker of this worktree, for the warning; nil says 워커.
+    var worker: String?
+    @ObservationIgnored private var expiry: Task<Void, Never>?
 
     init(root: String?, page: URL? = editorPageFolder) {
         self.root = root
@@ -30,15 +35,41 @@ final class IdeSession {
         editor.onDirty = { [weak self] path, dirty in
             guard let self else { return }
             let effect = buffers.setDirty(path, dirty)
+            // the first edit of an unlocked file a worker just wrote: the next Edit of the worker may fail on it, or
+            // undo it. Only an unlocked file: the page may report a locked one dirty for a moment as it takes the disk's text
+            if dirty, buffers.files[path]?.readOnly == false, let warning = writtenWarning(path) { status = warning }
             Task { await self.run(effect) }
         }
         editor.onWrite = { [weak self] path, reply in self?.wrote(path, reply) }
         editor.onRestart = { [weak self] in self?.restarted() }
         let files = editor.files
+        let base = realPath(root) ?? root
         watch = FileWatch(root: root) { [weak self] batch in
             Task { @MainActor in
+                // the app's own saves and file operations are not the worker's
+                let own = await files.ownWrites(batch.changed.map { base + "/" + $0 })
+                self?.recordWrites(batch, root: base, own: own)
                 for command in await files.diskChanged(batch, root: root) { await self?.disk(command) }
             }
+        }
+    }
+
+    /// "<worker>가 N초 전에 이 파일을 썼습니다" while a worker's write of `path` is recent; nil otherwise.
+    func writtenWarning(_ path: String) -> String? {
+        writes.age(path, at: Date()).map { workerWriteWarning(worker: worker, age: $0) }
+    }
+
+    /// Takes in a watch batch, and drops each write as it gets old, so the marks go without another event.
+    private func recordWrites(_ batch: FileWatchBatch, root: String, own: Set<String>) {
+        writes.record(batch, root: root, own: own, at: Date())
+        guard expiry == nil, !writes.last.isEmpty else { return }
+        expiry = Task { [weak self] in
+            // weak across each sleep: a session no window shows is not kept for its marks
+            while let oldest = self?.writes.last.values.min() {
+                try? await Task.sleep(for: .seconds(max(0.1, oldest.timeIntervalSinceNow + WorkerWrites.window)))
+                self?.writes.expire(at: Date())
+            }
+            self?.expiry = nil
         }
     }
 
@@ -271,6 +302,8 @@ func unsavedQuitMessage(_ paths: [String], home: String) -> String? {
 /// under it or the file is gone.
 struct IdeTabs: View {
     let buffers: EditorBuffers
+    /// The files a worker wrote lately (W3), marked with ✎.
+    var written: Set<String> = []
     let show: (String) -> Void
 
     var body: some View {
@@ -278,7 +311,7 @@ struct IdeTabs: View {
             HStack(spacing: 2) {
                 ForEach(buffers.tabs, id: \.self) { path in
                     Button { show(path) } label: {
-                        Text(Self.label(path, buffers.files[path]))
+                        Text(Self.label(path, buffers.files[path]) + (written.contains(path) ? " ✎" : ""))
                             .scaledFont(.caption1, design: .monospaced).lineLimit(1)
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(path == buffers.shown ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 4))

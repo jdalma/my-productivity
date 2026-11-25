@@ -275,3 +275,16 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     // the same text: no lines
     #expect(try #require(bufferDiff(path: a, text: "one\ntwo\nthree\n")).lines.isEmpty)
 }
+
+/// W3 (T35): a write the editor saved is the app's own, not a worker's.
+@Test func theEditorTellsItsOwnSavesFromOtherWrites() async {
+    let root = tempTree()
+    put("one\n", root + "/a.txt")
+    put("x\n", root + "/b.txt")
+    let files = EditorFiles(roots: [root])
+    let hash = await read(files, root + "/a.txt")!
+    _ = await files.setReadOnly(root + "/a.txt", false)
+    _ = await files.handle(.writeFile(path: root + "/a.txt", text: "two\n", baseHash: hash))
+    put("y\n", root + "/b.txt")  // a worker's write
+    #expect(await files.ownWrites([root + "/a.txt", root + "/b.txt"]) == [root + "/a.txt"])
+}

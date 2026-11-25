@@ -42,6 +42,22 @@ final class IdeState {
     /// What the area says when its session cannot: no editor page for a document.
     private var note = ""
 
+    /// The worker of the code shown, named in the warning of a file it just wrote (W3).
+    var worker: String? { didSet { session?.worker = worker } }
+
+    /// The tree's paths (from its top) of the files a worker wrote lately (W3).
+    var workerWritten: Set<String> {
+        guard let session, let root, let top = changes.diff(for: root)?.toplevel else { return [] }
+        let prefix = (realPath(top) ?? top) + "/"
+        return Set(session.writes.last.keys.compactMap { $0.hasPrefix(prefix) ? String($0.dropFirst(prefix.count)) : nil })
+    }
+
+    /// The warning before unlocking the shown file while a worker's write of it is recent (W3); nil otherwise.
+    var unlockWarning: String? {
+        guard readOnly, session?.outside == nil, let shown = buffers.shown else { return nil }
+        return session?.writtenWarning(shown)
+    }
+
     /// The worktree the editor reads and may save in; nil for a commit or no source.
     var root: String? { if case .worktree(let r) = source { r } else { nil } }
 
@@ -58,6 +74,7 @@ final class IdeState {
         if let root { changes.select(workspace: root) }
         // A window that never unlocks takes no waiting editor: its files may be unlocked and edited (D#8 b).
         session = if lockable, let root { IdeParking.session(for: root, page: page) } else { IdeSession(root: root, page: page) }
+        session?.worker = worker
         note = ""
         if let waiting = waitingDocument, waiting.source == source {
             waitingDocument = nil
@@ -133,8 +150,12 @@ final class IdeState {
 struct IdeArea: View {
     let source: TaskCodeSource?
     var terminal: TmuxRef?
+    /// The worker whose code this is, for the warning of a file it just wrote.
+    var worker: String?
     let at: String
     @Bindable var state: IdeState
+    /// The warning asked before unlocking a file a worker just wrote.
+    @State private var unlockAsked: String?
     @AppStorage(IdeLayout.storageKey) private var stored = ""
 
     var body: some View {
@@ -172,6 +193,7 @@ struct IdeArea: View {
             }
         }
         .onDisappear { state.areaGone() }
+        .onChange(of: worker, initial: true) { state.worker = $1 }
         .sheet(isPresented: Binding { state.session?.comparing != nil } set: { if !$0 { state.session?.comparing = nil } }) {
             if let file = state.session?.comparing { IdeCompare(file: file) { state.session?.comparing = nil } }
         }
@@ -184,6 +206,7 @@ struct IdeArea: View {
             // the tree's file menu (I9): the board window's only, the task board window reads
             DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick,
                             menu: state.lockable ? { line in AnyView(IdeTreeMenu(line: line, state: state)) } : nil)
+                .environment(\.workerWritten, state.workerWritten)
         case .commit(_, _, let commit)?:
             CommitTreeSidebar(commit: commit, state: state)
         case nil:
@@ -205,7 +228,7 @@ struct IdeArea: View {
             Divider()
             // buffers (I7): the open files once there are two, and the shown file's banner
             if state.buffers.tabs.count > 1, state.session?.outside == nil {
-                IdeTabs(buffers: state.buffers) { path in Task { await state.session?.open(path) } }
+                IdeTabs(buffers: state.buffers, written: state.session.map { Set($0.writes.last.keys) } ?? []) { path in Task { await state.session?.open(path) } }
                 Divider()
             }
             if let banner = state.buffers.banner {
@@ -241,7 +264,12 @@ struct IdeArea: View {
             Text(state.status).scaledFont(.caption1).foregroundStyle(.secondary).lineLimit(1)
             if state.lockable {
                 Button(state.readOnly ? "잠금 해제" : "잠그기", systemImage: state.readOnly ? "lock" : "lock.open") {
-                    Task { await state.session?.toggleLock() }
+                    if let warning = state.unlockWarning { unlockAsked = warning } else { Task { await state.session?.toggleLock() } }
+                }
+                .confirmationDialog(unlockAsked ?? "", isPresented: Binding { unlockAsked != nil } set: { if !$0 { unlockAsked = nil } }) {
+                    Button("잠금 해제") { Task { await state.session?.toggleLock() } }
+                } message: {
+                    Text("워커가 이 파일을 계속 고치는 중일 수 있습니다. 지금 고치면 워커의 다음 편집이 실패하거나 내 편집을 덮을 수 있습니다.")
                 }
                 .disabled(state.buffers.shown == nil || state.session?.outside != nil)
                 .help("작업 트리 파일은 읽기 전용으로 열립니다. 풀면 이 파일을 고쳐 저장할 수 있습니다")

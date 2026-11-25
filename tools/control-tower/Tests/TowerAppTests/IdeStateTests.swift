@@ -113,3 +113,19 @@ private func host(_ view: some View, width: CGFloat) -> NSWindow {
     await state.loadCommitTree()
     #expect(state.commitTree?.mode == .all && state.commitTree?.nodes == nil)  // a new mode is read, and fails
 }
+
+// MARK: - T35 (G4 I14)
+
+/// W3: a file written in the worktree by something other than the app is marked, in the tree's terms too.
+@MainActor @Test func aFileWrittenFromOutsideIsMarkedAsTheWorkers() async throws {
+    let work = try folder()
+    try "x\n".write(toFile: work + "/a.swift", atomically: true, encoding: .utf8)
+    let state = IdeState(lockable: true, page: try page())
+    state.show(.worktree(work))
+    state.worker = "analyst"
+    try await Task.sleep(for: .milliseconds(300))  // the watch starts
+    try "y\n".write(toFile: work + "/a.swift", atomically: true, encoding: .utf8)
+    try await until { state.session?.writes.last[work + "/a.swift"] != nil }
+    #expect(state.session?.writtenWarning(work + "/a.swift")?.hasPrefix("analyst가 ") == true)
+    state.areaGone()
+}

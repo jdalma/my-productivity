@@ -732,7 +732,7 @@ private struct DetailView: View {
             workspace: s.cwd,
             conversation: [("나", s.lastUser), ("에이전트", s.lastAssistant)],
             terminal: s.tmux,
-            tasks: workerTaskLine(row, team: team))
+            tasks: workerTaskLine(row, team: team), worker: row.worker?.workerName)
     }
 
     private func past(_ h: HistorySession) -> some View {
@@ -762,7 +762,7 @@ private struct DetailView: View {
     /// A live session's detail is its head over its terminal, which fills the rest; a session without one scrolls.
     private func detailBody(title: String, @ViewBuilder badges: () -> some View,
                             facts: [(String, String)], workspace: String, conversation: [(String, String)],
-                            terminal: TmuxRef?, tasks: WorkerTaskLine?) -> some View {
+                            terminal: TmuxRef?, tasks: WorkerTaskLine?, worker: String? = nil) -> some View {
         let head = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(title).scaledFont(.title2, weight: .bold).lineLimit(1)
@@ -786,7 +786,7 @@ private struct DetailView: View {
             if let terminal {
                 VStack(alignment: .leading, spacing: 12) {
                     head
-                    IdeArea(source: .worktree(workspace), terminal: terminal, at: board.at, state: ide)
+                    IdeArea(source: .worktree(workspace), terminal: terminal, worker: worker, at: board.at, state: ide)
                         .frame(maxHeight: .infinity)
                 }
                 .padding(16)

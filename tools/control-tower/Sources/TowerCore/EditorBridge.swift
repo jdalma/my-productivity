@@ -261,6 +261,14 @@ public actor EditorFiles {
         return await writer.trash(path, roots: roots)
     }
 
+    /// Which of `paths` (real paths) this editor saved within the last moment (`SelfWriteRegistry.ttl`): a watch
+    /// event of one of them is the app's own save, not a worker's write (W3).
+    public func ownWrites(_ paths: [String]) async -> Set<String> {
+        var own: Set<String> = []
+        for p in paths where await writer.isSelfWrite(p) { own.insert(p) }
+        return own
+    }
+
     public func handle(_ request: EditorRequest) async -> EditorReply {
         switch request {
         case .readFile(let path): return read(path)

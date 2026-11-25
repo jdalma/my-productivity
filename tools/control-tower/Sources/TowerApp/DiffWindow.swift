@@ -126,6 +126,8 @@ struct DiffTreeSidebar: View {
     @Bindable var state: ChangesState
     /// What a picked line does; the diff window's `state.pick` when nil.
     var pick: ((TreeLine) -> Void)?
+    /// The context menu of a line, or of the list where no line is (nil); no menu when nil, as in the diff window.
+    var menu: ((TreeLine?) -> AnyView)?
 
     private struct FullTreeKey: Equatable {
         var mode: TreeMode
@@ -133,7 +135,7 @@ struct DiffTreeSidebar: View {
     }
 
     var body: some View {
-        FolderTreeList(tree: state.tree, pick: pick ?? state.pick) {
+        FolderTreeList(tree: state.tree, pick: pick ?? state.pick, menu: menu) {
             if let diff = state.diff(for: workspace) {
                 switch state.treeMode {
                 case .changed:
@@ -180,6 +182,7 @@ struct DiffTreeSidebar: View {
 struct FolderTreeList<Rows: View>: View {
     @Bindable var tree: FolderTreeState
     let pick: (TreeLine) -> Void
+    var menu: ((TreeLine?) -> AnyView)?
     @ViewBuilder let rows: Rows
     @FocusState private var focused: Bool
 
@@ -190,16 +193,22 @@ struct FolderTreeList<Rows: View>: View {
             .focused($focused)
             .onAppear { focused = true }
             .onChange(of: tree.picked) { _, line in if let line { pick(line) } }
-            .contextMenu(forSelectionType: TreeLine.self) { _ in } primaryAction: { lines in lines.first.map(pick) }
+            .contextMenu(forSelectionType: TreeLine.self) { lines in menu?(lines.first) } primaryAction: { lines in lines.first.map(pick) }
     }
 }
 
 /// A tree line and, while it is an open folder, the lines under it; a closed folder builds nothing below it.
+extension EnvironmentValues {
+    /// The IDE tree's paths (from its top) of files a worker wrote lately (G4 I14 W3); empty in the diff window.
+    @Entry var workerWritten: Set<String> = []
+}
+
 struct TreeNodeRow: View {
     let node: ChangeTreeNode
     let part: DiffPart?
     let openByDefault: (String) -> Bool
     let tree: FolderTreeState
+    @Environment(\.workerWritten) private var workerWritten
 
     var body: some View {
         let line = TreeLine(node, part: part)
@@ -221,6 +230,10 @@ struct TreeNodeRow: View {
                 Text(node.name).lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(change == .unchanged ? .secondary : .primary)
                 Spacer(minLength: 4)
+                if workerWritten.contains(node.path) {
+                    Image(systemName: "pencil").foregroundStyle(.orange).help("워커가 최근 \(Int(WorkerWrites.window))초 안에 쓴 파일")
+                        .accessibilityLabel("워커가 최근에 씀")
+                }
                 marker(change).foregroundStyle(.secondary)
             }
             .scaledFont(.caption1, design: .monospaced)

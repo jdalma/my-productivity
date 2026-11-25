@@ -56,6 +56,11 @@ struct TaskBoardWindow: View {
                                   tower.boardSelectRequest = id
                                   openWindow(id: "board")
                               },
+                              openInBoard: { request, row in
+                                  tower.ideOpenRequest = request
+                                  tower.boardSelectRequest = row
+                                  openWindow(id: "board")
+                              },
                               reload: { tower.reloadTaskBoards() },
                               navigation: navigation,
                               searchFocus: searchFocus,

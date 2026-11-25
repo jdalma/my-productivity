@@ -13,19 +13,31 @@ import TowerCore
         let process: Process
         let input: FileHandle
         var reader = LSPFrameReader()
-        let onMessage: (String) -> Void
-        let onExit: () -> Void
+        let launch: Launch
 
-        init(process: Process, input: FileHandle, onMessage: @escaping (String) -> Void, onExit: @escaping () -> Void) {
+        init(process: Process, input: FileHandle, launch: Launch) {
             self.process = process
             self.input = input
-            self.onMessage = onMessage
-            self.onExit = onExit
+            self.launch = launch
         }
+
+        var onMessage: (String) -> Void { launch.onMessage }
+        var onExit: () -> Void { launch.onExit }
+    }
+
+    /// How a server was started, to start it the same way again (`resume`).
+    private struct Launch {
+        let key: LanguageServerKey
+        let executable: String
+        let arguments: [String]
+        let onMessage: (String) -> Void
+        let onExit: () -> Void
     }
 
     private var pool = LanguageServerPool()
     private var servers: [LanguageServerKey: Server] = [:]
+    /// The servers of an editor no window shows, stopped until it shows again (T41), by editor.
+    private var suspended: [Int: [Launch]] = [:]
     private var quit: NSObjectProtocol?
 
     init() {
@@ -51,14 +63,17 @@ import TowerCore
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
+        // A key may run a new process before the old one's end comes (stopped, then started again at once: T41, R40 M1):
+        // what a process reports goes to the server of its key only while that server is still this process.
+        let id = ObjectIdentifier(process)
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
             // the main queue keeps the reads in order; a Task per read might not
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.received(data, from: key) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.received(data, from: key, process: id) } }
         }
         process.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.ended(key) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.ended(key, process: id) } }
         }
         do {
             try process.run()
@@ -66,7 +81,8 @@ import TowerCore
             pool.exited(key)
             return error.localizedDescription
         }
-        servers[key] = Server(process: process, input: stdin.fileHandleForWriting, onMessage: onMessage, onExit: onExit)
+        servers[key] = Server(process: process, input: stdin.fileHandleForWriting,
+                              launch: Launch(key: key, executable: executable, arguments: arguments, onMessage: onMessage, onExit: onExit))
         Self.log.info("language server \(key.server, privacy: .public) started in \(key.root, privacy: .public)")
         return nil
     }
@@ -83,8 +99,28 @@ import TowerCore
         }
     }
 
-    /// An editor closed: its servers stop.
-    func release(editor: Int) { pool.release(editor: editor).forEach(stop) }
+    /// An editor closed: its servers stop, and the ones it waited to start again are forgotten.
+    func release(editor: Int) {
+        suspended[editor] = nil
+        pool.release(editor: editor).forEach(stop)
+    }
+
+    /// An editor no window shows (IdeParking): its servers stop, kept to start again by `resume`. The keys stopped.
+    func suspend(editor: Int) -> [LanguageServerKey] {
+        let keys = pool.release(editor: editor)
+        suspended[editor, default: []] += keys.compactMap { servers[$0]?.launch }
+        keys.forEach(stop)
+        return keys
+    }
+
+    /// The editor shows again: the servers `suspend` stopped start again as they were started.
+    func resume(editor: Int) {
+        for l in suspended.removeValue(forKey: editor) ?? [] {
+            if let failure = start(l.key, executable: l.executable, arguments: l.arguments, onMessage: l.onMessage, onExit: l.onExit) {
+                Self.log.error("language server \(l.key.server, privacy: .public) did not start again: \(failure, privacy: .public)")
+            }
+        }
+    }
 
     func stopAll() { pool.stopAll().forEach(stop) }
 
@@ -95,8 +131,8 @@ import TowerCore
         server.process.terminate()
     }
 
-    private func received(_ data: Data, from key: LanguageServerKey) {
-        guard let server = servers[key] else { return }
+    private func received(_ data: Data, from key: LanguageServerKey, process: ObjectIdentifier) {
+        guard let server = servers[key], ObjectIdentifier(server.process) == process else { return }
         do {
             for body in try server.reader.push(data) {
                 let message = String(decoding: body, as: UTF8.self)
@@ -118,8 +154,9 @@ import TowerCore
         return (m["method"] as? String ?? (m["error"] != nil ? "error" : "result")) + id
     }
 
-    private func ended(_ key: LanguageServerKey) {
-        guard let server = servers.removeValue(forKey: key) else { return }
+    private func ended(_ key: LanguageServerKey, process: ObjectIdentifier) {
+        guard let server = servers[key], ObjectIdentifier(server.process) == process else { return }
+        servers[key] = nil
         pool.exited(key)
         Self.log.error("language server \(key.server, privacy: .public) ended (status \(server.process.terminationStatus))")
         server.onExit()

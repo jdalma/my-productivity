@@ -179,6 +179,18 @@ final class EditorPageView: WKWebView {
         }
     }
 
+    /// No window shows the editor, which waits for its edits (IdeParking, T41): its servers stop and the page's clients
+    /// close, as when a server ends.
+    func suspendLanguageServers() {
+        for key in servers.suspend(editor: editorID) { forward(.lspClosed(channel: key.channel)) }
+    }
+
+    /// Shown again: the servers run again, and the page connects to them for its open files.
+    func resumeLanguageServers() {
+        servers.resume(editor: editorID)
+        forward(.reconnectLanguageServers)
+    }
+
     /// The editor goes away: its language servers stop.
     func close() {
         servers.release(editor: editorID)

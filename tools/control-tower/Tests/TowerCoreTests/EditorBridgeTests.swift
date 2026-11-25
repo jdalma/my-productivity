@@ -61,6 +61,7 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     #expect(NSDictionary(dictionary: try json(EditorCommand.setReadOnly(path: "/w/a", readOnly: false)))
             == ["kind": "setReadOnly", "path": "/w/a", "readOnly": false])
     #expect(NSDictionary(dictionary: try json(EditorCommand.save)) == ["kind": "save"])
+    #expect(NSDictionary(dictionary: try json(EditorCommand.reconnectLanguageServers)) == ["kind": "reconnectLanguageServers"])
 }
 
 // MARK: - Reads and writes the page asks for

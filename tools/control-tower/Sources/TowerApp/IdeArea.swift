@@ -98,9 +98,8 @@ final class IdeState {
         session = nil
     }
 
-    /// Lets go of the editor: one with edits that are not saved waits in `IdeParking`; any other is gone, and its
-    /// language servers stop (K12: a root no longer shown has none).
-    // ponytail: a waiting editor keeps its servers, as its page keeps their clients; stop them and tell the page (lspClosed) if idle servers cost too much
+    /// Lets go of the editor: one with edits that are not saved waits in `IdeParking`, its servers stopped until it
+    /// shows again (T41); any other is gone, and its language servers stop (K12: a root no longer shown has none).
     private func leave() {
         guard let session else { return }
         if !IdeParking.park(session) { session.editor?.close() }

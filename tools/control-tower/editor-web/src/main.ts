@@ -218,6 +218,12 @@ async function main() {
       closed(m.channel)
       return { result: 'ok' }
     },
+    /** Shown again after waiting with its servers stopped (T41): each open file's language connects to its server
+     *  again, one at a time so one channel gets one client. */
+    async reconnectLanguageServers() {
+      for (const [path, f] of files) await connectLanguageServer(model(f).getLanguageId(), path)
+      return { result: 'ok' }
+    },
     /** The open findings beside their lines (G4 W5), on the file's model: they stay while it is open. */
     /** On the path's buffer and its link document alike. */
     setMarkers(m) {

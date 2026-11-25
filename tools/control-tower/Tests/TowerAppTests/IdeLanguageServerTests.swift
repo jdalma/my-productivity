@@ -64,3 +64,55 @@ import Testing
     editor.webViewWebContentProcessDidTerminate(editor.web)
     #expect(!host.isRunning(key), "the new page starts its servers again when it opens a file")
 }
+
+/// T41: an editor kept for its edits that are not saved (IdeParking) runs no server while no window shows it; the page
+/// hears its clients closed (lspClosed). Shown again, the same servers start again and the page connects anew.
+@MainActor @Test func aParkedEditorsServersStopAndStartAgainWhenItIsShown() async throws {
+    let f = try folders()
+    let host = LanguageServerHost()
+    let state = IdeState { root in EditorController(roots: [root], page: URL(fileURLWithPath: f.page), servers: host) }
+    defer { host.stopAll() }
+    try "x\n".write(toFile: f.a + "/a.swift", atomically: true, encoding: .utf8)
+
+    state.show(root: f.a)
+    let editor = try #require(state.editor)
+    let key = runServer(host, for: editor, root: f.a)
+    // an edit not saved: the editor waits in IdeParking when another worktree shows (files go by their real path)
+    let file = try #require(realPath(f.a + "/a.swift"))
+    await state.session?.open(file)
+    editor.onDirty?(file, true)
+    #expect(state.buffers.unsaved == [file])
+
+    state.show(root: f.b)
+    #expect(!host.isRunning(key), "a parked editor's server stops")
+    try await until { editor.waiting.contains(.lspClosed(channel: key.channel)) }
+
+    state.show(root: f.a)
+    #expect(state.editor === editor, "the waiting editor, edits and all")
+    #expect(host.isRunning(key), "its server runs again")
+    try await until { editor.waiting.contains(.reconnectLanguageServers) }
+}
+
+@MainActor private func until(_ done: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(5)
+    while !done(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(done())
+}
+
+/// R40 M1: a server started again under the key of one just stopped (parked, then shown at once) is not taken for
+/// the old one: the old process's end and output do not touch it, and the app does not stop.
+@MainActor @Test func aServerStartedAgainAtOnceOutlivesTheEndOfTheOldOne() async throws {
+    let f = try folders()
+    let host = LanguageServerHost()
+    defer { host.stopAll() }
+    let key = LanguageServerKey(editor: 4101, server: "echo", root: f.a)
+    var exits = 0
+    _ = host.start(key, executable: "/bin/cat", arguments: [], onMessage: { _ in }, onExit: { exits += 1 })
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(host.suspend(editor: 4101) == [key])
+    host.resume(editor: 4101)  // before the old process's end is reported
+    try await Task.sleep(for: .seconds(1))
+    #expect(host.isRunning(key), "the new server still runs")
+    #expect(exits == 0, "a stop is no end by itself")
+    #expect(host.send(key, #"{"jsonrpc":"2.0","method":"x"}"#))
+}

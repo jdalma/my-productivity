@@ -59,6 +59,7 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     #expect(NSDictionary(dictionary: try json(EditorCommand.setReadOnly(path: "/w/a", readOnly: false)))
             == ["kind": "setReadOnly", "path": "/w/a", "readOnly": false])
     #expect(NSDictionary(dictionary: try json(EditorCommand.save)) == ["kind": "save"])
+    #expect(NSDictionary(dictionary: try json(EditorCommand.reconnectLanguageServers)) == ["kind": "reconnectLanguageServers"])
 }
 
 // MARK: - Reads and writes the page asks for
@@ -314,4 +315,39 @@ private final class Clock: @unchecked Sendable {
     let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(EditorCommand.showFile(path: "/w/a.swift", text: "x", line: 2))) as! [String: Any]
     #expect(json["kind"] as? String == "showFile" && json["path"] as? String == "/w/a.swift" && json["text"] as? String == "x"
             && json["line"] as? Int == 2)
+}
+
+/// T45: a watch check made while the save is still in the writer (its bytes on the disk, the save not yet answered),
+/// and late, past the 750 ms window: the save is the app's own all the same.
+@Test func aWatchCheckDuringTheSaveFindsItTheAppsOwn() async {
+    let root = tempTree()
+    put("one\n", root + "/a.txt")
+    let hook = InFlight()
+    let files = EditorFiles(roots: [root], writer: WorkingFileWriter(now: { hook.now() }))
+    let hash = await read(files, root + "/a.txt")!
+    _ = await files.setReadOnly(root + "/a.txt", false)
+    hook.during = { Task { hook.own = await files.ownWrites([root + "/a.txt"]) } }
+    _ = await files.handle(.writeFile(path: root + "/a.txt", text: "two\n", baseHash: hash))
+    await hook.check?.value
+    #expect(hook.own == [root + "/a.txt"])
+}
+
+/// The writer's clock: its first call after `during` is set comes from inside a save (it notes the save's time once
+/// the bytes are on the disk); there it starts the check, and from then on the time is past the self-write window.
+private final class InFlight: @unchecked Sendable {
+    private let lock = NSLock()
+    private var start = Date(timeIntervalSince1970: 1_000_000), late = false
+    var during: (() -> Task<Void, Never>)?
+    var check: Task<Void, Never>?
+    var own: Set<String> = []
+
+    func now() -> Date {
+        lock.lock(); defer { lock.unlock() }
+        if let during, !late {
+            late = true
+            check = during()
+            return start
+        }
+        return late ? start.addingTimeInterval(5) : start
+    }
 }

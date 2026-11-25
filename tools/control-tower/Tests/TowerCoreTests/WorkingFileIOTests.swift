@@ -183,7 +183,10 @@ private func sha(_ b: [UInt8]) -> String { SHA256.hash(data: Data(b)).map { Stri
     _ = await w.write("b", encoding: .utf8, to: root + "/link.txt", roots: [root], expected: sha(Array("a".utf8)))
     #expect(await w.isSelfWrite(path))
     #expect(await !w.isSelfWrite(root + "/link.txt"))  // the watcher reports the real path
-    clock.now = now.addingTimeInterval(0.8)
+    // past the window (a watch event late on a loaded machine): still its own while the disk holds its bytes (T45)
+    clock.now = now.addingTimeInterval(5)
+    #expect(await w.isSelfWrite(path))
+    put("c", path)  // someone else's write after it
     #expect(await !w.isSelfWrite(path))
 }
 

@@ -4,8 +4,8 @@ import TowerCore
 // Quick open and text search of one folder (G4 I10), in Swift: the page cannot start git. A picked result goes to
 // `open`, which shows it in the editor.
 
-/// `CT_EDITOR_SEARCH=<words>`: what the search field holds when the panel first shows, as a text search. Typing does
-/// not reach the test instance.
+/// `CT_EDITOR_SEARCH=<words>`: what the search field holds when the panel first shows. Typing does not reach the
+/// test instance.
 let searchAtStart = ProcessInfo.processInfo.environment["CT_EDITOR_SEARCH"] ?? ""
 
 enum SearchMode: Hashable {
@@ -44,11 +44,13 @@ func search(_ mode: SearchMode, _ query: String, in root: String, files: [String
     }
 }
 
-/// The field, the choice of files or text, and the results. `open` gets a path from `root`, and a text hit's line.
+/// The field, the choice of files or text, and the results. `open` gets a path from `root`, and a text hit's line;
+/// `close` (its button, Esc in the field) puts the panel away.
 struct SearchPanel: View {
     let root: String
+    @State var mode: SearchMode
     let open: (String, Int?) -> Void
-    @State private var mode = searchAtStart.isEmpty ? SearchMode.files : .text
+    let close: () -> Void
     @State private var query = searchAtStart
     @State private var found = SearchFound.idle
     /// The folder's files, listed when a quick open starts and dropped when the field is emptied: the next one lists
@@ -65,17 +67,22 @@ struct SearchPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 6) {
-                Picker("찾을 것", selection: $mode) {
-                    Text("파일").tag(SearchMode.files)
-                    Text("내용").tag(SearchMode.text)
+                HStack(spacing: 6) {
+                    Picker("찾을 것", selection: $mode) {
+                        Text("파일").tag(SearchMode.files)
+                        Text("내용").tag(SearchMode.text)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .help("파일 이름으로 열기 (⌘P), 또는 파일 내용에서 찾기 (⌘⇧F). git이 무시하는 파일 제외")
+                    Button("닫기", systemImage: "xmark", action: close)
+                        .labelStyle(.iconOnly).buttonStyle(.borderless).help("검색 닫기 (Esc)")
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("파일 이름으로 열기, 또는 파일 내용에서 찾기 (git이 무시하는 파일 제외)")
                 TextField(mode == .files ? "파일 이름" : "찾을 글자", text: $query)
                     .textFieldStyle(.roundedBorder)
                     .focused($focused)
                     .onSubmit { if let first = found.first { open(first.path, first.line) } }
+                    .onExitCommand(perform: close)
             }
             .padding(8)
             Divider()

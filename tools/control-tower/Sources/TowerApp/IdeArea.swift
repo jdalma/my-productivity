@@ -54,11 +54,14 @@ final class IdeState {
 
     /// Shows `root`'s files: its waiting editor, edits and all, or a new one. The editor left goes as in `leave`.
     func show(root: String) {
+        onScreen = true
         guard root != session?.root else { return }
         leave()
+        searching = nil
         changes.select(workspace: root)
         session = IdeParking.session(for: root, makeEditor: makeEditor)
         session?.worker = worker
+        session?.editor?.onSearch = { [weak self] in self?.search($0) }
         if let pending, pending.root == root { Task { await take(pending) } }
     }
 
@@ -84,11 +87,13 @@ final class IdeState {
     /// The area left the window (a row with no tmux pane, the window closed): an editor with edits that are not saved
     /// waits for the next area of its worktree; one without stays here, as before.
     func areaGone() {
+        onScreen = false
         if let session, IdeParking.park(session) { self.session = nil }
     }
 
     /// The window closed: its editor goes as in `leave`. A later `show` starts afresh.
     func close() {
+        onScreen = false
         leave()
         session = nil
     }
@@ -108,6 +113,27 @@ final class IdeState {
             await session.open(top + "/" + line.path)
             await sendMarkers()
         }
+    }
+
+    /// The search panel in the tree's place (T39): what it looks for; nil while the tree shows.
+    var searching: SearchMode?
+
+    /// Whether the area is in the window: the menu's ⌘P and ⌘⇧F open the panel only then.
+    private(set) var onScreen = false
+    var canSearch: Bool { onScreen && session != nil }
+
+    /// ⌘P, ⌘⇧F: the panel, for the worktree shown. Nothing when the area shows none.
+    func search(_ mode: SearchMode) {
+        if canSearch { searching = mode }
+    }
+
+    /// A search result picked: `path` (from the worktree) opens read-only at `line`, as a tree line's file does.
+    /// A file found by name (no line) closes the panel; text hits stay for the next one.
+    func openFound(_ path: String, line: Int?) async {
+        guard let session else { return }
+        if line == nil { searching = nil }
+        await session.open(session.root + "/" + path, line: line)
+        await sendMarkers()
     }
 
     /// A file operation from the tree's menu (I9), then the tree read again.
@@ -135,13 +161,22 @@ struct IdeArea: View {
         GeometryReader { geo in
             HStack(spacing: 0) {
                 editorColumn.frame(maxWidth: .infinity)
-                if layout.treeShown {
+                if layout.treeShown || state.searching != nil {
                     let width = IdeLayout.treeWidth(layout.treeWidth, total: geo.size.width)
                     DragLine(at: width) { change($0) { $0.treeWidth = $1 } }
-                    DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick,
-                                    menu: { line in AnyView(IdeTreeMenu(line: line, state: state)) })
-                        .environment(\.workerWritten, state.workerWritten)
-                        .frame(width: width)
+                    Group {
+                        // the search panel in the tree's place (T39); ⌘P or ⌘⇧F again starts it afresh in that mode
+                        if let mode = state.searching {
+                            SearchPanel(root: root, mode: mode) { path, line in Task { await state.openFound(path, line: line) } }
+                                close: { state.searching = nil }
+                                .id(mode)
+                        } else {
+                            DiffTreeSidebar(workspace: root, state: state.changes, pick: state.pick,
+                                            menu: { line in AnyView(IdeTreeMenu(line: line, state: state)) })
+                                .environment(\.workerWritten, state.workerWritten)
+                        }
+                    }
+                    .frame(width: width)
                 }
             }
         }
@@ -215,6 +250,8 @@ struct IdeArea: View {
             Button("저장", systemImage: "square.and.arrow.down") { Task { await state.session?.save() } }
                 .disabled(state.shown == nil || state.readOnly)
                 .help("저장 (편집기 안에서 ⌘S)")
+            Button("검색", systemImage: "magnifyingglass") { state.searching = state.searching == nil ? .files : nil }
+                .help("이 작업 트리에서 파일 이름으로 열기 (⌘P), 내용에서 찾기 (⌘⇧F)")
             Button("트리", systemImage: "sidebar.right") { change(0) { l, _ in l.treeShown.toggle() } }
                 .help("폴더 트리 보이기/숨기기")
         }

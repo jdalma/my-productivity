@@ -23,7 +23,8 @@ private func page() throws -> URL {
 
 @MainActor
 private func until(_ done: () -> Bool) async throws {
-    let deadline = Date().addingTimeInterval(10)
+    // long: another test may hold every GCD worker for 30 s (FocusRunnerTests; on CI this wait gave up 60 s into the test), and a link's detached read waits for one
+    let deadline = Date().addingTimeInterval(120)
     while !done(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
 }
 

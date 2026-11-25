@@ -66,8 +66,9 @@ public func fileRefSpans(in text: String) -> [FileRefSpan] {
         }
     }
 
-    // path:line[-line][:column], with more lines of the same file after it; the column is read and left out (R20 L1)
-    for m in s.matches(of: #/(?:([0-9a-f]{7,40}):)?([A-Za-z0-9_.\/~@+\-]*\.[A-Za-z][A-Za-z0-9_]*):(\d+)(?:-(\d+))?(?::\d+)?(?![A-Za-z0-9_:]|\.\d)/#) {
+    // path:line[-line][:column], with more lines of the same file after it; the column is read and left out (R20 L1).
+    // A colon may follow (`a.swift:12:5: error`, R34 M1), a third number may not
+    for m in s.matches(of: #/(?:([0-9a-f]{7,40}):)?([A-Za-z0-9_.\/~@+\-]*\.[A-Za-z][A-Za-z0-9_]*):(\d+)(?:-(\d+))?(?::\d+)?(?![A-Za-z0-9_]|:\d|\.\d)/#) {
         let path = String(m.output.2), commit = m.output.1.map(String.init)
         guard let a = Int(m.output.3), a > 0 else { continue }
         found.append((offsets(m.range), FileRef(path: path, lineStart: a, lineEnd: m.output.4.flatMap { Int($0) }, commit: commit)))

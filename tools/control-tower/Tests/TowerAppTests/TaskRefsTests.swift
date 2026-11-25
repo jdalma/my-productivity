@@ -21,3 +21,10 @@ import TowerCore
     #expect(targets.isEmpty)  // the URL is blanked out before places are read
     #expect(shown.runs.compactMap(\.link) == [URL(string: "https://example.com/a.md:3")!])
 }
+
+/// R34 L1: the ranges of one sed share its characters: the first is the link, the rest are not lost to it.
+@Test func placesWrittenInTheSameCharactersMakeOneLink() {
+    let (shown, targets) = linkedRefs("git show abc1234:lib/a.swift | sed -n '2,3p;9p'", resolve: { .file(path: "/w/a.swift", line: $0.lineStart) })
+    #expect(targets == [.file(path: "/w/a.swift", line: 2)])
+    #expect(shown.runs.compactMap(\.link) == [URL(string: "ctref://open/0")!])
+}

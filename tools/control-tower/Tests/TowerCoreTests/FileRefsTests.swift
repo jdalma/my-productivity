@@ -109,6 +109,11 @@ private func ref(_ path: String, _ start: Int, _ end: Int? = nil, at commit: Str
     #expect(fileRefs(in: "warning at X.swift:498:9 unused") == [ref("X.swift", 498)])
     #expect(fileRefs(in: "src/a.ts:12:3, b.ts:4") == [ref("src/a.ts", 12), ref("b.ts", 4)])
     #expect(fileRefs(in: "10:30:00 시작").isEmpty)  // a time has no file name before it
+    // R34 M1: the compiler's and swift test's form, a colon after the column
+    #expect(fileRefs(in: "Sources/Foo.swift:12:5: error: x") == [ref("Sources/Foo.swift", 12)])
+    #expect(fileRefs(in: "TeamLaunchTests.swift:498:9: Expectation failed") == [ref("TeamLaunchTests.swift", 498)])
+    #expect(fileRefs(in: "a.swift:12: warning") == [ref("a.swift", 12)])
+    #expect(fileRefs(in: "a.swift:1:2:3").isEmpty)  // a third number: not a place this reads
 }
 
 // MARK: - Where each one is written (G4 I12): the part a link covers

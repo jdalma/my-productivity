@@ -87,8 +87,11 @@ func linkedRefs(_ text: String, resolve: (FileRef) -> FileTarget?) -> (Attribute
     var shown = inlineMarkdown(text)
     var targets: [FileTarget] = []
     // the places are read in the text as shown: Markdown's marks are gone, so the offsets are the shown characters'
+    var linked: [Range<Int>] = []
     for span in fileRefSpans(in: String(shown.characters)) {
-        guard let t = resolve(span.ref) else { continue }
+        // the ranges of one sed share its characters: the first is the link (R34 L1)
+        guard !linked.contains(where: { $0.overlaps(span.range) }), let t = resolve(span.ref) else { continue }
+        linked.append(span.range)
         let chars = shown.characters
         let range = chars.index(chars.startIndex, offsetBy: span.range.lowerBound)..<chars.index(chars.startIndex, offsetBy: span.range.upperBound)
         shown[range].link = URL(string: "\(RefText.scheme)://open/\(targets.count)")

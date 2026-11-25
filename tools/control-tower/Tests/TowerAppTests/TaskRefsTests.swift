@@ -28,3 +28,24 @@ import TowerCore
     #expect(targets == [.file(path: "/w/a.swift", line: 2)])
     #expect(shown.runs.compactMap(\.link) == [URL(string: "ctref://open/0")!])
 }
+
+/// R34 S1: a view's body never waits for git ls-files: the first ask reads the folder in the background, and the
+/// view hears of it through `foldersRead`.
+@MainActor @Test func aViewAsksForAFoldersFilesWithoutWaitingForThem() async throws {
+    let dir = FileManager.default.temporaryDirectory.appending(path: "ct-filelists-\(UUID().uuidString)").path
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try "x\n".write(toFile: dir + "/shapes.swift", atomically: true, encoding: .utf8)
+    let git = Process()
+    git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    git.arguments = ["-C", dir, "init", "-q"]
+    try git.run()
+    git.waitUntilExit()
+
+    let lists = FileLists()
+    #expect(lists.filesIfRead(dir) == nil)  // not read yet: no wait here
+    let deadline = Date().addingTimeInterval(10)
+    while lists.foldersRead == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(lists.foldersRead == 1)
+    #expect(lists.filesIfRead(dir) == ["shapes.swift"])
+}

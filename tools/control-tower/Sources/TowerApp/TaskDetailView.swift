@@ -650,7 +650,7 @@ private struct TaskDetailBody: View {
     private func refs(_ landingId: String?, _ d: TaskDetail) -> (FileRef) -> FileTarget? {
         let repo = landingId.flatMap { id in d.cards.first { $0.landing.id == id }?.landing.repo }
         let cwd = workerRow(d.task.assignee)?.session.cwd
-        return { refTarget($0, repo: repo, workerCwd: cwd) }
+        return { refTargetNow($0, repo: repo, workerCwd: cwd) }
     }
 
     private func findingRow(_ f: DetailFinding, _ d: TaskDetail) -> some View {

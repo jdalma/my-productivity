@@ -7,22 +7,44 @@ import TowerCore
 
 /// The files of each folder, for a bare file name (`fileTarget`'s `filesIn`): read once per folder.
 // ponytail: never read again, so a file added later is found by its bare name only after a relaunch; re-read on a miss if that matters
-final class FileLists: @unchecked Sendable {
+@Observable final class FileLists: @unchecked Sendable {
     static let shared = FileLists()
-    private let lock = NSLock()
-    private var byFolder: [String: [String]?] = [:]
+    @ObservationIgnored private let lock = NSLock()
+    @ObservationIgnored private var byFolder: [String: [String]?] = [:]
+    @ObservationIgnored private var reading: Set<String> = []
+    /// Counts the folders read in the background: a view that asked `filesIfRead` draws again when one comes.
+    private(set) var foldersRead = 0
 
+    /// Reads `folder`'s files the first time (git ls-files, long in a big repo): off the main actor only.
     func files(_ folder: String) -> [String]? {
         if let known = lock.withLock({ byFolder[folder] }) { return known }
         let read = workspaceFiles(toplevel: folder, scope: "")
         lock.withLock { byFolder[folder] = read }
         return read
     }
+
+    /// For a view's body: the files read so far, nil until then; the first ask reads them in the background (R34 S1).
+    @MainActor func filesIfRead(_ folder: String) -> [String]? {
+        _ = foldersRead
+        if let known = lock.withLock({ byFolder[folder] }) { return known }
+        guard lock.withLock({ reading.insert(folder).inserted }) else { return nil }
+        Task.detached { [self] in
+            _ = files(folder)
+            await MainActor.run { foldersRead += 1 }
+        }
+        return nil
+    }
 }
 
 /// Where `ref` opens for a text of a landing in `repo`, by a task whose worker works in `workerCwd` (plan §2.1).
+/// Off the main actor: it may read a folder's files.
 func refTarget(_ ref: FileRef, repo: String?, workerCwd: String?) -> FileTarget? {
     fileTarget(ref, repo: repo, workerCwd: workerCwd, filesIn: FileLists.shared.files)
+}
+
+/// `refTarget` for a view's body: a bare file name is placed once its folder was read, and the view draws again then.
+@MainActor func refTargetNow(_ ref: FileRef, repo: String?, workerCwd: String?) -> FileTarget? {
+    fileTarget(ref, repo: repo, workerCwd: workerCwd, filesIn: FileLists.shared.filesIfRead)
 }
 
 /// An open finding's texts and the landing its review was of: what its markers come from.

@@ -849,7 +849,14 @@ public struct TaskBoardState: Hashable, Sendable {
 public struct TaskBoardLanding: Decodable, Hashable, Sendable {
     public var id: String
     public var taskId: String
+    /// The worktree the landing was made in; nil for a document task's landing and in an answer from before the field.
+    /// A worker's worktree serves its next tasks too, so a done task's content is read at `commit`, not from the tree.
+    public var repo: String?
     public var commit: String
+    /// What the landing is judged against: the last approved landing's commit, the task's base before one (G4 W2).
+    public var baseCommit: String?
+    /// The landing's commits as the board lists them; empty for a document task.
+    public var commits: [String]
     public var checkCmd: String?
     public var checkResult: String?
     public var focus: [String]
@@ -865,7 +872,7 @@ public struct TaskBoardLanding: Decodable, Hashable, Sendable {
     public var createdBy: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, taskId, commit, checkCmd, checkResult, focus, closes, reportPath, reviewReportPath, deployed, supersededBy,
+        case id, taskId, repo, commit, baseCommit, commits, checkCmd, checkResult, focus, closes, reportPath, reviewReportPath, deployed, supersededBy,
              leftOut, createdAt, createdBy
     }
 
@@ -874,6 +881,9 @@ public struct TaskBoardLanding: Decodable, Hashable, Sendable {
         id = try c.decode(String.self, forKey: .id)
         taskId = try c.decode(String.self, forKey: .taskId)
         commit = try c.decode(String.self, forKey: .commit)
+        repo = try c.decodeIfPresent(String.self, forKey: .repo)?.nonEmpty
+        baseCommit = try c.decodeIfPresent(String.self, forKey: .baseCommit)?.nonEmpty
+        commits = try c.decodeIfPresent([String].self, forKey: .commits) ?? []
         checkCmd = try c.decodeIfPresent(String.self, forKey: .checkCmd)
         checkResult = try c.decodeIfPresent(String.self, forKey: .checkResult)
         focus = try c.decodeIfPresent([String].self, forKey: .focus) ?? []

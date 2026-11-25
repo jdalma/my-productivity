@@ -52,8 +52,8 @@ function archiveHasMessage(archiveFile, messageId) {
     return null;
 }
 
-export function runApiMailboxMarkDelivered(input) {
-    const { teamName, worker } = requireTeamAndWorker(input);
+export function runApiMailboxMarkDelivered(input, deps = {}) {
+    const { teamName, worker } = requireTeamAndWorker(input, { env: deps.env ?? process.env });
     const messageId = input?.message_id;
     if (!messageId) throw new Error('message_id is required');
 

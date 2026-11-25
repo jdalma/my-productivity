@@ -288,3 +288,23 @@ private func read(_ files: EditorFiles, _ path: String) async -> String? {
     put("y\n", root + "/b.txt")  // a worker's write
     #expect(await files.ownWrites([root + "/a.txt", root + "/b.txt"]) == [root + "/a.txt"])
 }
+
+/// W3 (T37): a watch event can come after the self-write window (750 ms) under load; the app's save is still its own
+/// while the disk holds the bytes it saved, and a worker's write after it is not.
+@Test func aSaveStaysTheAppsOwnPastTheWindowUntilTheFileChangesAgain() async {
+    let root = tempTree()
+    put("one\n", root + "/a.txt")
+    let clock = Clock()
+    let files = EditorFiles(roots: [root], writer: WorkingFileWriter(now: { clock.now }))
+    let hash = await read(files, root + "/a.txt")!
+    _ = await files.setReadOnly(root + "/a.txt", false)
+    _ = await files.handle(.writeFile(path: root + "/a.txt", text: "two\n", baseHash: hash))
+    clock.now = clock.now.addingTimeInterval(5)
+    #expect(await files.ownWrites([root + "/a.txt"]) == [root + "/a.txt"])
+    put("worker\n", root + "/a.txt")
+    #expect(await files.ownWrites([root + "/a.txt"]).isEmpty)
+}
+
+private final class Clock: @unchecked Sendable {
+    var now = Date(timeIntervalSince1970: 1_000_000)
+}

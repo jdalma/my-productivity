@@ -161,6 +161,7 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
         '- A `changes` verdict on your task: read its findings (`board-inbox`, `board-status` with "task") and start fixing with `board-take` without waiting for pm. Close what you fixed with `closes` in your next `board-land`; a finding of another task the same work fixed can go in `closes` too, open or backlog (a backlog one becomes fixed when that landing is approved: name it again if you resubmit).',
         ...decisionGuidance(api),
         `- Leave progress on the board each time you finish one of the ticket's numbered items, and when you have been on one item for more than 30 minutes or are stuck: \`${api('board-progress', { id: '<task>', item: 1, note: '<what you did, what is left>', done: false })}\`. item is the item's number in the ticket's What list (0 for work outside it). Write the note as sentences a person can follow, not only a commit hash or a path.`,
+        `- After a context compaction, find your tasks again: board-inbox without "since" lists them, and \`${api('board-status', { task: '<task>' })}\` shows one with its progress and verdicts.`,
         '- Never run a my-team of another version than the installed one (a branch you work on or review) on a running team\'s board: one command of a newer schema migrates the board file, and the installed my-team then refuses it for every worker. Try it on a copy in a temporary folder: set `MY_TEAM_STATE_ROOT_BASE` to that folder AND change `state_root` in the copied manifest.json to the copy\'s own folder (it is an absolute path, so a copied manifest still names the running board).',
     ];
     if (!(solo && workerRole === 'orchestrator')) lines.push(
@@ -200,7 +201,6 @@ function boardGuidance(teamName, workerName, workerRole, solo) {
             `- When the talk with the user changes an open decision (the question, an option, the recommendation), correct that entry so it says what is asked now, instead of withdrawing it and asking again: \`${api('board-decision-edit', { id: '<D#… or the waiting task>', recommendation: { option: '<label>', reason: '<why, as it stands now>' } })}\`. Give only the fields that changed; the worker who asked is told. An answered decision is not edited.`,
             '- `board-announce` is for notices to the team. It is not where a user decision is recorded.',
             '- Settle findings with `board-finding` (backlog, accepted-limit, rejected); reopening one needs an unfinished task in its family. A fix an approved landing made without naming the finding in `closes`, of an open or a backlog finding: `board-finding` with state `fixed` and that `landing`.',
-            `- After a context compaction, recover from \`${api('board-status', {})}\`.`,
         );
     }
     return lines.join('\n');
@@ -225,6 +225,8 @@ export function generateWorkerOverlay(params) {
     const orchestratorNames = teamRoster
         .filter((p) => p.teamRole === 'orchestrator')
         .map((p) => p.name);
+    // the Spawn protocol's "tell the orchestrator" is for the others: an orchestrator does not tell itself (B7)
+    const otherOrchestrators = orchestratorNames.filter((name) => name !== workerName);
 
     const statusPath = join(params.instructionStateRoot, 'workers', workerName, 'status.json').replaceAll('\\', '/');
 
@@ -439,7 +441,7 @@ with \`expects_reply: true\`, so each answer resolves its own \`message_id\`.
   Spawn protocol (you keep the task context; the peer works alone and does not report as it goes):
   - \`--extra-prompt\` MUST say: ${params.board
         ? `"Spawned by ${workerName}. Your work comes as a board task: start it with board-take and record it with board-land. Message ${workerName} ONLY when you need a decision to proceed — one message with expects_reply. No progress updates, no acknowledgements by message: progress goes on the board and your pane's stdout."`
-        : `"Spawned by ${workerName}. Message ${workerName} ONLY (a) when you need a decision to proceed — one message with expects_reply — or (b) when the ticket is done — one final report (reply_to the ticket). No progress updates, no acknowledgements: progress goes to your status file and your pane's stdout."`}${orchestratorNames.length > 0 ? `\n  - Tell the orchestrator (${orchestratorNames.join(', ')}) in ONE message that you spawned this peer and what it owns, so the team's picture of who is working stays complete.` : ''}
+        : `"Spawned by ${workerName}. Message ${workerName} ONLY (a) when you need a decision to proceed — one message with expects_reply — or (b) when the ticket is done — one final report (reply_to the ticket). No progress updates, no acknowledgements: progress goes to your status file and your pane's stdout."`}${otherOrchestrators.length > 0 ? `\n  - Tell the orchestrator (${otherOrchestrators.join(', ')}) in ONE message that you spawned this peer and what it owns, so the team's picture of who is working stays complete.` : ''}
 ${params.board
         ? `  - The ticket = a file with goal + inputs (file paths) + expected deliverable, given as the task's \`ticket\`.
   - Do not ask the peer for progress; read the task's progress on the board (\`board-status\` with "task") instead. Handle its question when it arrives in your inbox.`
@@ -448,7 +450,9 @@ ${params.board
 - **Retiring a peer you spawned**: when a peer you added has finished its part and its work is merged, remove it so the team stops waiting on it:
   \`my-team remove-worker --team ${teamName} --name <that-peer>\`
   This takes it off the roster, closes its pane, and tells the remaining workers to stop expecting replies from it. Only remove a peer whose work is done — never one that is mid-task, and never yourself. Its mailbox/archive and any worktree dir stay on disk for the user.
-- **Succession (when the user tells you to hand over, e.g. "교대해")**: follow the "Worker succession" section of the \`my-team\` skill (\`/workflow:my-team\`). In short: write a handoff, then \`add-worker --name ${workerName}-2 --cwd "$PWD" --agent-type ${agentType} --extra-prompt "<handoff path + the user's focus instruction verbatim + 'ask ${workerName} everything, then remove-worker it'>"\`; from then on do nothing but answer the successor's questions — the successor retires you.${params.board ? ' Your unfinished board tasks stay assigned to you until pm moves them: ask pm to board-assign them to the successor before it removes you (a task in review or waiting can only move after its verdict or answer).' : ''}
+- **Succession (when the user tells you to hand over, e.g. "교대해")**: follow the "Worker succession" section of the \`my-team\` skill (\`/workflow:my-team\`). In short: write a handoff, then \`add-worker --name ${workerName}-2 --cwd "$PWD" --agent-type ${agentType} --extra-prompt "<handoff path + the user's focus instruction verbatim + 'ask ${workerName} everything, then remove-worker it'>"\`; from then on do nothing but answer the successor's questions — the successor retires you.${!params.board ? '' : workerRole === 'worker'
+        ? ' Your unfinished board tasks stay assigned to you until pm moves them: ask pm to board-assign them to the successor before it removes you (a task in review or waiting can only move after its verdict or answer).'
+        : ' Your unfinished board tasks stay assigned to you: board-assign them to the successor yourself before it removes you (a task in review or waiting can only move after its verdict or answer).'}
 - **Closeout (when the user says your ticket is done, e.g. "마무리 보고해", "closeout")**: ${params.board
         ? `land your tasks with board-land first and wait for their verdicts (fixing what a \`changes\` verdict asks is part of the task): the board holds their state and the reviewer judges them. Once they are approved, run the \`my-team-closeout\` skill (\`/workflow:my-team-closeout\`) to be retired — its message to the worker that spawned you names your tasks on the board and their verdicts instead of restating their state, and THAT worker reads them there, then either \`remove-worker\` you (all approved) or writes a resume brief (unfinished; you stay). A message whose body starts with \`[closeout]\` in YOUR inbox means a peer you spawned asks to be retired: follow the skill's receiver procedure, reading its tasks on the board; a task still in review waits for its verdict, it is not unfinished work.`
         : `run the \`my-team-closeout\` skill (\`/workflow:my-team-closeout\`) — it sends an evidence-based final report to the worker that spawned you and lets THAT worker verify, then either \`remove-worker\` you (all done) or write a resume brief (unfinished; you stay). A message whose body starts with \`[closeout]\` in YOUR inbox means a peer you spawned is reporting in: follow the skill's receiver procedure.`} Never remove yourself.

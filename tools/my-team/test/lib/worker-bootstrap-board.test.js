@@ -91,8 +91,10 @@ test('a board team hands out, reports and follows work on the board: no line of 
         assert.match(text, /The ticket = a file[^\n]*given as the task's `ticket`/);
         assert.match(text, /Do not ask the peer for progress; read the task's progress on the board/);
         assert.match(text, /Closeout[^\n]*land your tasks with board-land first and wait for their verdicts[^\n]*Once they are approved[^\n]*names your tasks on the board and their verdicts[^\n]*Never remove yourself/);
-        assert.match(text, /Succession[^\n]*ask pm to board-assign them to the successor before it removes you/);
     }
+    // T42 B8: a worker asks pm to move its tasks; pm, and every worker of a team without roles, moves them itself
+    assert.match(dev, /Succession[^\n]*ask pm to board-assign them to the successor before it removes you/);
+    for (const text of [pm, peer]) assert.match(text, /Succession[^\n]*board-assign them to the successor yourself before it removes you/);
 });
 
 test('T100: pm is told to read in_hand before assigning and what the load warning means; a worker is not', () => {

@@ -48,6 +48,11 @@ struct BoardView: View {
             go(Screen(request))
             tower.boardSelectRequest = nil
         }
+        .onChange(of: tower.ideOpenRequest, initial: true) { _, request in
+            guard let request else { return }
+            tower.ideOpenRequest = nil
+            Task { await ide.take(request) }
+        }
         .onChange(of: query) { historyLimit = historyPageSize }
         .onChange(of: filter) { historyLimit = historyPageSize }
         .toolbar {

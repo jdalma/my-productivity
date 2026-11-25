@@ -23,6 +23,10 @@ final class IdeSession {
     var comparing: FileDiff?
     /// Making, renaming and trashing from the tree: locked until the user unlocks it for this worktree (D#5 b).
     private(set) var fileOpsLocked = true
+    /// The path of a file Swift read itself and the page shows (`show`: a task board link's, D#17), in place of the
+    /// shown buffer; nil when a buffer shows. Never unlocked: it is no file of the editor's.
+    private(set) var outside: String?
+
     /// The files a worker wrote lately (W3): marked in the tree and the tabs, and warned of before an edit.
     private(set) var writes = WorkerWrites()
     /// The worker of this worktree, for the warning; nil says 워커.
@@ -79,14 +83,24 @@ final class IdeSession {
         guard let editor else { return }
         if let opened = await editor.open(path, line: line) {
             buffers.open(opened.path, hash: opened.hash, readOnly: opened.readOnly)
+            outside = nil
             status = ""
         } else {
             status = "열 수 없음"
         }
     }
 
+    /// Shows a file Swift read itself (a task board link's, D#17): read-only, no buffer of this editor's.
+    func show(_ command: EditorCommand?) async {
+        guard let editor else { return }
+        guard let command, case .openFile(let path, _, _, _, _) = command else { return status = "열 수 없음" }
+        await editor.show(command)
+        outside = path
+        status = ""
+    }
+
     func toggleLock() async {
-        guard let editor, let shown = buffers.shown, let f = buffers.files[shown] else { return }
+        guard let editor, outside == nil, let shown = buffers.shown, let f = buffers.files[shown] else { return }
         buffers.setReadOnly(shown, !f.readOnly)
         await editor.setReadOnly(shown, !f.readOnly)
     }
@@ -208,7 +222,8 @@ final class IdeSession {
     /// The page's process ended: its buffers are gone, the edits in them too. The shown file opens again from disk.
     private func restarted() {
         let lost = buffers.unsaved.count
-        let was = buffers.shown
+        // a file Swift read itself is shown again by the controller
+        let was = outside == nil ? buffers.shown : nil
         buffers = EditorBuffers()
         Task {
             if let was { await open(was) }

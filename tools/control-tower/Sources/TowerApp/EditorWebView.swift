@@ -89,9 +89,11 @@ final class EditorPageView: WKWebView {
     let files: EditorFiles
     let web: EditorPageView
     private var ready = false
-    private var waiting: [EditorCommand] = []
-    /// The file the page shows, opened again when the page has to load again.
-    private var shown: (path: String, line: Int?)?
+    private(set) var waiting: [EditorCommand] = []
+    /// The file the page shows, opened again when the page has to load again: one read from the roots by its path,
+    /// or one Swift read itself (a task board link's, D#17) by the command that showed it.
+    private enum Shown { case file(path: String, line: Int?), command(EditorCommand) }
+    private var shown: Shown?
     /// What the page last said of each file it shows.
     var onDirty: ((String, Bool) -> Void)?
     /// A language server notice for the user: not installed (once per server), or ended.
@@ -143,9 +145,17 @@ final class EditorPageView: WKWebView {
     /// is outside the roots or not a text file.
     func open(_ path: String, line: Int? = nil) async -> (path: String, hash: String, readOnly: Bool)? {
         guard let command = await files.open(path, line: line), case .openFile(let real, _, let hash, _, let readOnly) = command else { return nil }
-        shown = (real, line)
+        shown = .file(path: real, line: line)
         await send(command)
         return (real, hash, readOnly)
+    }
+
+    /// Shows a file Swift read outside `EditorFiles` (`targetOpen`): read-only, never saved, a document of its own in
+    /// the page (R34a L3).
+    func show(_ command: EditorCommand) async {
+        guard case .openFile(let path, let text, _, let line, _) = command else { return }
+        shown = .command(command)
+        await send(.showFile(path: path, text: text, line: line))
     }
 
     /// The page's process ended (a crash, memory pressure): its buffers are gone. Load it again, open the shown file
@@ -158,9 +168,13 @@ final class EditorPageView: WKWebView {
         waiting = []
         loadPage()
         onRestart?()
-        guard let shown else { return }
-        onDirty?(shown.path, false)
-        Task { _ = await open(shown.path, line: shown.line) }
+        switch shown {
+        case .file(let path, let line)?:
+            onDirty?(path, false)
+            Task { _ = await open(path, line: line) }
+        case .command(let command)?: Task { await show(command) }
+        case nil: break
+        }
     }
 
     /// The editor goes away: its language servers stop.

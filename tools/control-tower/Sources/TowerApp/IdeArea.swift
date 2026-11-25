@@ -27,9 +27,13 @@ final class IdeState {
 
     var editor: EditorController? { session?.editor }
     var buffers: EditorBuffers { session?.buffers ?? EditorBuffers() }
-    /// The real path of the file the editor shows.
-    var shown: String? { buffers.shown }
-    var readOnly: Bool { shown.flatMap { buffers.files[$0]?.readOnly } ?? true }
+    /// The real path of the file the editor shows: a worktree's buffer, or one a task board link showed (D#17).
+    var shown: String? { session?.outside ?? buffers.shown }
+    var readOnly: Bool { session?.outside != nil ? true : shown.flatMap { buffers.files[$0]?.readOnly } ?? true }
+    /// A task board link's file waiting for this window to show its worktree (D#17).
+    @ObservationIgnored private var pending: IdeOpenRequest?
+    /// The open findings of the task a link came from, beside their lines in whichever file the editor shows (G4 W5).
+    private(set) var findingMarks: [FindingMark] = []
     var status: String { session?.status ?? "" }
 
     /// The worker of the code shown, named in the warning of a file it just wrote (W3).
@@ -55,6 +59,26 @@ final class IdeState {
         changes.select(workspace: root)
         session = IdeParking.session(for: root, makeEditor: makeEditor)
         session?.worker = worker
+        if let pending, pending.root == root { Task { await take(pending) } }
+    }
+
+    /// A task board link (D#17): its file read-only at its line, in this window's editor once it shows `root`.
+    func take(_ request: IdeOpenRequest) async {
+        guard let session, session.root == request.root else { return pending = request }
+        pending = nil
+        // the markers' places run git: off the main actor, with the file's read
+        let (found, command) = await Task.detached {
+            (marks(of: request.findings, workerCwd: request.root), targetOpen(request.target))
+        }.value
+        findingMarks = found
+        await session.show(command)
+        await sendMarkers()
+    }
+
+    // ponytail: the shown file's markers, sent as it opens; a tab shown again keeps the ones its model had
+    private func sendMarkers() async {
+        guard let editor, let shown else { return }
+        await editor.send(.setMarkers(path: shown, markers: editorMarkers(for: shown, marks: findingMarks)))
     }
 
     /// The area left the window (a row with no tmux pane, the window closed): an editor with edits that are not saved
@@ -80,7 +104,10 @@ final class IdeState {
     /// A tree line picked: a file opens in the editor, a folder does nothing.
     func pick(_ line: TreeLine) {
         guard !line.isFolder, let session, let top = changes.diff(for: session.root)?.toplevel else { return }
-        Task { await session.open(top + "/" + line.path) }
+        Task {
+            await session.open(top + "/" + line.path)
+            await sendMarkers()
+        }
     }
 
     /// A file operation from the tree's menu (I9), then the tree read again.
@@ -182,8 +209,9 @@ struct IdeArea: View {
             } message: {
                 Text("워커가 이 파일을 계속 고치는 중일 수 있습니다. 지금 고치면 워커의 다음 편집이 실패하거나 내 편집을 덮을 수 있습니다.")
             }
-            .disabled(state.shown == nil)
-            .help("작업 트리 파일은 읽기 전용으로 열립니다. 풀면 이 파일을 고쳐 저장할 수 있습니다")
+            .disabled(state.shown == nil || state.session?.outside != nil)
+            .help(state.session?.outside != nil ? "작업판 링크로 연 파일은 읽기 전용입니다"
+                  : "작업 트리 파일은 읽기 전용으로 열립니다. 풀면 이 파일을 고쳐 저장할 수 있습니다")
             Button("저장", systemImage: "square.and.arrow.down") { Task { await state.session?.save() } }
                 .disabled(state.shown == nil || state.readOnly)
                 .help("저장 (편집기 안에서 ⌘S)")
@@ -299,4 +327,17 @@ struct IdeTreeMenu: View {
         let path = newPath(name, from: line, toplevel: toplevel, root: root)
         Task { await state.fileOp(folder ? .newFolder(path) : .newFile(path)) }
     }
+}
+
+/// A file:line a task board text names, for the board window's editor of `root` (the assignee's worktree) to show
+/// read-only (G4 I12, D#17), with its task's open findings to mark (W5).
+struct IdeOpenRequest: Equatable, Sendable {
+    var root: String
+    var target: FileTarget
+    var findings: [FindingPlace]
+}
+
+extension EnvironmentValues {
+    /// Opens a file:line a task board text names in the board window's editor (D#17); nil where it has nowhere to open.
+    @Entry var openTargetInIde: ((FileTarget) -> Void)?
 }

@@ -108,6 +108,9 @@ public enum EditorReply: Equatable, Sendable, Encodable {
 /// JavaScript assembled from strings.
 public enum EditorCommand: Equatable, Sendable, Encodable {
     case openFile(path: String, text: String, hash: String, line: Int?, readOnly: Bool)
+    /// A file Swift read itself (a task board link's, D#17): a read-only document of its own in the page, apart from
+    /// any buffer of the same path, so nothing done to that buffer reaches it (R34a L3).
+    case showFile(path: String, text: String, line: Int?)
     /// The disk's text for a buffer held clean: the page takes it unless the buffer was edited meanwhile, and says
     /// which (`applied`).
     case fileChangedOnDisk(path: String, text: String?, hash: String?)
@@ -132,7 +135,10 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
     /// The server of `channel` ended: its client stops; the next file of its language starts it again.
     case lspClosed(channel: String)
 
-    private enum Key: String, CodingKey { case kind, path, text, hash, diskHash, line, readOnly, dark, size, from, to, channel, message }
+    /// The open findings beside their lines in `path` (G4 W5); an empty list clears them.
+    case setMarkers(path: String, markers: [EditorMarker])
+
+    private enum Key: String, CodingKey { case kind, path, text, hash, diskHash, line, readOnly, dark, size, from, to, channel, message, markers }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -144,6 +150,11 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
             try c.encode(hash, forKey: .hash)
             try c.encodeIfPresent(line, forKey: .line)
             try c.encode(readOnly, forKey: .readOnly)
+        case .showFile(let path, let text, let line):
+            try c.encode("showFile", forKey: .kind)
+            try c.encode(path, forKey: .path)
+            try c.encode(text, forKey: .text)
+            try c.encodeIfPresent(line, forKey: .line)
         case .fileChangedOnDisk(let path, let text, let hash):
             try c.encode("fileChangedOnDisk", forKey: .kind)
             try c.encode(path, forKey: .path)
@@ -186,6 +197,10 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
         case .lspClosed(let channel):
             try c.encode("lspClosed", forKey: .kind)
             try c.encode(channel, forKey: .channel)
+        case .setMarkers(let path, let markers):
+            try c.encode("setMarkers", forKey: .kind)
+            try c.encode(path, forKey: .path)
+            try c.encode(markers, forKey: .markers)
         }
     }
 }
@@ -392,5 +407,19 @@ public func editorContentType(_ pathExtension: String) -> String {
     case "png": "image/png"
     case "ttf": "font/ttf"
     default: "application/octet-stream"
+    }
+}
+
+/// A finding's place in the editor (G4 W5): its line, how loud, what the hover says.
+public struct EditorMarker: Hashable, Sendable, Encodable {
+    public enum Severity: String, Sendable, Encodable { case error, warning, info, hint }
+    public var line: Int
+    public var severity: Severity
+    public var message: String
+
+    public init(line: Int, severity: Severity, message: String) {
+        self.line = line
+        self.severity = severity
+        self.message = message
     }
 }

@@ -14,6 +14,8 @@ final class Tower {
     private(set) var historyRead = false
     /// A row the dropdown asked the board to select; the board takes it, open already or opening now.
     var boardSelectRequest: RowID?
+    /// A task board link's file for the board window's editor (D#17); the board takes it with the row it selects.
+    var ideOpenRequest: IdeOpenRequest?
     /// Launch or reopen asked for the board window; the menu bar label opens it and clears this.
     var boardOpenRequested = false
     /// Teams the board asked to start and has not seen running yet: their resume button waits.

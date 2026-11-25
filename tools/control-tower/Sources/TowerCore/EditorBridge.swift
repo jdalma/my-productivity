@@ -156,6 +156,16 @@ public actor EditorFiles {
         return .setReadOnly(path: real, readOnly: readOnly)
     }
 
+    /// What the page must hear of a watch batch under `root` (the folder the watch was given): each file it has open
+    /// that changed on disk, with its text now, or that cannot be read any more. A rescan looks at every open file. By path.
+    public func diskChanged(_ batch: FileWatchBatch, root: String) -> [EditorCommand] {
+        let base = realPath(root) ?? root
+        let paths = batch.rescan ? Set(opened.keys) : Set(batch.changed.union(batch.deleted).map { base + "/" + $0 }).filter { opened[$0] != nil }
+        return paths.sorted().map { path in
+            if case .file(let text, let hash) = read(path) { .fileChangedOnDisk(path: path, text: text, hash: hash) } else { .fileDeleted(path: path) }
+        }
+    }
+
     public func handle(_ request: EditorRequest) async -> EditorReply {
         switch request {
         case .readFile(let path): return read(path)

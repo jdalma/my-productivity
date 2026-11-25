@@ -212,10 +212,11 @@ test('T226: every render forbids creating tmux panes or sessions; a board team\'
     }
 });
 
-test('T46 (R44 L1): the single-quoted --input examples say how to write a \' inside them, in every overlay', () => {
+test('T46, T47 (R44 L1, R46 S1): every overlay says how to write a quote inside a single-quoted --input, by closing and reopening the quote only', () => {
     const board = { board: { store: 'sqlite' } };
     for (const text of [overlay('pm', 'orchestrator', board), overlay('dev', 'worker', board), overlay('solo', null, board),
         overlay('pm', 'orchestrator'), overlay('dev', 'worker'), overlay('solo', null)]) {
-        assert.match(text, /--input '[^\n]*single-quoted[^\n]*`\\u0027`[^\n]*`'\\''`/);
+        assert.match(text, /--input '[^\n]*single-quoted[^\n]*as `'\\''`\./);
+        assert.doesNotMatch(text, /\\u0027/, 'R46 S1: an escape a tool layer may turn into a quote');
     }
 });

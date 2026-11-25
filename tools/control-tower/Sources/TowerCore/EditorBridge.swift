@@ -134,6 +134,8 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
     case lspReceive(channel: String, message: String)
     /// The server of `channel` ended: its client stops; the next file of its language starts it again.
     case lspClosed(channel: String)
+    /// The editor is shown again and its servers run again (T41): every open file's language connects anew.
+    case reconnectLanguageServers
 
     /// The open findings beside their lines in `path` (G4 W5); an empty list clears them.
     case setMarkers(path: String, markers: [EditorMarker])
@@ -197,6 +199,7 @@ public enum EditorCommand: Equatable, Sendable, Encodable {
         case .lspClosed(let channel):
             try c.encode("lspClosed", forKey: .kind)
             try c.encode(channel, forKey: .channel)
+        case .reconnectLanguageServers: try c.encode("reconnectLanguageServers", forKey: .kind)
         case .setMarkers(let path, let markers):
             try c.encode("setMarkers", forKey: .kind)
             try c.encode(path, forKey: .path)

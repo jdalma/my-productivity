@@ -64,3 +64,37 @@ import Testing
     editor.webViewWebContentProcessDidTerminate(editor.web)
     #expect(!host.isRunning(key), "the new page starts its servers again when it opens a file")
 }
+
+/// T41: an editor kept for its edits that are not saved (IdeParking) runs no server while no window shows it; the page
+/// hears its clients closed (lspClosed). Shown again, the same servers start again and the page connects anew.
+@MainActor @Test func aParkedEditorsServersStopAndStartAgainWhenItIsShown() async throws {
+    let f = try folders()
+    let host = LanguageServerHost()
+    let state = IdeState { root in EditorController(roots: [root], page: URL(fileURLWithPath: f.page), servers: host) }
+    defer { host.stopAll() }
+    try "x\n".write(toFile: f.a + "/a.swift", atomically: true, encoding: .utf8)
+
+    state.show(root: f.a)
+    let editor = try #require(state.editor)
+    let key = runServer(host, for: editor, root: f.a)
+    // an edit not saved: the editor waits in IdeParking when another worktree shows (files go by their real path)
+    let file = try #require(realPath(f.a + "/a.swift"))
+    await state.session?.open(file)
+    editor.onDirty?(file, true)
+    #expect(state.buffers.unsaved == [file])
+
+    state.show(root: f.b)
+    #expect(!host.isRunning(key), "a parked editor's server stops")
+    try await until { editor.waiting.contains(.lspClosed(channel: key.channel)) }
+
+    state.show(root: f.a)
+    #expect(state.editor === editor, "the waiting editor, edits and all")
+    #expect(host.isRunning(key), "its server runs again")
+    try await until { editor.waiting.contains(.reconnectLanguageServers) }
+}
+
+@MainActor private func until(_ done: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(5)
+    while !done(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(done())
+}

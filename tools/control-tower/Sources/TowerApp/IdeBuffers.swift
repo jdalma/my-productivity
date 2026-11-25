@@ -264,7 +264,10 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
 
     /// The waiting editor of `root`, or a new one.
     static func session(for root: String, makeEditor: @MainActor (String) -> EditorController? = builtEditor) -> IdeSession {
-        if let waiting = parked.removeValue(forKey: root) { return waiting }
+        if let waiting = parked.removeValue(forKey: root) {
+            waiting.editor?.resumeLanguageServers()
+            return waiting
+        }
         let session = IdeSession(root: root, makeEditor: makeEditor)
         all.add(session)
         return session
@@ -274,6 +277,8 @@ func fileOpRefusalText(_ why: FileOpRefusal) -> String {
     static func park(_ session: IdeSession) -> Bool {
         guard !session.buffers.unsaved.isEmpty else { return false }
         parked[session.root] = session
+        // no window shows it: no server runs for it (K12), until it shows again
+        session.editor?.suspendLanguageServers()
         return true
     }
 

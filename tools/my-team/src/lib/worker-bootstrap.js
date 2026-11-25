@@ -302,6 +302,7 @@ Talk to other workers via CLI API:
 - Send a one-way notice (no answer expected): \`${apiCall('send-message', { to_worker: '<other-worker>', body: '<message>' })}\`
 - Ask a question that needs an answer (sets expects_reply): \`${sendWithReplyExpectedCommand}\`
 - Reply to a peer's message: same command, add \`"reply_to":"<original message_id>"\`. Replies never set expects_reply=true.
+- Each \`--input '…'\` is single-quoted for the shell: write a \`'\` inside it (don't, it's) as \`\\u0027\`, which JSON reads back as \`'\`, or as \`'\\''\`.
 - List unread inbox + your outstanding questions: \`${mailboxListCommand}\`
 - Mark a message consumed (moves it to archive): \`${mailboxDeliveredCommand}\`
 - Resolve a reply_to that is not in sent_pending: \`${archiveLookupCommand}\`

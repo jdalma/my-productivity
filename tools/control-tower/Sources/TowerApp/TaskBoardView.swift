@@ -365,6 +365,8 @@ struct TaskBoardView: View {
     let family: TaskFamilyState?
     let pick: (String?) -> Void
     let select: (RowID) -> Void
+    /// A link's file for the board window's editor of that row's worktree (D#17).
+    let openInBoard: (IdeOpenRequest, RowID) -> Void
     let reload: () -> Void
     /// The window's menu actions, published again inside the split's sides.
     var navigation: WindowNavigation?
@@ -671,14 +673,31 @@ struct TaskBoardView: View {
         } else if let decision {
             DecisionDetailView(decision: decision, tasks: s.tasks, team: team, now: now, pick: pick)
         } else if let line {
-            TaskDetailView(team: team, line: line, family: family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil,
+            let shownFamily = family?.ref == TaskRef(team: team, task: line.task.id) ? family : nil
+            // the board window has an editor for a worker in a tmux pane: links open there, else they stay text (D#17)
+            let row = workerRow(line.task.assignee).flatMap { $0.session.tmux == nil ? nil : $0 }
+            let places = findingPlaces(line.task, family: shownFamily)
+            TaskDetailView(team: team, line: line, family: shownFamily,
                            decisions: decisions(of: line.task.id, in: s), listsDecisions: s.decisions != nil,
                            now: now, workerRow: workerRow, pick: pick, select: select, reload: reload,
                            goalLinks: goalLinks(of: line.task.id, in: goals),
                            boardTasks: Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                            showInOrder: { showInOrder(OrderScroll(task: line.task.id, goal: $0)) })
+                .environment(\.openTargetInIde, row.map { row in
+                    { target in openInBoard(IdeOpenRequest(root: row.session.cwd, target: target, findings: places), row.id) }
+                })
         } else {
             overview(s, now: now)
+        }
+    }
+
+    /// The task's open findings and the landings they were raised on: the board editor's markers (G4 W5).
+    private func findingPlaces(_ t: TaskBoardTask, family: TaskFamilyState?) -> [FindingPlace] {
+        guard let d = family?.family.flatMap({ taskDetail($0, task: t.id) }) else { return [] }
+        return d.findings.filter { $0.pile == .open }.map { f in
+            let landing = f.raisedIn.flatMap { id in d.cards.first { $0.landing.id == id }?.landing }
+            return FindingPlace(id: f.finding.id, severity: f.finding.severity, summary: f.finding.summary, repro: f.finding.repro,
+                                repo: landing?.repo, commit: landing?.commit.nonEmptyText)
         }
     }
 

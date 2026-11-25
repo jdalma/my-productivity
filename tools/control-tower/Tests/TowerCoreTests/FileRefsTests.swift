@@ -102,3 +102,104 @@ private func ref(_ path: String, _ start: Int, _ end: Int? = nil, at commit: Str
         #expect(fileRefs(in: s).isEmpty, "\(s)")
     }
 }
+
+// MARK: - R20 L1: a column after the line
+
+@Test func aColumnAfterTheLineIsReadAndLeftOut() {
+    #expect(fileRefs(in: "warning at X.swift:498:9 unused") == [ref("X.swift", 498)])
+    #expect(fileRefs(in: "src/a.ts:12:3, b.ts:4") == [ref("src/a.ts", 12), ref("b.ts", 4)])
+    #expect(fileRefs(in: "10:30:00 시작").isEmpty)  // a time has no file name before it
+    // R34 M1: the compiler's and swift test's form, a colon after the column
+    #expect(fileRefs(in: "Sources/Foo.swift:12:5: error: x") == [ref("Sources/Foo.swift", 12)])
+    #expect(fileRefs(in: "TeamLaunchTests.swift:498:9: Expectation failed") == [ref("TeamLaunchTests.swift", 498)])
+    #expect(fileRefs(in: "a.swift:12: warning") == [ref("a.swift", 12)])
+    #expect(fileRefs(in: "a.swift:1:2:3").isEmpty)  // a third number: not a place this reads
+}
+
+// MARK: - Where each one is written (G4 I12): the part a link covers
+
+@Test func eachLocationKnowsTheCharactersItWasWrittenIn() {
+    let text = "한글 앞 https://x.io/한 그리고 a.swift:12, :14 또 sed -n '3,4p' /w/b.md"
+    let spans = fileRefSpans(in: text)
+    func written(_ s: FileRefSpan) -> String {
+        String(text[text.index(text.startIndex, offsetBy: s.range.lowerBound)..<text.index(text.startIndex, offsetBy: s.range.upperBound)])
+    }
+    #expect(spans.map(\.ref) == [ref("a.swift", 12), ref("a.swift", 14), ref("/w/b.md", 3, 4)])
+    #expect(spans.map(written) == ["a.swift:12", ", :14", "sed -n '3,4p' /w/b.md"])
+}
+
+// MARK: - Which file a location opens (G4 I12, plan §2.1)
+
+private struct Disk {
+    var files: Set<String>
+    var lists: [String: [String]] = [:]
+    func isFile(_ p: String) -> Bool { files.contains(p) }
+    func list(_ base: String) -> [String]? { lists[base] }
+}
+
+@Test func anAbsoluteOrHomePathIsThatFile() {
+    let disk = Disk(files: ["/abs/a.md", "/home/u/.my-team/r.md"])
+    #expect(fileTarget(ref("/abs/a.md", 3), repo: nil, workerCwd: nil, home: "/home/u", isFile: disk.isFile, filesIn: disk.list)
+            == .file(path: "/abs/a.md", line: 3))
+    #expect(fileTarget(ref("~/.my-team/r.md", 5), repo: nil, workerCwd: nil, home: "/home/u", isFile: disk.isFile, filesIn: disk.list)
+            == .file(path: "/home/u/.my-team/r.md", line: 5))
+    #expect(fileTarget(ref("/abs/gone.md", 3), repo: "/w", workerCwd: nil, home: "/home/u", isFile: disk.isFile, filesIn: disk.list) == nil)
+}
+
+@Test func aCommitAndPathIsReadAtThatCommitInTheLandingsRepo() {
+    let disk = Disk(files: [])
+    #expect(fileTarget(ref("tools/x/Y.swift", 12, at: "6c0ca46"), repo: "/w/dev", workerCwd: "/w/other", home: "/h",
+                       isFile: disk.isFile, filesIn: disk.list) == .commit(repo: "/w/dev", commit: "6c0ca46", path: "tools/x/Y.swift", line: 12))
+    // no landing repo: the worker's folder
+    #expect(fileTarget(ref("a.swift", 1, at: "6c0ca46"), repo: nil, workerCwd: "/w/other", home: "/h", isFile: disk.isFile, filesIn: disk.list)
+            == .commit(repo: "/w/other", commit: "6c0ca46", path: "a.swift", line: 1))
+    #expect(fileTarget(ref("a.swift", 1, at: "6c0ca46"), repo: nil, workerCwd: nil, home: "/h", isFile: disk.isFile, filesIn: disk.list) == nil)
+}
+
+@Test func aRelativePathIsTriedInTheLandingsRepoThenTheWorkersFolder() {
+    let disk = Disk(files: ["/w/dev/src/a.swift", "/w/cwd/src/b.swift", "/w/cwd/src/a.swift"])
+    #expect(fileTarget(ref("src/a.swift", 2), repo: "/w/dev", workerCwd: "/w/cwd", home: "/h", isFile: disk.isFile, filesIn: disk.list)
+            == .file(path: "/w/dev/src/a.swift", line: 2))
+    #expect(fileTarget(ref("src/b.swift", 2), repo: "/w/dev", workerCwd: "/w/cwd", home: "/h", isFile: disk.isFile, filesIn: disk.list)
+            == .file(path: "/w/cwd/src/b.swift", line: 2))
+    // a document task: no repo, no worker, the text stays text
+    #expect(fileTarget(ref("src/a.swift", 2), repo: nil, workerCwd: nil, home: "/h", isFile: disk.isFile, filesIn: disk.list) == nil)
+}
+
+@Test func aBareFileNameIsLinkedOnlyWhenOneFileHasIt() {
+    let disk = Disk(files: [], lists: ["/w/dev": ["Sources/A/History.swift", "Sources/A/Board.swift", "Sources/B/Board.swift"]])
+    #expect(fileTarget(ref("History.swift", 315), repo: "/w/dev", workerCwd: nil, home: "/h", isFile: disk.isFile, filesIn: disk.list)
+            == .file(path: "/w/dev/Sources/A/History.swift", line: 315))
+    #expect(fileTarget(ref("Board.swift", 3), repo: "/w/dev", workerCwd: nil, home: "/h", isFile: disk.isFile, filesIn: disk.list) == nil)
+    #expect(fileTarget(ref("Nowhere.swift", 3), repo: "/w/dev", workerCwd: nil, home: "/h", isFile: disk.isFile, filesIn: disk.list) == nil)
+}
+
+// MARK: - A finding beside its line (G4 W5)
+
+@Test func anOpenFindingMarksItsLinesInTheFileShownByItsSeverity() {
+    let marks = [
+        FindingMark(target: .file(path: "/w/a.swift", line: 12), severity: "must", id: "R9 M1", summary: "breaks", changed: false),
+        FindingMark(target: .file(path: "/w/a.swift", line: 30), severity: "low", id: "R9 L1", summary: "wording", changed: true),
+        FindingMark(target: .file(path: "/w/b.swift", line: 1), severity: "should", id: "R9 S1", summary: "other file", changed: false),
+        FindingMark(target: .commit(repo: "/w", commit: "abc", path: "a.swift", line: 5), severity: "should", id: "R9 S2", summary: "at a commit", changed: false),
+    ]
+    #expect(editorMarkers(for: "/w/a.swift", marks: marks) == [
+        EditorMarker(line: 12, severity: .error, message: "R9 M1 breaks"),
+        EditorMarker(line: 30, severity: .hint, message: "R9 L1 wording (지적 뒤 파일이 바뀌어 줄이 어긋났을 수 있음)"),
+        EditorMarker(line: 5, severity: .warning, message: "R9 S2 at a commit"),  // /w + a.swift is the file shown
+    ])
+    #expect(editorMarkers(for: "/w/c.swift", marks: marks).isEmpty)
+}
+
+// MARK: - D#17: a done task's place is read at the commit its landing was reviewed at
+
+@Test func aDoneTasksFileUnderTheRepoOpensAtTheLandingsCommit() {
+    #expect(atCommit(.file(path: "/w/r/lib/a.swift", line: 2), repo: "/w/r", commit: "abc1234")
+            == .commit(repo: "/w/r", commit: "abc1234", path: "lib/a.swift", line: 2))
+    // outside the repo (the worker's folder, ~/), no commit, or a commit place already: as it was
+    #expect(atCommit(.file(path: "/w/other/a.swift", line: 2), repo: "/w/r", commit: "abc1234") == .file(path: "/w/other/a.swift", line: 2))
+    #expect(atCommit(.file(path: "/w/r/a.swift", line: 2), repo: "/w/r", commit: "") == .file(path: "/w/r/a.swift", line: 2))
+    #expect(atCommit(.file(path: "/w/r/a.swift", line: 2), repo: nil, commit: "abc1234") == .file(path: "/w/r/a.swift", line: 2))
+    let at = FileTarget.commit(repo: "/w/r", commit: "1111111", path: "a.swift", line: 1)
+    #expect(atCommit(at, repo: "/w/r", commit: "abc1234") == at)
+}

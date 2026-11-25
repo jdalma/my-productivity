@@ -105,7 +105,7 @@ public enum DocumentTarget: Hashable, Sendable {
     }
 }
 
-func realPath(_ path: String) -> String? {
+public func realPath(_ path: String) -> String? {
     guard let p = realpath(path, nil) else { return nil }
     defer { free(p) }
     return String(cString: p)

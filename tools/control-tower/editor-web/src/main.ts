@@ -11,13 +11,15 @@ import '@codingame/monaco-vscode-json-default-extension'
 import '@codingame/monaco-vscode-markdown-basics-default-extension'
 import '@codingame/monaco-vscode-shellscript-default-extension'
 import '@codingame/monaco-vscode-yaml-default-extension'
-import { KeyCode, KeyMod, Uri } from '@codingame/monaco-vscode-editor-api'
+import { editor as monacoEditor, KeyCode, KeyMod, MarkerSeverity, Uri } from '@codingame/monaco-vscode-editor-api'
 import { createModelReference } from '@codingame/monaco-vscode-api/monaco'
 import { getService, IConfigurationService } from '@codingame/monaco-vscode-api/services'
 import { MonacoVscodeApiWrapper } from 'monaco-languageclient/vscodeApiWrapper'
 import { configureDefaultWorkerFactory } from 'monaco-languageclient/workerFactory'
 import { EditorApp } from 'monaco-languageclient/editorApp'
 import { call, fire, type Reply } from './bridge'
+import { closed, connectLanguageServer, receive } from './lsp-transport'
+import { keepEditorKeys } from './keys'
 
 const theme = (dark: boolean) => (dark ? 'Default Dark Modern' : 'Default Light Modern')
 
@@ -47,10 +49,16 @@ async function main() {
   const app = new EditorApp({ codeResources: { modified: { text: '', uri: '/untitled.txt' } } })
   await app.start(document.getElementById('root')!)
   const editor = app.getEditor()!
-  editor.updateOptions({ readOnly: true })
+  // squiggles for LSP diagnostics in a read-only editor too: Monaco's default ('editable') hides them there, and this
+  // editor starts read-only (D#5 b)
+  // the findings' markers need it too (T34)
+  editor.updateOptions({ readOnly: true, renderValidationDecorations: 'on' })
   const configuration = await getService(IConfigurationService)
 
   const files = new Map<string, OpenFile>()
+  /** Files Swift read itself (a task board link's), by path: read-only models of their own, apart from the buffers
+   * of the same paths, so a buffer's reload, lock or save never reaches them (R34a L3). */
+  const links = new Map<string, monacoEditor.ITextModel>()
   let shown: string | undefined
   const model = (f: OpenFile) => f.ref.object.textEditorModel!
   const isDirty = (f: OpenFile) => model(f).getAlternativeVersionId() !== f.savedVersion
@@ -63,7 +71,7 @@ async function main() {
       fire('dirtyChanged', { path, dirty })
     }
   }
-  /** Takes the disk's text into a clean buffer; a dirty one is kept (its banner is I7's). */
+  /** Takes the disk's text into a clean buffer; a dirty one is kept, and Swift shows its banner (EditorBuffers.swift). */
   const reload = (path: string, f: OpenFile, text: string, hash: string) => {
     if (isDirty(f)) return false
     if (model(f).getValue() !== text) model(f).setValue(text)
@@ -73,11 +81,10 @@ async function main() {
     return true
   }
 
-  async function save(): Promise<Reply> {
-    const f = shown === undefined ? undefined : files.get(shown)
-    if (shown === undefined || !f) return { result: 'refused', reason: 'notOpen' }
+  async function save(path = shown): Promise<Reply> {
+    const f = path === undefined ? undefined : files.get(path)
+    if (path === undefined || !f) return { result: 'refused', reason: 'notOpen' }
     if (f.readOnly) return { result: 'refused', reason: 'readOnly' }
-    const path = shown
     const version = model(f).getAlternativeVersionId()
     const r = await call('writeFile', { path, text: model(f).getValue(), baseHash: f.hash })
     if (r.result === 'ok') {
@@ -89,6 +96,7 @@ async function main() {
   }
 
   editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => void save())
+  keepEditorKeys(editor)
   editor.onDidChangeModelContent(() => {
     const f = shown === undefined ? undefined : files.get(shown)
     if (shown !== undefined && f) reportDirty(shown, f)
@@ -115,12 +123,67 @@ async function main() {
         editor.revealLineInCenter(m.line)
         editor.setPosition({ lineNumber: m.line, column: 1 })
       }
+      // completion, definitions and diagnostics, if the app has a server for this language (not awaited: the file shows now)
+      void connectLanguageServer(model(f).getLanguageId(), m.path)
       return { result: 'ok', language: model(f).getLanguageId() }
+    },
+    showFile(m) {
+      let text = links.get(m.path)
+      if (!text) {
+        // its own scheme: the buffer of this path, if open, keeps its model (a file URI names one model only)
+        text = monacoEditor.createModel(m.text, undefined, Uri.from({ scheme: 'ctlink', path: m.path }))
+        links.set(m.path, text)
+      } else if (text.getValue() !== m.text) {
+        text.setValue(m.text)
+      }
+      editor.setModel(text)
+      // no buffer shows: a save, a lock or a buffer's state change has nothing on screen to act on
+      shown = undefined
+      editor.updateOptions({ readOnly: true, readOnlyMessage: { value: '작업판 링크로 연 파일은 읽기 전용입니다.' } })
+      if (m.line) {
+        editor.revealLineInCenter(m.line)
+        editor.setPosition({ lineNumber: m.line, column: 1 })
+      }
+      return { result: 'ok', language: text.getLanguageId() }
     },
     fileChangedOnDisk(m) {
       const f = files.get(m.path)
       if (!f || m.text === undefined) return { result: 'ok', applied: false }
       return { result: 'ok', applied: reload(m.path, f, m.text, m.hash) }
+    },
+    /** The banner's 디스크로 다시 읽기: the disk's text over the buffer, as one edit that undo takes back. */
+    reloadFile(m) {
+      const f = files.get(m.path)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      if (model(f).getValue() !== m.text) {
+        model(f).pushStackElement()
+        model(f).pushEditOperations(null, [{ range: model(f).getFullModelRange(), text: m.text }], () => null)
+        model(f).pushStackElement()
+      }
+      f.hash = m.hash
+      f.savedVersion = model(f).getAlternativeVersionId()
+      reportDirty(m.path, f)
+      return { result: 'ok', applied: true }
+    },
+    /** The banner's 덮어쓰기: a save from the disk bytes the banner was for. */
+    overwrite(m) {
+      const f = files.get(m.path)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      f.hash = m.diskHash
+      return save(m.path)
+    },
+    /** The tree renamed an open file: its buffer stays, under the new path (the language stays the old name's until it is opened again). */
+    renameFile(m) {
+      const f = files.get(m.from)
+      if (!f) return { result: 'refused', reason: 'notOpen' }
+      files.delete(m.from)
+      files.set(m.to, f)
+      if (shown === m.from) shown = m.to
+      return { result: 'ok' }
+    },
+    getText(m) {
+      const f = files.get(m.path)
+      return f ? { result: 'ok', text: model(f).getValue() } : { result: 'refused', reason: 'notOpen' }
     },
     fileDeleted(m) {
       // nothing to save to: Swift refuses a save of a missing file anyway; the buffer stays for the user to copy
@@ -146,7 +209,33 @@ async function main() {
       if (shown === m.path) showReadOnly(f)
       return { result: 'ok' }
     },
-    save,
+    save: () => save(),
+    lspReceive(m) {
+      receive(m.channel, m.message)
+      return { result: 'ok' }
+    },
+    lspClosed(m) {
+      closed(m.channel)
+      return { result: 'ok' }
+    },
+    /** The open findings beside their lines (G4 W5), on the file's model: they stay while it is open. */
+    /** On the path's buffer and its link document alike. */
+    setMarkers(m) {
+      const f = files.get(m.path)
+      const models = [f && model(f), links.get(m.path)].filter((t): t is monacoEditor.ITextModel => t !== undefined)
+      if (models.length === 0) return { result: 'refused', reason: 'notOpen' }
+      const severity: Record<string, MarkerSeverity> = {
+        error: MarkerSeverity.Error, warning: MarkerSeverity.Warning, info: MarkerSeverity.Info, hint: MarkerSeverity.Hint,
+      }
+      for (const text of models) {
+        monacoEditor.setModelMarkers(text, 'findings', m.markers.map((k: { line: number; severity: string; message: string }) => {
+          const line = Math.max(1, Math.min(k.line, text.getLineCount()))
+          return { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: text.getLineMaxColumn(line),
+                   severity: severity[k.severity] ?? MarkerSeverity.Info, message: k.message }
+        }))
+      }
+      return { result: 'ok' }
+    },
   }
   ;(window as any).ctBridge = {
     receive: async (m: { kind: string }) => {

@@ -110,6 +110,16 @@ test('a cycle gives its path and no waves; syntax errors give their lines and no
     const [loop, typo] = goalOrder(base, { team_name: 'g2' }).json.goals;
     assert.deepEqual([loop.cycle, loop.waves, loop.ready_now], [['A', 'B', 'A'], [], []]);
     assert.deepEqual([typo.cycle, typo.waves, typo.errors.map((e) => e.line)], [null, [], [4]]);
+    assert.deepEqual(typo.errors[0], { line: 4, text: '- A => C', reason: 'bad reference "A => C"', formats: ['- T1 -> T2', '- T1, T2', 'T177:4-7'] });
+});
+
+test('T52: template gives a new goal file to fill in, and reads neither goals nor the board', (t) => {
+    const { base, goal } = team(t, 'g7', { board: null });
+    goal('G1-x.md', '# G1 x\n## 순서\n- A => B\n');
+    const r = goalOrder(base, { team_name: 'g7', template: true });
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(Object.keys(r.json), ['ok', 'template']);
+    assert.match(r.json.template, /^# G<n> <title>\n[\s\S]*\n## 순서\n- <before> -> <after>\n/);
 });
 
 test('R7 L1: one G number in two files is one goal with an error per file, and no order', (t) => {

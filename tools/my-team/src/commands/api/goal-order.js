@@ -5,15 +5,16 @@
  * so MY_TEAM_STATE_ROOT_BASE moves it too). Their `## 순서` section is sorted into waves (board/core/goal-order.js)
  * and matched against the board read like board-status. Nothing is written.
  *
- * Input:  { team_name, goal? }           goal "G3" for one goal; left out, every goal
+ * Input:  { team_name, goal?, template? } goal "G3" for one goal; left out, every goal. template true: { ok, template }
+ *                                         only, a new goal file to fill in (T52); no goal file or board is read
  * Output: { ok, goals: [ { id, title, path,
  *             waves: [ [ { ref, task, items: [n]|null, after: [ { ref, task, items } ], title, state, status,
  *                          blocked_by: [ { ref, state } ] } ] ],
- *             ready_now: [ref], unregistered: [task id], cycle: [ref…]|null, errors: [ { line, text, reason } ] } ] }
+ *             ready_now: [ref], unregistered: [task id], cycle: [ref…]|null, errors: [ { line, text, reason, formats? } ] } ] }
  * status: done | ready_now | waiting | cancelled | unregistered. ready_now: every predecessor complete and the unit
  * not done or cancelled, so a task already under way is in it too, whatever its state (doing, review, waiting…).
  * A goal without `## 순서`: waves []. A cycle: cycle set, waves []. Syntax errors: errors set, waves [] (a partial
- * order would put a task in ready_now whose predecessor line was mistyped). One G number in two or more files:
+ * order would put a task in ready_now whose predecessor line was mistyped); each names the forms a line takes in formats. One G number in two or more files:
  * one entry, path the first file by name, title null, waves [], an error per file (T230). Only regular files
  * count: a directory named G<n>-x.md is skipped. A team without a board: every node unregistered.
  */
@@ -22,7 +23,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 
 import { refuseOutsider, withBoard } from '../../board/compose.js';
-import { annotate, parseOrder, waves } from '../../board/core/goal-order.js';
+import { annotate, GOAL_TEMPLATE, parseOrder, waves } from '../../board/core/goal-order.js';
 import { status } from '../../board/core/queries.js';
 import { BoardError } from '../../board/core/rules.js';
 import { getStateRootBase } from '../../lib/state-root.js';
@@ -72,6 +73,7 @@ function duplicate(id, paths) {
 
 export async function runApiGoalOrder(input = {}, env = process.env) {
     refuseOutsider(env, input.team_name);
+    if (input.template) return { ok: true, template: GOAL_TEMPLATE };
     const tasks = await boardTasks(input.team_name);
     const dir = goalsDir(input.team_name);
     const byId = new Map();

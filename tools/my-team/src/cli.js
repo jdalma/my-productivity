@@ -289,7 +289,7 @@ async function main() {
     };
     for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name), true);
     board('board-pushable', '[pure] Whether every outgoing commit has an approved review on the board or is within the baseline: commit, upstream (or remote, for a new branch); repo, baseline', runApiBoardPushable);
-    board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle. Optional input: goal', runApiGoalOrder);
+    board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle. Optional input: goal; template:true prints a new goal file instead', runApiGoalOrder);
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
     board('review-copy', '[mutating] A copy of a commit\'s files in a new temporary folder, for a rerun away from every working tree; it has no .git. Input: commit; repo (default: the current folder\'s), install (true: npm ci in every folder with a package-lock.json, or a list of those folders)', runApiReviewCopy);
 

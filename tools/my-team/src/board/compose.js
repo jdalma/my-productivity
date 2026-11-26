@@ -12,8 +12,10 @@ import { dirname, join } from 'node:path';
 
 import { loadManifest, manifestPathForTeam, rosterOf } from '../commands/_manifest.js';
 import { appendEvent } from '../lib/events.js';
+import { listPanes, liveness } from '../lib/team-liveness.js';
 import { validateTeamName } from '../lib/team-name.js';
 import { logRefusedTrigger, queueDirectMessage } from '../lib/tmux-comm.js';
+import { MigrationRefused, SCHEMA_VERSION } from './core/contract.js';
 import { BoardError } from './core/rules.js';
 import { createBoard } from './core/service.js';
 import { gitRange } from './git.js';
@@ -22,15 +24,28 @@ import { createSqliteStore } from './store/sqlite/index.js';
 
 const fail = (code, message) => { throw new BoardError(code, message); };
 
-/** The team's board, for reading unless `write`: only a write may migrate the board file (T159). */
-export async function openBoard(teamName, { write = false } = {}) {
+/**
+ * The team's board, for reading unless `write`: only a write may migrate the board file (T159), and not while the
+ * team runs (T50): the my-team its workers run would then refuse the file. `panes` is tmux's pane list (tests pass one).
+ */
+export async function openBoard(teamName, { write = false, panes = listPanes } = {}) {
     if (!teamName) fail('invalid', 'team_name is required');
     try { validateTeamName(teamName); } catch (err) { fail('invalid', err.message); }
     if (!existsSync(manifestPathForTeam(teamName))) fail('not-found', `no team '${teamName}' (no manifest at ${manifestPathForTeam(teamName)})`);
     const manifest = loadManifest(teamName);
     if (!manifest.board) fail('board-unavailable', `team '${teamName}' has no board in its config (add "board": {"store": "sqlite"})`);
     const store = manifest.board.store === 'memory' ? createMemoryStore() : createSqliteStore(join(manifest.state_root, 'board.db'));
-    await store.open({ readonly: !write });
+    const beforeMigrate = async (version) => {
+        if (!liveness(manifest, await panes()).team_alive) return;
+        throw new MigrationRefused(
+            `team '${teamName}' is running and its board file has schema ${version}, older than this my-team's ${SCHEMA_VERSION}: `
+            + 'a write would migrate it, and the my-team the team runs would then refuse it. Run this my-team on a copy: copy '
+            + `${manifest.state_root} into a temporary folder, set MY_TEAM_STATE_ROOT_BASE to that folder, and in the copied manifest.json `
+            + "change state_root to the copy's own folder (it is an absolute path) and session_name to one no tmux session has (the copy "
+            + 'is running too while it names this one). Or shut the team down first; reads work as they are.',
+        );
+    };
+    await store.open({ readonly: !write, beforeMigrate });
     return { store, roster: rosterOf(manifest), manifest, close: () => store.close() };
 }
 

@@ -988,8 +988,8 @@ private func task(_ id: String, _ state: String, to assignee: String, base: Stri
     return #"{"id":"\#(id)","title":"t","state":"\#(state)","assignee":"\#(assignee)","priority":1,"base_commit":\#(b),"assigned_at":"\#(assigned)"\#(h)}"#
 }
 
-/// T58 (D#27): a worker's row counts from the start commit of its task in progress taken last; none in progress, the
-/// folder's base as before.
+/// T58 (D#27, D#28): a worker's row counts from the start commit of its task in progress taken last; none in progress,
+/// of its task assigned last in any state; no task, or that task without a base, the folder's base as before.
 @Test func aWorkersTaskBaseIsItsTaskInProgressTakenLast() throws {
     func base(_ tasks: [String], _ worker: String = "a") throws -> String? {
         workerTaskBase(team: "t", worker: worker, taskBoards: ["t": try taskBoard(tasks)])
@@ -997,9 +997,17 @@ private func task(_ id: String, _ state: String, to assignee: String, base: Stri
     #expect(try base([]) == nil)
     #expect(try base([task("T1", "doing", to: "a", base: "b1")]) == "b1")
     #expect(try base([task("T1", "doing", to: "b", base: "b1")]) == nil, "another worker's task")
-    for done in ["ready", "approved", "cancelled"] {
-        #expect(try base([task("T1", done, to: "a", base: "b1")]) == nil, "\(done) is not in progress")
+    for done in ["ready", "done", "approved", "cancelled"] {
+        #expect(try base([task("T1", done, to: "a", base: "b1")]) == "b1", "\(done): the last task when none is in progress")
     }
+    #expect(try base([task("T1", "done", to: "a", base: "old", assigned: "2026-11-01T00:00:00Z"),
+                      task("T2", "done", to: "a", base: "new", assigned: "2026-11-02T00:00:00Z")]) == "new")
+    #expect(try base([task("T1", "review", to: "a", base: "rev", assigned: "2026-11-01T00:00:00Z"),
+                      task("T2", "done", to: "a", base: "done", assigned: "2026-11-05T00:00:00Z")]) == "rev", "one in progress beats a newer done one")
+    #expect(try base([task("T1", "done", to: "a", base: "old", assigned: "2026-11-01T00:00:00Z"),
+                      task("T2", "done", to: "a", base: nil, assigned: "2026-11-02T00:00:00Z")]) == nil, "the last task has no base")
+    #expect(try base([task("T1", "held", to: "a", base: "old", assigned: "2026-11-01T00:00:00Z"),
+                      task("T2", "doing", to: "a", base: nil, assigned: "2026-11-02T00:00:00Z")]) == nil, "the task taken last has no base")
     for state in ["changes", "review", "held", "waiting"] {
         #expect(try base([task("T1", state, to: "a", base: "b1")]) == "b1", "\(state) is in progress")
     }

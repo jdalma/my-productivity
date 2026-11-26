@@ -188,17 +188,18 @@ func workspaceSharers(_ row: LiveRow, in board: Board) -> [String] {
 /// The task states a worker is on (T58): taken and not finished.
 let inProgressTaskStates: Set<String> = ["doing", "changes", "review", "held", "waiting"]
 
-/// The start commit of the task in progress `worker` took last (T58, D#27); nil when it has none or no board is read.
+/// The start commit of the task in progress `worker` took last (T58, D#27); with none in progress, of its task assigned
+/// last in any state (D#28); nil when that task has none, the worker has no task, or no board is read.
 /// The board keeps no time of a take: a `doing` task was taken when it entered `doing` (its `state_since`), so the
 /// latest of those wins; with none doing, the latest assigned.
 func workerTaskBase(team: String, worker: String, taskBoards: [String: TaskBoardStatus]) -> String? {
-    let mine = (taskBoards[team]?.tasks ?? []).filter {
-        $0.assignee == worker && inProgressTaskStates.contains($0.state) && !($0.baseCommit ?? "").isEmpty
-    }
-    let doing = mine.filter { $0.state == "doing" }
-    let last = doing.isEmpty ? mine.max { ($0.assignedAt ?? "") < ($1.assignedAt ?? "") }
+    let mine = (taskBoards[team]?.tasks ?? []).filter { $0.assignee == worker }
+    let active = mine.filter { inProgressTaskStates.contains($0.state) }
+    let doing = active.filter { $0.state == "doing" }
+    let latestAssigned = { (ts: [TaskBoardTask]) in ts.max { ($0.assignedAt ?? "") < ($1.assignedAt ?? "") } }
+    let last = doing.isEmpty ? latestAssigned(active.isEmpty ? mine : active)
                              : doing.max { ($0.history?.stateSince ?? "") < ($1.history?.stateSince ?? "") }
-    return last?.baseCommit
+    return last?.baseCommit.flatMap { $0.isEmpty ? nil : $0 }
 }
 
 func diffKey(_ row: LiveRow, taskBoards: [String: TaskBoardStatus]) -> DiffKey {

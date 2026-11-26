@@ -491,6 +491,28 @@ private func sections(_ dir: String) throws -> DiffTotal {
     #expect(try sections(dir) == diffTotal(at: dir))
 }
 
+/// T58: a branch stacked on another worker's unmerged branch counts its own lines from its task's start commit.
+@Test func aTaskBaseCountsOnlyTheStackedBranchsOwnLines() throws {
+    let dir = try fixture()
+    try sh(dir, ["switch", "-q", "-c", "parent"])
+    try commit(dir, "p.txt", "p1\np2\np3\n")
+    let parentTip = try sh(dir, ["rev-parse", "HEAD"])
+    try sh(dir, ["switch", "-q", "-c", "child"])
+    try commit(dir, "c.txt", "c1\n")
+    try write(dir, "b.txt", "x\n")
+    try write(dir, "n.txt", "u1\nu2\n")
+    let own = DiffTotal(added: 1 + 2, removed: 1)
+    #expect(diffTotal(at: dir, taskBase: parentTip) == own)
+    #expect(diffTotal(at: dir, taskBase: String(parentTip.prefix(7))) == own, "an abbreviated sha resolves too")
+    let fromMain = DiffTotal(added: 3 + 1 + 2, removed: 1)
+    #expect(diffTotal(at: dir) == fromMain)
+    #expect(diffTotal(at: dir, taskBase: nil) == fromMain)
+    #expect(diffTotal(at: dir, taskBase: "") == fromMain)
+    #expect(diffTotal(at: dir, taskBase: "0123456789abcdef0123456789abcdef01234567") == fromMain, "a commit not in the repo")
+    #expect(diffTotal(at: dir, taskBase: "--output=\(dir)/x") == fromMain, "an option-like base is a revision git cannot find")
+    #expect(!FileManager.default.fileExists(atPath: "\(dir)/x"))
+}
+
 @Test func theTotalOfAnUnchangedWorkspaceIsEmptyAndOfAFolderOutsideGitIsNone() throws {
     let dir = try fixture()
     #expect(diffTotal(at: dir) == DiffTotal())

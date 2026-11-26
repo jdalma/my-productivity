@@ -24,6 +24,8 @@ const needsSqlite = sqlite ? {} : { skip: 'node:sqlite needs Node >= 22.13' };
 const DatabaseSync = sqlite?.Database ?? sqlite?.DatabaseSync;
 const ROSTER = [{ name: 'pm', role: 'orchestrator' }, { name: 'core', role: 'worker' }, { name: 'rv', role: 'worker' }];
 const OLD = SCHEMA_VERSION - 1;
+/** Takes a board.db back one schema: what migration 7 added (T53). */
+const UNDO_LAST_MIGRATION = 'ALTER TABLE landings DROP COLUMN "check_detail"; ALTER TABLE landings DROP COLUMN "unverified"; ALTER TABLE verdicts DROP COLUMN "rerun_detail"';
 
 function scratch(t, prefix) {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -64,7 +66,7 @@ async function oldBoard(file, repo, commits) {
     let tick = 0;
     const now = () => new Date(Date.UTC(2026, 10, 11, 0, 0, tick++)).toISOString();
     const as = (actor) => createBoard({ store, roster: () => ROSTER, actor, now, git: gitRange });
-    const landing = (id, commit) => ({ id, repo, commit, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], report: '/r.md', review_report: '/R.md' });
+    const landing = (id, commit) => ({ id, repo, commit, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], unverified: [], report: '/r.md', review_report: '/R.md' });
     const verdict = (l, commit, v, findings = []) => ({ landing: l, verdict: v, verified_commit: commit, rerun: { cmd: 'npm test', result: 'ok' }, findings });
     await as('pm').add({ id: 'T1', title: 'one', assignee: 'core', reviewer: 'rv', ticket: '/t.md', constraints: 'c', base: commits.base });
     await as('core').take({ id: 'T1' });
@@ -83,7 +85,7 @@ async function oldBoard(file, repo, commits) {
     await store.close();
     const raw = new DatabaseSync(file);
     raw.exec('PRAGMA journal_mode = DELETE');   // one file, so its bytes are the whole board
-    raw.exec(`ALTER TABLE tasks DROP COLUMN "deliverable"; PRAGMA user_version = ${OLD}`);
+    raw.exec(`${UNDO_LAST_MIGRATION}; PRAGMA user_version = ${OLD}`);
     raw.close();
 }
 
@@ -171,7 +173,7 @@ test(`a write command migrates a schema ${OLD} board.db and first leaves board.d
     // a copy that is there is kept: a later migration from the same schema does not write over it
     const kept = readFileSync(bak);
     const raw = new DatabaseSync(w.file);
-    raw.exec(`ALTER TABLE tasks DROP COLUMN "deliverable"; PRAGMA user_version = ${OLD}`);
+    raw.exec(`${UNDO_LAST_MIGRATION}; PRAGMA user_version = ${OLD}`);
     raw.close();
     assert.equal(cli(w.base, 'board-note', { team_name: 'old', body: 'second' }, 'old/pm').code, 0);
     assert.equal(pragma(w.file, 'user_version'), SCHEMA_VERSION);
@@ -216,7 +218,7 @@ test(`a schema ${OLD} board.db in WAL mode, with a writer's connection open, is 
     assert.equal(status.code, 0, status.err);
     assert.equal(status.json.tasks.find((x) => x.id === 'T2').title, 'renamed in the WAL', 'what is in the WAL is read too');
     assert.equal(writer.prepare('PRAGMA user_version').get().user_version, OLD);
-    assert.equal(writer.prepare(`SELECT count(*) AS n FROM pragma_table_info('tasks') WHERE name = 'deliverable'`).get().n, 0);
+    assert.equal(writer.prepare(`SELECT count(*) AS n FROM pragma_table_info('landings') WHERE name = 'unverified'`).get().n, 0);
     writer.exec(`UPDATE tasks SET "title" = 'two' WHERE "id" = 'T2'`);   // and the writer is not locked out
 });
 

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import TowerCore
+import TowerTestSupport
 @testable import TowerApp
 
 // The board's IDE area marks the files a worker wrote lately (G4 I14 W3, T35): not the app's own saves.
@@ -21,53 +22,58 @@ private func page() throws -> URL {
     return URL(fileURLWithPath: dir)
 }
 
+/// The tests that wait on work off the main actor run in `withGCDWorkersFree` (T48): a test that blocks every GCD
+/// worker (FocusRunnerTests, CommandTests) would hold that work for its 20 s.
 @MainActor
 private func until(_ done: () -> Bool) async throws {
-    // long: another test may hold every GCD worker for 30 s (FocusRunnerTests; on CI this wait gave up 60 s into the test), and a link's detached read waits for one
-    let deadline = Date().addingTimeInterval(120)
+    let deadline = Date().addingTimeInterval(10)
     while !done(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
 }
 
 /// W3: a file written in the worktree by something other than the app is marked as the worker's.
 @MainActor @Test func aFileWrittenFromOutsideIsMarkedAsTheWorkers() async throws {
-    let work = try folder()
-    try "x\n".write(toFile: work + "/a.swift", atomically: true, encoding: .utf8)
-    let state = IdeState(page: try page())
-    state.show(root: work)
-    state.worker = "analyst"
-    try await Task.sleep(for: .milliseconds(300))  // the watch starts
-    try "y\n".write(toFile: work + "/a.swift", atomically: true, encoding: .utf8)
-    try await until { state.session?.writes.last[work + "/a.swift"] != nil }
-    #expect(state.session?.writtenWarning(work + "/a.swift")?.hasPrefix("analyst가 ") == true)
-    state.areaGone()
+    try await withGCDWorkersFree {
+        let work = try folder()
+        try "x\n".write(toFile: work + "/a.swift", atomically: true, encoding: .utf8)
+        let state = IdeState(page: try page())
+        state.show(root: work)
+        state.worker = "analyst"
+        try await Task.sleep(for: .milliseconds(300))  // the watch starts
+        try "y\n".write(toFile: work + "/a.swift", atomically: true, encoding: .utf8)
+        try await until { state.session?.writes.last[work + "/a.swift"] != nil }
+        #expect(state.session?.writtenWarning(work + "/a.swift")?.hasPrefix("analyst가 ") == true)
+        state.areaGone()
+    }
 }
 
 /// R36 L1: the app's own save of an unlocked file is not marked; a worker's write of another file in the same batch
 /// window is.
 @MainActor @Test func theAppsOwnSaveIsNotMarkedAsTheWorkers() async throws {
-    let work = try folder()
-    try "x\n".write(toFile: work + "/mine.swift", atomically: true, encoding: .utf8)
-    try "x\n".write(toFile: work + "/theirs.swift", atomically: true, encoding: .utf8)
-    let state = IdeState(page: try page())
-    state.show(root: work)
-    let files = try #require(state.editor?.files)
-    guard case .file(_, let hash) = await files.handle(.readFile(path: work + "/mine.swift")) else { Issue.record("no read"); return }
-    _ = await files.setReadOnly(work + "/mine.swift", false)
-    // The setup's writes above are not the app's, and on a loaded machine their events can come after the watch has
-    // started (T45: the cause of the R40a failure, which slept 300 ms for them). Events come in order: once a file
-    // written now is seen, theirs have come too. The save must then add nothing for mine.swift.
-    try "s\n".write(toFile: work + "/sentinel.txt", atomically: true, encoding: .utf8)
-    try await until { state.session?.writes.last[work + "/sentinel.txt"] != nil }
-    let before = state.session?.writes.last[work + "/mine.swift"]
-    let saved = Date()
-    guard case .written = await files.handle(.writeFile(path: work + "/mine.swift", text: "saved\n", baseHash: hash)) else {
-        Issue.record("not saved"); return
+    try await withGCDWorkersFree {
+        let work = try folder()
+        try "x\n".write(toFile: work + "/mine.swift", atomically: true, encoding: .utf8)
+        try "x\n".write(toFile: work + "/theirs.swift", atomically: true, encoding: .utf8)
+        let state = IdeState(page: try page())
+        state.show(root: work)
+        let files = try #require(state.editor?.files)
+        guard case .file(_, let hash) = await files.handle(.readFile(path: work + "/mine.swift")) else { Issue.record("no read"); return }
+        _ = await files.setReadOnly(work + "/mine.swift", false)
+        // The setup's writes above are not the app's, and on a loaded machine their events can come after the watch has
+        // started (T45: the cause of the R40a failure, which slept 300 ms for them). Events come in order: once a file
+        // written now is seen, theirs have come too. The save must then add nothing for mine.swift.
+        try "s\n".write(toFile: work + "/sentinel.txt", atomically: true, encoding: .utf8)
+        try await until { state.session?.writes.last[work + "/sentinel.txt"] != nil }
+        let before = state.session?.writes.last[work + "/mine.swift"]
+        let saved = Date()
+        guard case .written = await files.handle(.writeFile(path: work + "/mine.swift", text: "saved\n", baseHash: hash)) else {
+            Issue.record("not saved"); return
+        }
+        // a worker's write after the save: once it is seen, so is the save's event
+        try "y\n".write(toFile: work + "/theirs.swift", atomically: true, encoding: .utf8)
+        try await until { (state.session?.writes.last[work + "/theirs.swift"]).map { $0 >= saved } == true }
+        #expect(state.session?.writes.last[work + "/mine.swift"] == before)
+        state.areaGone()
     }
-    // a worker's write after the save: once it is seen, so is the save's event
-    try "y\n".write(toFile: work + "/theirs.swift", atomically: true, encoding: .utf8)
-    try await until { (state.session?.writes.last[work + "/theirs.swift"]).map { $0 >= saved } == true }
-    #expect(state.session?.writes.last[work + "/mine.swift"] == before)
-    state.areaGone()
 }
 
 /// The last markers the page was sent for `path`.
@@ -78,24 +84,26 @@ private func until(_ done: () -> Bool) async throws {
 }
 
 @MainActor @Test func aLinkWaitsForTheWorkersWorktreeThenOpensReadOnlyAtItsLineWithItsMarkers() async throws {
-    let state = IdeState(page: try page())
-    let other = try folder(), work = try folder(), file = work + "/area.swift"
-    try "a\nb\nc\n".write(toFile: file, atomically: true, encoding: .utf8)
-    state.show(root: other)  // the board window shows another worker
+    try await withGCDWorkersFree {
+        let state = IdeState(page: try page())
+        let other = try folder(), work = try folder(), file = work + "/area.swift"
+        try "a\nb\nc\n".write(toFile: file, atomically: true, encoding: .utf8)
+        state.show(root: other)  // the board window shows another worker
 
-    let finding = FindingPlace(id: "R1 M1", severity: "must", summary: "`area.swift:2` rounds", repo: work)
-    await state.take(IdeOpenRequest(root: work, target: .file(path: file, line: 2), findings: [finding]))
-    #expect(state.shown == nil && state.session?.root == other)  // not in another worktree's editor
+        let finding = FindingPlace(id: "R1 M1", severity: "must", summary: "`area.swift:2` rounds", repo: work)
+        await state.take(IdeOpenRequest(root: work, target: .file(path: file, line: 2), findings: [finding]))
+        #expect(state.shown == nil && state.session?.root == other)  // not in another worktree's editor
 
-    state.show(root: work)  // the board selects the worker's row
-    try await until { marked(state, file) != nil }
-    #expect(state.shown == file && state.readOnly)
-    #expect(state.editor?.waiting.contains(.showFile(path: file, text: "a\nb\nc\n", line: 2)) == true)
-    #expect(marked(state, file) == [EditorMarker(line: 2, severity: .error, message: "R1 M1 `area.swift:2` rounds")])
+        state.show(root: work)  // the board selects the worker's row
+        try await until { marked(state, file) != nil }
+        #expect(state.shown == file && state.readOnly)
+        #expect(state.editor?.waiting.contains(.showFile(path: file, text: "a\nb\nc\n", line: 2)) == true)
+        #expect(marked(state, file) == [EditorMarker(line: 2, severity: .error, message: "R1 M1 `area.swift:2` rounds")])
 
-    // never unlocked: it is no buffer of the editor's
-    await state.session?.toggleLock()
-    #expect(state.readOnly)
+        // never unlocked: it is no buffer of the editor's
+        await state.session?.toggleLock()
+        #expect(state.readOnly)
+    }
 }
 
 @MainActor @Test func aLinkOfTheWorktreeShownOpensAtOnceAndACommitsFileIsReadFromGit() async throws {

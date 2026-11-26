@@ -26,6 +26,14 @@ private func passHolder() {
     next?.resume()
 }
 
+/// Runs `body` while no test blocks the GCD workers (T48): a test that waits on work off the main actor (a detached
+/// task, a file watch) waits for a holder's 20 s first, instead of counting them against its own deadline.
+public func withGCDWorkersFree<T>(isolation: isolated (any Actor)? = #isolation, _ body: () async throws -> T) async rethrows -> T {
+    await takeHolder()
+    defer { passHolder() }
+    return try await body()
+}
+
 /// Blocks every GCD worker until the returned function is called, or 20 s pass (R51 L2); calling it again does nothing.
 public func blockEveryGCDWorker() async -> @Sendable () -> Void {
     await takeHolder()

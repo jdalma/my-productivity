@@ -27,9 +27,11 @@ import TowerTestSupport
     /// The timeout fires while every GCD worker is blocked (T130): it waits on a thread of its own. Here the workers are
     /// let go after 20 s; a killer on a global queue would have waited for that.
     @Test func theTimeoutFiresWhileEveryGCDWorkerIsBlocked() async throws {
-        let start = Date()
-        let r = try await Self.withEveryGCDWorkerBlocked { try runCommand(["/bin/sleep", "300"], timeout: 0.5) }
-        let took = Date().timeIntervalSince(start)
+        // timed once the workers are held: the wait for the holder is another test's (T48)
+        let (r, took) = try await Self.withEveryGCDWorkerBlocked {
+            let start = Date()
+            return (try runCommand(["/bin/sleep", "300"], timeout: 0.5), Date().timeIntervalSince(start))
+        }
         #expect(r.status == SIGTERM)
         #expect(took < 10, "returned after \(took) s")
     }

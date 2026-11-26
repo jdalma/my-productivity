@@ -924,8 +924,8 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
         team("folded", [worker("e", session: session("pane:folded:%5", cwd: "/w/e"))]),
     ], loose: [session("pid:9", cwd: "/w/loose")])
     let teams = model(board).teams
-    #expect(diffTotalFolders(teams) { $0 == "open" } == ["/w/a", "/w/c"])
-    #expect(diffTotalFolders(teams) { _ in false }.isEmpty)
+    #expect(diffTotalKeys(teams) { $0 == "open" } == [DiffKey(folder: "/w/a"), DiffKey(folder: "/w/c")])
+    #expect(diffTotalKeys(teams) { _ in false }.isEmpty)
 }
 
 @Test func aWorkerRowsLineCountIsItsFoldersAndNamesWhoSharesIt() throws {
@@ -937,7 +937,8 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
     let rows = model(board).teams[0].rows
     func change(_ name: String) throws -> RowChange? {
         rowChange(try #require(rows.first { $0.title == name }),
-                  totals: ["/w/a": DiffTotal(added: 340, removed: 85), "/w/c": DiffTotal(added: 0, removed: 2), "/w/d": DiffTotal()], board: board)
+                  totals: [DiffKey(folder: "/w/a"): DiffTotal(added: 340, removed: 85), DiffKey(folder: "/w/c"): DiffTotal(added: 0, removed: 2),
+                          DiffKey(folder: "/w/d"): DiffTotal()], board: board)
     }
     let own = try #require(try change("c"))
     #expect(own.added == "+0" && own.removed == "−2" && own.words == "더한 줄 0, 뺀 줄 2")
@@ -956,21 +957,77 @@ private func teamHistory(_ id: String, team: String?, worker: String, at: String
         var all: [String] { lock.withLock { folders } }
     }
     let seen = Seen()
-    let totals = WorkerDiffTotals { folder, _ in
-        seen.add(folder)
-        return folder == "/w/plain" ? nil : DiffTotal(added: 1, removed: 0)
+    let totals = WorkerDiffTotals { key, _ in
+        seen.add(key.folder)
+        return key.folder == "/w/plain" ? nil : DiffTotal(added: 1, removed: 0)
     }
     await totals.refresh()
-    #expect(seen.all.isEmpty && totals.byFolder.isEmpty)
+    #expect(seen.all.isEmpty && totals.byKey.isEmpty)
 
-    totals.folders = ["/w/a", "/w/plain"]
+    totals.keys = [DiffKey(folder: "/w/a"), DiffKey(folder: "/w/plain")]
     await totals.refresh()
     await totals.refresh()
-    #expect(totals.byFolder == ["/w/a": DiffTotal(added: 1, removed: 0)])
+    #expect(totals.byKey == [DiffKey(folder: "/w/a"): DiffTotal(added: 1, removed: 0)])
     #expect(seen.all.filter { $0 == "/w/a" }.count >= 2 && Set(seen.all) == ["/w/a", "/w/plain"])
 
     let before = seen.all.count
-    totals.folders = []
+    totals.keys = []
     await totals.refresh()
-    #expect(seen.all.count == before && totals.byFolder.isEmpty)
+    #expect(seen.all.count == before && totals.byKey.isEmpty)
+}
+
+private func taskBoard(_ tasks: [String]) throws -> TaskBoardStatus {
+    let d = JSONDecoder()
+    d.keyDecodingStrategy = .convertFromSnakeCase
+    return try d.decode(TaskBoardStatus.self, from: Data(#"{"tasks":[\#(tasks.joined(separator: ","))],"workers":[],"open_findings":[],"recent":[],"announcements":[]}"#.utf8))
+}
+
+private func task(_ id: String, _ state: String, to assignee: String, base: String?, assigned: String = "2026-11-01T00:00:00Z", since: String? = nil) -> String {
+    let b = base.map { "\"\($0)\"" } ?? "null"
+    let h = since.map { #","history":{"landings":0,"verdicts":{"changes":0},"state_since":"\#($0)"}"# } ?? ""
+    return #"{"id":"\#(id)","title":"t","state":"\#(state)","assignee":"\#(assignee)","priority":1,"base_commit":\#(b),"assigned_at":"\#(assigned)"\#(h)}"#
+}
+
+/// T58 (D#27): a worker's row counts from the start commit of its task in progress taken last; none in progress, the
+/// folder's base as before.
+@Test func aWorkersTaskBaseIsItsTaskInProgressTakenLast() throws {
+    func base(_ tasks: [String], _ worker: String = "a") throws -> String? {
+        workerTaskBase(team: "t", worker: worker, taskBoards: ["t": try taskBoard(tasks)])
+    }
+    #expect(try base([]) == nil)
+    #expect(try base([task("T1", "doing", to: "a", base: "b1")]) == "b1")
+    #expect(try base([task("T1", "doing", to: "b", base: "b1")]) == nil, "another worker's task")
+    for done in ["ready", "approved", "cancelled"] {
+        #expect(try base([task("T1", done, to: "a", base: "b1")]) == nil, "\(done) is not in progress")
+    }
+    for state in ["changes", "review", "held", "waiting"] {
+        #expect(try base([task("T1", state, to: "a", base: "b1")]) == "b1", "\(state) is in progress")
+    }
+    #expect(try base([task("T1", "doing", to: "a", base: nil)]) == nil)
+    #expect(try base([task("T1", "doing", to: "a", base: "old", since: "2026-11-02T00:00:00Z"),
+                      task("T2", "doing", to: "a", base: "new", since: "2026-11-03T00:00:00Z")]) == "new")
+    #expect(try base([task("T1", "review", to: "a", base: "rev", assigned: "2026-11-09T00:00:00Z"),
+                      task("T2", "doing", to: "a", base: "doing", assigned: "2026-11-01T00:00:00Z")]) == "doing", "a task doing beats one landed")
+    #expect(try base([task("T1", "review", to: "a", base: "older", assigned: "2026-11-01T00:00:00Z"),
+                      task("T2", "changes", to: "a", base: "newer", assigned: "2026-11-02T00:00:00Z")]) == "newer")
+    #expect(workerTaskBase(team: "other", worker: "a", taskBoards: ["t": try taskBoard([task("T1", "doing", to: "a", base: "b1")])]) == nil)
+}
+
+/// T58: workers of one folder are counted apart when their task bases differ, and name each other only when they agree.
+@Test func workersOfOneFolderAreCountedFromTheirOwnTaskBase() throws {
+    let board = Board(at: at, teams: [team("t", [
+        worker("pm", session: session("pane:t:%1", cwd: "/w/r")), worker("rv", session: session("pane:t:%2", cwd: "/w/r")),
+        worker("dev", session: session("pane:t:%3", cwd: "/w/r")),
+    ])], loose: [])
+    let boards = ["t": try taskBoard([task("T1", "doing", to: "dev", base: "b1")])]
+    let rows = model(board).teams[0].rows
+    #expect(diffTotalKeys(model(board).teams, taskBoards: boards) { _ in true } == [DiffKey(folder: "/w/r"), DiffKey(folder: "/w/r", taskBase: "b1")])
+    let totals = [DiffKey(folder: "/w/r"): DiffTotal(added: 900, removed: 9), DiffKey(folder: "/w/r", taskBase: "b1"): DiffTotal(added: 30, removed: 3)]
+    func change(_ name: String) throws -> RowChange? {
+        rowChange(try #require(rows.first { $0.title == name }), totals: totals, board: board, taskBoards: boards)
+    }
+    let dev = try #require(try change("dev"))
+    #expect(dev.total == DiffTotal(added: 30, removed: 3) && dev.sharers.isEmpty)
+    let pm = try #require(try change("pm"))
+    #expect(pm.total == DiffTotal(added: 900, removed: 9) && pm.sharers == ["rv"])
 }

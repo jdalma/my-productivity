@@ -159,8 +159,16 @@ public let defaultFileLineLimit = 2000
 
 /// The line counts of `workspaceDiff` without its diffs; nil outside a git work tree. `pins` is the picked base of
 /// each repo by toplevel. Untracked files count as the diff window counts them (`NewFileMemo`), a binary file as no lines.
-public func diffTotal(at path: String, pins: [String: String] = [:]) -> DiffTotal? {
-    guard let w = Workspace(at: path, pinnedBase: { pins[$0] }) else { return nil }
+/// `taskBase` (T58), the start commit of the worker's task, counts the committed lines from it instead, when it is a
+/// commit there; else the base as without it. It is the board's, another worker's input: it is read after
+/// `--end-of-options` and only its full sha reaches the diff.
+public func diffTotal(at path: String, pins: [String: String] = [:], taskBase: String? = nil) -> DiffTotal? {
+    guard var w = Workspace(at: path, pinnedBase: { pins[$0] }) else { return nil }
+    if let taskBase, !taskBase.isEmpty,
+       let sha = out(.revParse, ["--verify", "--quiet", "--end-of-options", "\(taskBase)^{commit}"], in: w.top)?.trimmed.nonEmpty,
+       let base = mergeBase(sha, w.top) {
+        w.base = .resolved(ref: sha, mergeBase: base)
+    }
     let text = w.text(.lineCounts)
     var total = DiffTotal()
     for line in ((text.committed ?? "") + text.uncommitted).split(separator: "\n") {

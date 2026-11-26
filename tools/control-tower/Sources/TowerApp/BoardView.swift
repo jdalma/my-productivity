@@ -101,12 +101,13 @@ struct BoardView: View {
         .modifier(ShutdownConfirmation(tower: tower))
         .onChange(of: activeState, initial: true) { tower.windows.boardKey = activeState == .key }
         .onAppear { tower.windows.board = true }
-        .onChange(of: model.map { diffTotalFolders($0.teams) { opened.isExpanded($0, query: query) } } ?? [], initial: true) {
-            tower.diffTotals.folders = $1
+        .onChange(of: model.map { diffTotalKeys($0.teams, taskBoards: tower.taskBoardStatuses) { opened.isExpanded($0, query: query) } } ?? [],
+                  initial: true) {
+            tower.diffTotals.keys = $1
         }
         .onDisappear {
             tower.windows.board = false
-            tower.diffTotals.folders = []
+            tower.diffTotals.keys = []
             // the window's editor goes, and its language servers with it (K12)
             ide.close()
         }
@@ -203,7 +204,7 @@ struct BoardView: View {
                 ForEach(model.teams, id: \.name) { team in
                     Section(isExpanded: teamExpanded(team.name)) {
                         ForEach(team.rows, id: \.id) {
-                            LiveRowView(row: $0, change: rowChange($0, totals: tower.diffTotals.byFolder, board: board))
+                            LiveRowView(row: $0, change: rowChange($0, totals: tower.diffTotals.byKey, board: board, taskBoards: tower.taskBoardStatuses))
                                 .padding(.leading, TeamHeader.workerInset(scale.value)).tag($0.id)
                         }
                     } header: {

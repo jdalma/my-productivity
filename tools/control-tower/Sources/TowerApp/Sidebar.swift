@@ -185,8 +185,29 @@ func workspaceSharers(_ row: LiveRow, in board: Board) -> [String] {
         .map(\.workerName)
 }
 
-func diffTotalFolders(_ teams: [TeamGroup], expanded: (String) -> Bool) -> Set<String> {
-    Set(teams.filter { expanded($0.name) }.flatMap(\.rows).map(\.session.cwd).filter { !$0.isEmpty })
+/// The task states a worker is on (T58): taken and not finished.
+let inProgressTaskStates: Set<String> = ["doing", "changes", "review", "held", "waiting"]
+
+/// The start commit of the task in progress `worker` took last (T58, D#27); nil when it has none or no board is read.
+/// The board keeps no time of a take: a `doing` task was taken when it entered `doing` (its `state_since`), so the
+/// latest of those wins; with none doing, the latest assigned.
+func workerTaskBase(team: String, worker: String, taskBoards: [String: TaskBoardStatus]) -> String? {
+    let mine = (taskBoards[team]?.tasks ?? []).filter {
+        $0.assignee == worker && inProgressTaskStates.contains($0.state) && !($0.baseCommit ?? "").isEmpty
+    }
+    let doing = mine.filter { $0.state == "doing" }
+    let last = doing.isEmpty ? mine.max { ($0.assignedAt ?? "") < ($1.assignedAt ?? "") }
+                             : doing.max { ($0.history?.stateSince ?? "") < ($1.history?.stateSince ?? "") }
+    return last?.baseCommit
+}
+
+func diffKey(_ row: LiveRow, taskBoards: [String: TaskBoardStatus]) -> DiffKey {
+    guard let worker = row.worker, let team = row.teamName else { return DiffKey(folder: row.session.cwd) }
+    return DiffKey(folder: row.session.cwd, taskBase: workerTaskBase(team: team, worker: worker.workerName, taskBoards: taskBoards))
+}
+
+func diffTotalKeys(_ teams: [TeamGroup], taskBoards: [String: TaskBoardStatus] = [:], expanded: (String) -> Bool) -> Set<DiffKey> {
+    Set(teams.filter { expanded($0.name) }.flatMap(\.rows).filter { !$0.session.cwd.isEmpty }.map { diffKey($0, taskBoards: taskBoards) })
 }
 
 struct RowChange: Equatable {
@@ -200,9 +221,13 @@ struct RowChange: Equatable {
     }
 }
 
-func rowChange(_ row: LiveRow, totals: [String: DiffTotal], board: Board) -> RowChange? {
-    guard let total = totals[row.session.cwd], !total.isEmpty else { return nil }
-    return RowChange(total: total, sharers: workspaceSharers(row, in: board))
+/// Sharers are the workers of the folder counted from the same task base: another base is another count.
+func rowChange(_ row: LiveRow, totals: [DiffKey: DiffTotal], board: Board, taskBoards: [String: TaskBoardStatus] = [:]) -> RowChange? {
+    let key = diffKey(row, taskBoards: taskBoards)
+    guard let total = totals[key], !total.isEmpty else { return nil }
+    return RowChange(total: total, sharers: workspaceSharers(row, in: board).filter {
+        workerTaskBase(team: row.teamName ?? "", worker: $0, taskBoards: taskBoards) == key.taskBase
+    })
 }
 
 /// A diff window's tab title (T149): the team and workers of each team working in the folder, or the folder's name

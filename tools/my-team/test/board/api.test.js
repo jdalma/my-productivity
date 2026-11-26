@@ -111,6 +111,18 @@ test('a refused board command prints the blocked message to send, with its task 
     assert.equal(sent.json.kind, 'blocked');
 });
 
+test('no blocked example for a refused read, nor for pm\'s own refused write (T56, R52 L2)', needsSqlite, async (t) => {
+    const { base, root } = team(t, 'bq');
+    await fill(root);
+    const read = cli(base, ['board-status', '--input', '{"team_name":"bq","task":"T999"}', '--json'], { worker: 'bq/core' });
+    const pm = cli(base, ['board-take', '--input', '{"team_name":"bq","id":"T9"}', '--json'], { worker: 'bq/pm' });
+    for (const r of [read, pm]) {
+        assert.equal(r.code, 1);
+        assert.match(r.err, /\[my-team\] error: /);
+        assert.doesNotMatch(r.err, /send-message/);
+    }
+});
+
 test('who asks: MY_TEAM_WORKER of another team is refused; without it the input must name the worker', needsSqlite, async (t) => {
     const { base, root } = team(t, 'bt');
     await fill(root);

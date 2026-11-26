@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import TowerCore
+import TowerTestSupport
 @testable import TowerApp
 
 // A task board text's file:line places as links (G4 I12): over the characters written, code spans included, and
@@ -30,23 +31,25 @@ import TowerCore
 }
 
 /// R34 S1: a view's body never waits for git ls-files: the first ask reads the folder in the background, and the
-/// view hears of it through `foldersRead`.
+/// view hears of it through `foldersRead`. In `withGCDWorkersFree` (T49): the read is a detached task, and a test that
+/// blocks every GCD worker (FocusRunnerTests, CommandTests) would hold it for its 20 s.
 @MainActor @Test func aViewAsksForAFoldersFilesWithoutWaitingForThem() async throws {
-    let dir = FileManager.default.temporaryDirectory.appending(path: "ct-filelists-\(UUID().uuidString)").path
-    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(atPath: dir) }
-    try "x\n".write(toFile: dir + "/shapes.swift", atomically: true, encoding: .utf8)
-    let git = Process()
-    git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    git.arguments = ["-C", dir, "init", "-q"]
-    try git.run()
-    git.waitUntilExit()
+    try await withGCDWorkersFree {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "ct-filelists-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try "x\n".write(toFile: dir + "/shapes.swift", atomically: true, encoding: .utf8)
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["-C", dir, "init", "-q"]
+        try git.run()
+        git.waitUntilExit()
 
-    let lists = FileLists()
-    #expect(lists.filesIfRead(dir) == nil)  // not read yet: no wait here
-    // long: another test may hold every GCD worker for 30 s (FocusRunnerTests), and the read waits for one
-    let deadline = Date().addingTimeInterval(60)
-    while lists.foldersRead == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(lists.foldersRead == 1)
-    #expect(lists.filesIfRead(dir) == ["shapes.swift"])
+        let lists = FileLists()
+        #expect(lists.filesIfRead(dir) == nil)  // not read yet: no wait here
+        let deadline = Date().addingTimeInterval(10)
+        while lists.foldersRead == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(lists.foldersRead == 1)
+        #expect(lists.filesIfRead(dir) == ["shapes.swift"])
+    }
 }

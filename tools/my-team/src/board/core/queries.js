@@ -7,6 +7,8 @@ import { BoardError, IN_HAND, TERMINAL, nextVerdictId, pmsOf } from './rules.js'
 
 const RECENT = 20;
 const ANNOUNCEMENTS = 10;
+/** In how many landings a failure is named before the board calls it repeated (T53). */
+const REPEATED = 3;
 const byPriority = (a, b) => a.priority - b.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const judgesOf = (task, roster) => (task.reviewer ? [task.reviewer] : pmsOf(roster));
 
@@ -253,6 +255,20 @@ export async function approvedCommits(store, repos) {
  * The whole board (the app's view, D1·D2), or with `task` that task's family in full. `workers` counts work
  * only; whether a worker is alive is status.json's and tmux's to say.
  */
+/**
+ * The failures named in REPEATED landings or more, by a check or by a rerun of it, most often first (T53): a
+ * flaky test or a standing excuse that wants a task of its own. An excused failure counts too.
+ */
+async function repeatedFailures(store) {
+    const where = new Map();
+    const named = (landing, names) => { for (const n of names ?? []) where.set(n, (where.get(n) ?? new Set()).add(landing)); };
+    for (const l of await store.list('landing', {})) named(l.id, l.check_detail?.failures);
+    for (const v of await store.list('verdict', {})) named(v.landing_id, v.rerun_detail?.failures);
+    return [...where].filter(([, ls]) => ls.size >= REPEATED)
+        .map(([name, ls]) => ({ name, count: ls.size, landings: [...ls].sort() }))
+        .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
+}
+
 export async function status(store, roster, { task, open = false } = {}) {
     const approved = await approvedLandings(store);
     if (task) {
@@ -300,6 +316,7 @@ export async function status(store, roster, { task, open = false } = {}) {
     const tasks = (await store.list('task', {})).sort(byPriority).map((t) => withSummary(t, summaries, hist));
     const live = tasks.filter((t) => !TERMINAL.includes(t.state));
     const findings = await store.list('finding', { state: ['open', 'fixed'] });
+    const repeated = await repeatedFailures(store);
     return {
         store: await store.describe(),
         // `open`: only what is not finished, so a worker in a new conversation reads the work at
@@ -318,5 +335,6 @@ export async function status(store, roster, { task, open = false } = {}) {
         announcements: (await store.list('announcement', {})).slice(-ANNOUNCEMENTS),
         // every decision asked of the user, oldest first (T146)
         decisions: decisionsOf(log, tasks, await store.list('decision', {})).filter((d) => !open || d.state === 'open').map(listed),
+        ...(repeated.length ? { repeated_failures: repeated } : {}),
     };
 }

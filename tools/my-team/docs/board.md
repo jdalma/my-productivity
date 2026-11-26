@@ -48,8 +48,8 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 | `board-edit` | pm | **`id`**, and one or more of `title`, `ticket`, `constraints`, `base`, `priority`, `deliverable` (`commits` or `document`) | `task` |
 | `board-assign` | pm | **`id`**; `assignee` (reassign → ready); `reviewer` (change it); neither, on a held task → review again | `task` |
 | `board-take` | assignee | **`id`** | `task` |
-| `board-land` | assignee | **`id`**, **`commit`** (none on a document task), **`check`** `{cmd, result}`, **`focus`**, **`report`**; `closes` (none when left out), `base`, `commits`, `review_report` (a suggestion), `deployed` | `task`, `landing`, `fixed` |
-| `board-verdict` | the task's reviewer (pm without one) | **`landing`**, **`verdict`** (`approve`, `changes` or `hold`), **`verified_commit`** (left out for a document task's landing), **`rerun`** `{cmd, result}`; `findings` (none when left out), `report` (required unless the landing suggests one), `reopen`, `side_notes` | `verdict`, `task`, `findings`, `reopened`, `fixed` (the backlog findings an approve fixed); `reopened` lists what the verdict moved to open |
+| `board-land` | assignee | **`id`**, **`commit`** (none on a document task), **`check`** `{cmd, result}` (and `counts`, `failures`, `excused`: below), **`focus`**, **`report`**, **`unverified`** (what you did not check, a list of sentences; `[]` when there is none); `closes` (none when left out), `base`, `commits`, `review_report` (a suggestion), `deployed` | `task`, `landing`, `fixed` |
+| `board-verdict` | the task's reviewer (pm without one) | **`landing`**, **`verdict`** (`approve`, `changes` or `hold`), **`verified_commit`** (left out for a document task's landing), **`rerun`** `{cmd, result}` (and `counts`, `failures`, `excused`: below); `findings` (none when left out), `report` (required unless the landing suggests one), `reopen`, `side_notes` | `verdict`, `task`, `findings`, `reopened`, `fixed` (the backlog findings an approve fixed); `reopened` lists what the verdict moved to open |
 | `board-finding` | pm settles or records a fix, reviewer reopens | **`id`**, **`state`**; `landing` (with `state` `fixed`: the approved landing that fixed it) | `finding` |
 | `board-cancel` | pm | **`id`**; `findings` (where its unsettled findings go), `reason` | `task`, `findings` |
 | `board-note` | anyone | **`body`**; `id` (task), `to` (workers to tell) | `note` |
@@ -61,7 +61,7 @@ shell (no `MY_TEAM_WORKER`), a write command names its worker in `by` and a read
 | `board-progress` | the task's assignee, in `doing` or `changes` | **`id`**, **`item`** (the ticket's numbered item, 1 up; 0 for work outside them), **`note`**, **`done`** (true or false) | `progress` |
 | `board-inbox` | anyone, for themselves | `since` (the last `cursor`) | `tasks`, `review_queue`, `review_hint` (with 2 or more requests), `incomplete`, `notes`, `announcements`, `decisions` `{open, answered}`, `cursor` |
 | `board-review-queue` | anyone, for themselves | | `queue`, `incomplete`, `hint` (with 2 or more requests) |
-| `board-status` | anyone | `task` (one family in full, with its `answers` and the task's `progress`); `open` (`true`: only tasks not done or cancelled and decisions not answered, what a worker in a new conversation of a continued team reads) | `store`, `tasks` (each with `progress_summary` and `history`), `workers` (`name`, `role`, `assigned`, `in_hand`, `reviewing`), `open_findings`, `recent`, `announcements`, `decisions` |
+| `board-status` | anyone | `task` (one family in full, with its `answers` and the task's `progress`); `open` (`true`: only tasks not done or cancelled and decisions not answered, what a worker in a new conversation of a continued team reads) | `store`, `tasks` (each with `progress_summary` and `history`), `workers` (`name`, `role`, `assigned`, `in_hand`, `reviewing`), `open_findings`, `recent`, `announcements`, `decisions`, `repeated_failures` (when there are any: below) |
 | `board-pushable` | anyone | **`commit`**, **`upstream`** (the remote's commit) or **`remote`** (its name, for a new branch); `repo` (default: the current folder), `baseline` | `ok`, `repo`, `covered`, `uncovered` (`commit`, `short`, `subject`) |
 
 Notes on the inputs:
@@ -76,6 +76,19 @@ Notes on the inputs:
 - A `board-review-queue` row carries the task and its parent, the landing (with `commits` and `left_out`),
   `previous_commit` (the commit of the landing it superseded), open and settled findings, notes, the
   family's earlier verdicts, and `next_verdict` (the id this verdict will take).
+- A check and a rerun are text a person reads (`cmd`, `result`) and, beside it, data the board compares, each
+  part optional: `counts` `{pass, fail, skip}` (whole numbers; `skip` is 0 when left out; one total for a check of
+  several commands), `failures` (the names of the tests that failed) and `excused` (`[{name, why}]`: failures that
+  are no fault of the work, such as a test that needs `.git` run on a copy without one). They are kept as
+  `check_detail` on the landing and `rerun_detail` on the verdict, `null` when none was given; `unverified` is
+  kept on the landing. All three are `null` on rows written before schema 7.
+- `board-verdict` compares the two when both name their failures: a failure of the rerun that the landing's
+  `failures` does not hold, as it is written, and that no `excused` of either side covers, is a warning
+  (`failures the landing did not name: …`). An excuse covers every failure whose name holds its `name`, so a
+  file name excuses all its tests. The verdict is recorded either way.
+- `board-status` without `task` gives `repeated_failures`, `[{name, count, landings}]`, most often first: each
+  failure named in 3 landings or more, by its check or by a rerun of it, an excused one too. It is a flaky test
+  or a standing excuse that wants a task of its own. The field is left out when there is none.
 - With 2 or more rows in the queue, `board-review-queue` adds a `hint` and `board-inbox` a `review_hint`: give
   each request to its own sub-agent and start them together. Neither is there for one request.
 
@@ -253,7 +266,8 @@ other input for its form and many boards already hold relative paths.
 | `board-add`, `board-assign` that changes the reviewer | `reviewer` is missing, so pm judges, or is a pm. A team that declares no roles is exempt: every worker is pm there |
 | `board-ask`, `board-wait` | `question` is over 120 characters, `context` is over 1000, or the asker then has more than 3 open decisions (its `board-ask` decisions in `open`, plus its `board-wait` tasks in `waiting`). The line tells the asker to keep them all on the board, and when raising them with the user to lead with the one that blocks work and present them one at a time, as the worker protocol says |
 | `board-add`, `board-edit` (with `ticket`) | the `ticket` path is not absolute, or the file does not exist |
-| `board-land` | the `report` path is not absolute, or the file does not exist |
+| `board-land` | the `report` path is not absolute, or the file does not exist; `check.counts` says tests failed and `check.failures` names none |
+| `board-verdict` | the rerun has failures the landing did not name; `rerun.counts` says tests failed and `rerun.failures` names none |
 
 - The bounds come from the boards of 6 teams (87 briefs): the question's p95 is 120 characters and its maximum 139;
   the context's median is 207, its p95 about 1000 and its maximum 2988. Askers held 1 open decision at most,
@@ -432,12 +446,12 @@ the finding, and rv approves. `$BASE`, `$C1` and `$C2` stand for full commit has
 ```sh
 MY_TEAM_WORKER=demo/pm my-team api board-add --input '{"team_name":"demo","id":"T1","title":"Add the parser","single":true,"assignee":"dev","reviewer":"rv","ticket":"docs/tickets/T1.md","constraints":"없음","base":"$BASE"}' --json
 MY_TEAM_WORKER=demo/dev my-team api board-take --input '{"team_name":"demo","id":"T1"}' --json
-MY_TEAM_WORKER=demo/dev my-team api board-land --input '{"team_name":"demo","id":"T1","commit":"$C1","check":{"cmd":"npm test","result":"12/12"},"focus":["the parser"],"closes":[],"report":"docs/reports/T1.md","review_report":"docs/reports/R1-review.md"}' --json
+MY_TEAM_WORKER=demo/dev my-team api board-land --input '{"team_name":"demo","id":"T1","commit":"$C1","check":{"cmd":"npm test","result":"12/12"},"focus":["the parser"],"closes":[],"unverified":[],"report":"docs/reports/T1.md","review_report":"docs/reports/R1-review.md"}' --json
 MY_TEAM_WORKER=demo/rv my-team api board-review-queue --input '{"team_name":"demo"}' --json
 MY_TEAM_WORKER=demo/rv my-team api board-verdict --input '{"team_name":"demo","landing":"T1#1","verdict":"changes","verified_commit":"$C1","report":"docs/reports/R1-review.md","rerun":{"cmd":"npm test","result":"12/12"},"findings":[{"code":"M1","severity":"must","summary":"empty input crashes","repro":"node parse.js --empty"}]}' --json
 MY_TEAM_WORKER=demo/dev my-team api board-inbox --input '{"team_name":"demo"}' --json
 MY_TEAM_WORKER=demo/dev my-team api board-take --input '{"team_name":"demo","id":"T1"}' --json
-MY_TEAM_WORKER=demo/dev my-team api board-land --input '{"team_name":"demo","id":"T1","commit":"$C2","base":"$C1","check":{"cmd":"npm test","result":"13/13"},"focus":["M1"],"closes":["R1 M1"],"report":"docs/reports/T1.md","review_report":"docs/reports/R1-review.md"}' --json
+MY_TEAM_WORKER=demo/dev my-team api board-land --input '{"team_name":"demo","id":"T1","commit":"$C2","base":"$C1","check":{"cmd":"npm test","result":"13/13"},"focus":["M1"],"closes":["R1 M1"],"unverified":[],"report":"docs/reports/T1.md","review_report":"docs/reports/R1-review.md"}' --json
 MY_TEAM_WORKER=demo/rv my-team api board-verdict --input '{"team_name":"demo","landing":"T1#2","verdict":"approve","verified_commit":"$C2","report":"docs/reports/R1-review.md","rerun":{"cmd":"npm test","result":"13/13"},"findings":[]}' --json
 MY_TEAM_WORKER=demo/pm my-team api board-status --input '{"team_name":"demo","task":"T1"}' --json
 ```

@@ -271,7 +271,7 @@ test('--continue migrates a board.db of an older schema, and leaves the copy bes
         await store.open();
         await store.close();
         const raw = new sqlite.DatabaseSync(file);
-        raw.exec(`ALTER TABLE tasks DROP COLUMN "deliverable"; PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+        raw.exec(`ALTER TABLE landings DROP COLUMN "check_detail"; ALTER TABLE landings DROP COLUMN "unverified"; ALTER TABLE verdicts DROP COLUMN "rerun_detail"; PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
         raw.close();
         await prepareStateRoot(stateRoot, { keep: true });
         const version = (f) => { const db = new sqlite.DatabaseSync(f); try { return db.prepare('PRAGMA user_version').get().user_version; } finally { db.close(); } };

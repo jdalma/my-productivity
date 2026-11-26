@@ -54,7 +54,7 @@ async function fill(root) {
     const as = (actor) => createBoard({ store, roster: () => ROSTER, actor, now, git });
     await as('pm').add({ id: 'T1', title: 'one', assignee: 'core', reviewer: 'rv', ticket: '/t.md', constraints: 'c', base: '0'.repeat(40) });
     await as('core').take({ id: 'T1' });
-    await as('core').land({ id: 'T1', repo: '/repo', commit: '1'.repeat(40), check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], report: '/r.md', review_report: '/R.md' });
+    await as('core').land({ id: 'T1', repo: '/repo', commit: '1'.repeat(40), check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], unverified: [], report: '/r.md', review_report: '/R.md' });
     await as('pm').add({ id: 'T2', title: 'two', assignee: 'core', reviewer: 'rv', ticket: '/t.md', constraints: 'c' });
     await store.close();
 }

@@ -35,7 +35,7 @@
  * in the same change set.
  */
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 const text = (opts = {}) => ({ type: 'text', ...opts });
 const int = (opts = {}) => ({ type: 'int', ...opts });
@@ -73,6 +73,10 @@ export const KINDS = {
             // review_report_path is the reviewer's to choose; a land may suggest one (R71 R2, schema 3)
             review_report_path: text(), deployed: text(), superseded_by: text(filt),
             left_out: list(),   // rev-list commits the landing leaves out (R69 R3); null on rows before schema 2
+            // the check as data beside its text: {counts {pass, fail, skip} | null, failures [name] | null,
+            // excused [{name, why}]}; null when the land gave none of them. unverified: what the assignee did not
+            // check; null on rows before schema 7 (T53)
+            check_detail: { type: 'json' }, unverified: list(),
             ...created, ...updated,
         },
     },
@@ -82,6 +86,7 @@ export const KINDS = {
             id: text(req), landing_id: text({ ...req, ...filt }), verdict: text({ ...req, ...filt }),
             verified_commit: text(req), report_path: text(req), rerun_cmd: text(req), rerun_result: text(req),
             side_notes: text(),
+            rerun_detail: { type: 'json' },   // the rerun as data, as a landing's check_detail (T53, schema 7)
             ...created,
         },
     },

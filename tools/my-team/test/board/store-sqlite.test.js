@@ -310,9 +310,31 @@ test('[sqlite] a version 5 file migrates to 6: its tasks stay, none a document t
     const store = createSqliteStore(file);
     await store.open();
     t.after(() => store.close());
-    assert.equal((await store.describe()).schema_version, 6);
+    assert.equal((await store.describe()).schema_version, SCHEMA_VERSION);
     const task = await store.get('task', 'T1');
     assert.deepEqual([task.state, task.deliverable, task.version], ['doing', null, 2]);
     await store.apply({ updates: [{ kind: 'task', key: 'T1', expect_version: 2, patch: { deliverable: 'document' } }] });
     assert.equal((await store.get('task', 'T1')).deliverable, 'document');
+});
+
+test('[sqlite] a version 6 file migrates to 7: its landings and verdicts stay, with no structured check, and take one (T53)', needsSqlite, async (t) => {
+    const file = tempFile(t);
+    const raw = new DatabaseSync(file);
+    for (const m of MIGRATIONS.filter((x) => x.to <= 6)) raw.exec(m.sql);
+    raw.exec('PRAGMA user_version = 6');
+    const C = 'a'.repeat(40);
+    raw.prepare(`INSERT INTO landings VALUES ('T1#1','T1','/repo','${C}','${C}','["${C}"]','npm test','10/10','["one"]','[]','/r.md',NULL,NULL,NULL,'${AT}','core',NULL,NULL,1,'[]')`).run();
+    raw.prepare(`INSERT INTO verdicts VALUES ('R1','T1#1','approve','${C}','/R.md','npm test','10/10',NULL,'${AT}','rv')`).run();
+    raw.close();
+    const store = createSqliteStore(file);
+    await store.open();
+    t.after(() => store.close());
+    assert.equal((await store.describe()).schema_version, 7);
+    const landing = await store.get('landing', 'T1#1');
+    assert.deepEqual([landing.check_result, landing.check_detail, landing.unverified, landing.version], ['10/10', null, null, 1]);
+    assert.deepEqual([(await store.get('verdict', 'R1')).rerun_result, (await store.get('verdict', 'R1')).rerun_detail], ['10/10', null]);
+    const detail = { counts: { pass: 9, fail: 1, skip: 0 }, failures: ['a: b'], excused: [] };
+    await store.apply({ updates: [{ kind: 'landing', key: 'T1#1', expect_version: 1, patch: { check_detail: detail, unverified: ['x'] } }] });
+    const after = await store.get('landing', 'T1#1');
+    assert.deepEqual([after.check_detail, after.unverified], [detail, ['x']]);
 });

@@ -87,8 +87,8 @@ Notes on the inputs:
   (`failures the landing did not name: …`). An excuse covers every failure whose name holds its `name`, so a
   file name excuses all its tests. The verdict is recorded either way.
 - `board-status` without `task` gives `repeated_failures`, `[{name, count, landings}]`, most often first: each
-  failure named in 3 landings or more, by its check or by a rerun of it, an excused one too. It is a flaky test
-  or a standing excuse that wants a task of its own. The field is left out when there is none.
+  name in 3 landings or more, in the `failures` or the `excused` of the landing's check or of a rerun of it (a name
+  in both counts once for that landing). It is a flaky test or a standing excuse that wants a task of its own. The field is left out when there is none.
 - With 2 or more rows in the queue, `board-review-queue` adds a `hint` and `board-inbox` a `review_hint`: give
   each request to its own sub-agent and start them together. Neither is there for one request.
 

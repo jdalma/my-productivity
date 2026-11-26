@@ -997,7 +997,7 @@ private func task(_ id: String, _ state: String, to assignee: String, base: Stri
     #expect(try base([]) == nil)
     #expect(try base([task("T1", "doing", to: "a", base: "b1")]) == "b1")
     #expect(try base([task("T1", "doing", to: "b", base: "b1")]) == nil, "another worker's task")
-    for done in ["ready", "done", "approved", "cancelled"] {
+    for done in ["new", "ready", "done", "cancelled"] {
         #expect(try base([task("T1", done, to: "a", base: "b1")]) == "b1", "\(done): the last task when none is in progress")
     }
     #expect(try base([task("T1", "done", to: "a", base: "old", assigned: "2026-11-01T00:00:00Z"),

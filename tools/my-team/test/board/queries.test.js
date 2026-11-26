@@ -449,3 +449,18 @@ both('status: a failure named in three landings or more is listed as repeated (T
     assert.deepEqual((await status(store, ROSTER)).repeated_failures, [{ name: 'flaky: a', count: 3, landings: ['T1#1', 'T2#1', 'T3#1'] }]);
     assert.deepEqual((await status(store, ROSTER, { open: true })).repeated_failures?.length, 1, 'with open too: it is what pm acts on');
 });
+
+both('status: an excused name counts as a failure of its landing, once with a failure of the same name (T57, R54 S1)', async ({ store, as }) => {
+    const excuse = (name) => ({ name, why: 'the copy has no .git' });
+    for (const [id, commit] of [['T1', H('1')], ['T2', H('2')], ['T3', H('3')]]) {
+        await as('pm').add({ id, title: id, assignee: 'core', reviewer: 'rv', ...full });
+        await as('core').take({ id });
+        await as('core').land(land(id, commit, { check: { cmd: 'npm test', result: 'r', failures: [`only ${id}`], excused: [excuse('deploy.test.js')] } }));
+    }
+    assert.deepEqual((await status(store, ROSTER)).repeated_failures, [{ name: 'deploy.test.js', count: 3, landings: ['T1#1', 'T2#1', 'T3#1'] }]);
+
+    // a rerun's excuses count for the landing it reran; a name both failed and excused there is one
+    await as('rv').verdict(judge('T1#1', H('1'), 'approve', { rerun: { cmd: 'npm test', result: 'r', failures: ['deploy.test.js', 'lint.test.js'], excused: [excuse('deploy.test.js'), excuse('lint.test.js')] } }));
+    await as('rv').verdict(judge('T2#1', H('2'), 'approve', { rerun: { cmd: 'npm test', result: 'r', excused: [excuse('lint.test.js')] } }));
+    assert.deepEqual((await status(store, ROSTER)).repeated_failures.map((r) => [r.name, r.count]), [['deploy.test.js', 3]], 'lint.test.js: two landings');
+});

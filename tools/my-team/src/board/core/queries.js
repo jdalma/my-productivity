@@ -257,13 +257,17 @@ export async function approvedCommits(store, repos) {
  */
 /**
  * The failures named in REPEATED landings or more, by a check or by a rerun of it, most often first (T53): a
- * flaky test or a standing excuse that wants a task of its own. An excused failure counts too.
+ * flaky test or a standing excuse that wants a task of its own. The names are those in `failures` and those
+ * in `excused`.
  */
 async function repeatedFailures(store) {
     const where = new Map();
-    const named = (landing, names) => { for (const n of names ?? []) where.set(n, (where.get(n) ?? new Set()).add(landing)); };
-    for (const l of await store.list('landing', {})) named(l.id, l.check_detail?.failures);
-    for (const v of await store.list('verdict', {})) named(v.landing_id, v.rerun_detail?.failures);
+    // a name a landing both failed and excused is in its set once (T57)
+    const named = (landing, detail) => {
+        for (const n of [...(detail?.failures ?? []), ...(detail?.excused ?? []).map((e) => e.name)]) where.set(n, (where.get(n) ?? new Set()).add(landing));
+    };
+    for (const l of await store.list('landing', {})) named(l.id, l.check_detail);
+    for (const v of await store.list('verdict', {})) named(v.landing_id, v.rerun_detail);
     return [...where].filter(([, ls]) => ls.size >= REPEATED)
         .map(([name, ls]) => ({ name, count: ls.size, landings: [...ls].sort() }))
         .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));

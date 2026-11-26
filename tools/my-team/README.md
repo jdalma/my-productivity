@@ -302,12 +302,9 @@ msg` / `my-team add-task` commands were removed when task lifecycle was dropped.
 **Mid-session worker add**, by contrast, *is* a supported command: `my-team
 add-worker` splits a new pane into the running team and registers the worker in
 `manifest.workers` (which is all that's needed for peers to message it — `api
-send-message` enforces roster membership per call). The new worker then
-introduces itself: its startup notice tells it to `send-message` each existing
-peer with `expects_reply=true`. Going through the mailbox (not a best-effort
-in-pane tmux poke) means a busy peer still receives the greeting on its next
-self-poll, and the ACK lets you see which peers haven't acknowledged the newcomer
-yet (visibility — it does not auto-resend). Existing workers' `AGENTS.md` rosters
+send-message` enforces roster membership per call). In a team with roles
+the new worker reports in with one message of kind `notice` to the
+orchestrator(s); in a peer team it stays silent. Existing workers' `AGENTS.md` rosters
 are a boot snapshot and are **not** rewritten (a running worker CLI already
 loaded its `AGENTS.md` at launch, so a disk rewrite would not reach it). Instead
 every `api mailbox-list` response carries the current `roster` from the
@@ -344,7 +341,7 @@ review requests, verdicts and findings, notes and announcements. It is a SQLite 
   (only the fields that changed). The list shows it as it stands now, how often it was edited and by whom last.
 - While working, the assignee leaves progress with `board-progress`: which of the ticket's numbered items, what
   was done and what is left, and whether the item is done. `board-status` shows it per task.
-- Each change sends the workers it concerns a one-line mailbox notice, `[board] <ref> <action>`, and adds a
+- Each change sends the workers it concerns a one-line mailbox notice of kind `board`, `<ref> <action>`, and adds a
   `board` line to `events.jsonl`.
 - Workers of such a team get a `## Team Board` section in their AGENTS.md. A team without `board` gets the
   overlay it always had.

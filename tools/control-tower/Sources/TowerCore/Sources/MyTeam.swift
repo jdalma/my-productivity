@@ -179,7 +179,7 @@ private func spoolCount(_ dir: String) -> Int {
 }
 
 /// Inbox entries, pending questions and the earliest `sent_at` of a mailbox file.
-/// Throws like my-team's readMailboxFile: bad JSON, or a schema other than 2.
+/// Throws like my-team's readMailboxFile: bad JSON, or a schema other than 3.
 func mailCounts(_ data: Data, path: String) throws -> (unread: Int, sentPending: Int, oldestPendingAt: String?) {
     let parsed: Any
     do {
@@ -189,10 +189,10 @@ func mailCounts(_ data: Data, path: String) throws -> (unread: Int, sentPending:
     }
     guard parsed is [Any] || parsed is [String: Any] else { return (0, 0, nil) }
     let mb = parsed as? [String: Any] ?? [:]
-    guard mb["schema_version"] as? Int == 2 else {
+    guard mb["schema_version"] as? Int == 3 else {
         let v = mb["schema_version"].flatMap { $0 is NSNull ? nil : "\($0)" } ?? "missing"
         throw MyTeamError(description:
-            "Mailbox at \(path) has schema_version=\(v), expected 2. " +
+            "Mailbox at \(path) has schema_version=\(v), expected 3. " +
             "Shutdown the team (my-team shutdown) and restart to begin with a fresh schema; " +
             "automatic migration is not supported.")
     }

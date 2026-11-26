@@ -3,7 +3,7 @@
  *
  * Purpose: workers use this to resolve `reply_to` references when the
  * pointed-to message is no longer in mailbox.sent_pending (it was sent
- * without expects_reply, or it has already been answered and the
+ * of a kind that waits for none, or it has already been answered and the
  * sent_pending entry was cleared). The worker's archive jsonl is the
  * durable record for those cases.
  *

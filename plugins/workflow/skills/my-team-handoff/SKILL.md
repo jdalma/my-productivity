@@ -1,6 +1,6 @@
 ---
 name: my-team-handoff
-description: my-team 팀 전체를 shutdown하기 전에 PM(orchestrator)이 모든 워커의 진행 상태를 한 묶음으로 수집·취합하는 팀 단위 handoff. 두 상황에서 반드시 사용한다. (1) PM — my-team PM pane에서 사용자가 "/my-team-handoff", "팀 handoff", "팀 내리기 전에 정리해", "다음에 이어서 하게 전부 정리해" 라고 하면 전 워커에게 상태 보고를 요청하고 ~/.my-team/handoffs/{team}/ 에 team.md로 취합한다. (2) 워커 — 메일박스에 본문이 `[team-handoff]`로 시작하는 메시지가 도착한 워커는 이 스킬의 §B 절차로 자기 상태 파일을 쓰고 회신한다. 워커 1명만 /clear하는 경우(/my-team-resume)나 워커 교대(succession)·티켓 종결(/my-team-closeout)과 다르다 — 이 스킬은 팀을 통째로 내렸다가 같은 config로 다시 띄울 때 쓴다. 재기동 후 로드는 /my-team-takeover.
+description: my-team 팀 전체를 shutdown하기 전에 PM(orchestrator)이 모든 워커의 진행 상태를 한 묶음으로 수집·취합하는 팀 단위 handoff. 두 상황에서 반드시 사용한다. (1) PM — my-team PM pane에서 사용자가 "/my-team-handoff", "팀 handoff", "팀 내리기 전에 정리해", "다음에 이어서 하게 전부 정리해" 라고 하면 전 워커에게 상태 보고를 요청하고 ~/.my-team/handoffs/{team}/ 에 team.md로 취합한다. (2) 워커 — 메일박스에 kind가 `team-handoff`인 메시지가 도착한 워커는 이 스킬의 §B 절차로 자기 상태 파일을 쓰고 회신한다. 워커 1명만 /clear하는 경우(/my-team-resume)나 워커 교대(succession)·티켓 종결(/my-team-closeout)과 다르다 — 이 스킬은 팀을 통째로 내렸다가 같은 config로 다시 띄울 때 쓴다. 재기동 후 로드는 /my-team-takeover.
 ---
 
 # my-team handoff — 팀 shutdown 전 상태 수집
@@ -20,7 +20,7 @@ echo "worker=$MY_TEAM_WORKER state_root=$MY_TEAM_STATE_ROOT"
 
 `MY_TEAM_WORKER`(`<team>/<worker>`)가 비어 있으면 my-team 워커 pane이 아니다. 그 사실만 알리고 중단한다.
 
-- 메일박스에 `[team-handoff]` 메시지가 와서 호출된 것이면 → **§B (워커)**
+- 메일박스에 kind `team-handoff` 메시지가 와서 호출된 것이면 → **§B (워커)**
 - 사용자가 pane에서 호출한 것이면 → **§A (PM)**
 
 ---
@@ -46,11 +46,11 @@ BUNDLE="$HOME/.my-team/handoffs/$TEAM/$(date +%Y-%m-%d-%H%M%S)"; mkdir -p "$BUND
 워커마다 한 통씩 보낸다:
 
 ```bash
-my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<w>","expects_reply":true,
- "body":"[team-handoff] 팀 shutdown 전 상태 수집. <bundle>/workers/<w>.md 에 상태 파일을 쓰고 이 메시지에 reply_to로 경로와 한 줄 요약을 회신하라. 수신 절차=my-team-handoff 스킬 §B. 회신 후 새 작업 시작 금지."}' --json
+my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<w>","kind":"team-handoff",
+ "body":"팀 shutdown 전 상태 수집. <bundle>/workers/<w>.md 에 상태 파일을 쓰고 이 메시지에 reply_to로 경로와 한 줄 요약을 회신하라. 수신 절차=my-team-handoff 스킬 §B. 회신 후 새 작업 시작 금지."}' --json
 ```
 
-본문은 `[team-handoff]`로 시작해야 워커가 일반 지시와 구분한다. 파일 경로를 PM이 지정해 주는 이유는 워커가 묶음 위치를 몰라도 되게 하기 위해서다.
+`kind: team-handoff`로 워커가 일반 지시와 구분한다. 이 메시지는 회신이 올 때까지 PM의 `sent_pending`에 남는다. 파일 경로를 PM이 지정해 주는 이유는 워커가 묶음 위치를 몰라도 되게 하기 위해서다.
 
 ### A3. 회신 수집
 
@@ -86,7 +86,7 @@ pane에 출력한다:
 
 ---
 
-## B. 워커 절차 (`[team-handoff]` 메시지를 받은 pane)
+## B. 워커 절차 (kind `team-handoff` 메시지를 받은 pane)
 
 ### B1. 상태 수집
 
@@ -112,8 +112,8 @@ my-team api mailbox-list --input '{"team_name":"<team>","worker":"<me>"}' --json
 ### B3. 회신
 
 ```bash
-my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<pm>","reply_to":"<message_id>",
- "body":"[team-handoff] <me>: <path>. 완료 <a>·미완료 <b>·결정 필요 <c>. <한 줄 요약>"}' --json
+my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<pm>","kind":"answer","reply_to":"<message_id>",
+ "body":"<me>: <path>. 완료 <a>·미완료 <b>·결정 필요 <c>. <한 줄 요약>"}' --json
 ```
 
 `mailbox-mark-delivered` 후 **새 작업을 시작하지 않는다.** 회신 후 코드가 움직이면 파일의 `head_commit`이 거짓이 된다. 사용자가 pane에서 직접 지시하면 따르되, PM에게 "회신 후 변경 있음"을 한 줄 알린다.

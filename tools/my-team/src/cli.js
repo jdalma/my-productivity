@@ -75,6 +75,19 @@ function parseApiInput(opts) {
  * with --json the error is also {ok:false, code, message} on stdout so the app can branch on the code
  * (docs/board.md, Commands).
  */
+/**
+ * The send-message input of a blocked message for a board refusal (T54): its task when the input named one,
+ * the refusal as board_error. Printed on stderr beside the error, so the worker copies the code and message
+ * instead of retyping them in a message body.
+ */
+function blockedExample(opts, code, message) {
+    let task = '<task>';
+    try { task = JSON.parse(opts.input)?.id ?? task; } catch { /* the error was the input itself */ }
+    const example = { to_worker: '<orchestrator>', kind: 'blocked', task: String(task), need: '<what would let it go on>',
+        board_error: { code, message }, body: '<one line>' };
+    return JSON.stringify(example).replaceAll("'", "'\\''");
+}
+
 async function boardRun(opts, fn) {
     try {
         const result = await fn(parseApiInput(opts));
@@ -85,6 +98,7 @@ async function boardRun(opts, fn) {
         const code = typeof err?.code === 'string' && !err.code.startsWith('ERR_') ? err.code : 'error';
         if (opts.json) console.log(JSON.stringify({ ok: false, code, message: err.message }));
         console.error(`[my-team] error: ${code}: ${err.message}`);
+        console.error(`[my-team] if this stops your task, tell your orchestrator: my-team api send-message --input '${blockedExample(opts, code, err.message)}' --json`);
         process.exit(1);
     }
 }
@@ -208,7 +222,7 @@ async function main() {
     const api = program.command('api').description('Internal API used by worker LLMs for peer messaging. Each command\'s --help names its --input fields: required ones, then after ";" optional ones. In a worker process MY_TEAM_WORKER gives team_name and the worker it acts as (worker, from_worker, by): leave them out');
 
     api.command('send-message')
-        .description('[mutating] Send a peer message — drops a spool file, appends sender archive, records sent_pending. Add "to_team":"<team name>" to reach a worker in another running team. Input: to_worker, body; reply_to, expects_reply, to_team')
+        .description('[mutating] Send a peer message — drops a spool file, appends sender archive, records sent_pending. Add "to_team":"<team name>" to reach a worker in another running team. kind: question (waits for an answer) | answer (reply_to required) | blocked (task, need; board_error {code, message} when a board refusal is why) | notice | closeout | team-handoff | team-takeover. Input: to_worker, kind, body; reply_to, task, need, board_error, to_team')
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiSendMessage(parseApiInput(opts)), opts.json));

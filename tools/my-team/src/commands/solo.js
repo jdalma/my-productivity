@@ -53,7 +53,7 @@ export const COPY_STEPS = [
 
 const REVIEWER_BRIEF = [
     'You review the work dev submits on the board, and nothing else. You cannot edit the repository, commit or push.',
-    'When a [board] notice arrives, take the request from board-review-queue, check the commit against its ticket, rerun its check, and judge with board-verdict.',
+    'When a board notice (kind board) arrives, take the request from board-review-queue, check the commit against its ticket, rerun its check, and judge with board-verdict.',
     ...COPY_STEPS,
     'Write findings in plain sentences, without abbreviations, each with a command that shows the problem.',
 ].join('\n');

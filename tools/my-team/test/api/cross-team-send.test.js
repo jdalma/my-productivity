@@ -75,7 +75,7 @@ function paneDeps(impl) {
 test('cross-team send lands in the RECIPIENT team spool, not the sender root', async () => {
     const ctx = setupTwoTeams();
     try {
-        const result = await runApiSendMessage({
+        const result = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-a', from_worker: 'alice',
             to_team: 'team-b', to_worker: 'bob',
             body: 'cross-team hello',
@@ -102,12 +102,12 @@ test('cross-team message carries from_team so the recipient can reply back', asy
         await runApiSendMessage({
             team_name: 'team-a', from_worker: 'alice',
             to_team: 'team-b', to_worker: 'bob',
-            body: 'need an answer', expects_reply: true,
+            body: 'need an answer', kind: 'question',
         }, paneDeps());
         const [msg] = readSpool(ctx.teamB.stateRoot, 'bob');
         assert.equal(msg.from_team, 'team-a', 'without from_team the recipient cannot address a reply back');
         assert.equal(msg.from_session, undefined, 'session names are no longer carried');
-        assert.equal(msg.expects_reply, true);
+        assert.equal(msg.kind, 'question');
     } finally {
         cleanup(ctx);
     }
@@ -116,7 +116,7 @@ test('cross-team message carries from_team so the recipient can reply back', asy
 test('cross-team send mirrors the event into BOTH team logs', async () => {
     const ctx = setupTwoTeams();
     try {
-        const r = await runApiSendMessage({
+        const r = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-a', from_worker: 'alice',
             to_team: 'team-b', to_worker: 'bob', body: 'ping',
         }, paneDeps());
@@ -134,7 +134,7 @@ test('cross-team send mirrors the event into BOTH team logs', async () => {
     }
 });
 
-test('same-name worker in another team is a distinct peer (expects_reply allowed)', async () => {
+test('same-name worker in another team is a distinct peer (a question allowed)', async () => {
     const ctx = setupTwoTeams();
     try {
         // Both teams have a worker literally named "shared". Cross-team, this is
@@ -142,9 +142,9 @@ test('same-name worker in another team is a distinct peer (expects_reply allowed
         const r = await runApiSendMessage({
             team_name: 'team-a', from_worker: 'shared',
             to_team: 'team-b', to_worker: 'shared',
-            body: 'question for my namesake', expects_reply: true,
+            body: 'question for my namesake', kind: 'question',
         }, paneDeps());
-        assert.equal(r.expects_reply, true);
+        assert.equal(r.kind, 'question');
         assert.equal(readSpool(ctx.teamB.stateRoot, 'shared').length, 1);
     } finally {
         cleanup(ctx);
@@ -155,7 +155,7 @@ test('cross-team send rejects a worker missing from the target team', async () =
     const ctx = setupTwoTeams();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'alice',
                 to_team: 'team-b', to_worker: 'ghost', body: 'hi',
             }, paneDeps()),
@@ -170,7 +170,7 @@ test('the removed to_session field is rejected, not silently treated as same-tea
     const ctx = setupTwoTeams();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'alice',
                 to_session: ctx.teamB.sessionName, to_worker: 'shared', body: 'hi',
             }, paneDeps()),
@@ -187,7 +187,7 @@ test('a dead tmux session fails the send (no silent unread spool)', async () => 
     const ctx = setupTwoTeams();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'alice',
                 to_team: 'team-b', to_worker: 'bob', body: 'hi',
             }, paneDeps(async () => { throw new Error("tmux session 'x' not found or has no panes."); })),
@@ -203,7 +203,7 @@ test('a dead tmux session fails the send (no silent unread spool)', async () => 
 test('same-team send is unchanged when to_team is omitted', async () => {
     const ctx = setupTwoTeams();
     try {
-        const r = await runApiSendMessage({
+        const r = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-a', from_worker: 'alice', to_worker: 'shared', body: 'local',
         }, paneDeps());
         assert.equal(r.delivered_to, 'shared');

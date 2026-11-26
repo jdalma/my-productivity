@@ -53,8 +53,8 @@ export function boardFor({ store, roster, manifest, actor }) {
             for (const name of to) {
                 const pane = manifest.workers.find((w) => w.name === name)?.pane_id;
                 try {
-                    const sent = await queueDirectMessage(manifest.team_name, actor, name, `[board] ${ref} ${action}`, pane, dirname(root),
-                        null, false, null, manifest.session_name);
+                    const sent = await queueDirectMessage(manifest.team_name, actor, name, 'board', `${ref} ${action}`, pane, dirname(root),
+                        null, null, manifest.session_name);
                     if (sent.trigger?.refused) {
                         warnings.push(`notice to ${name} not typed into its pane (${sent.trigger.refused}); it waits in the mailbox`);
                         await logRefusedTrigger(root, { team: manifest.team_name, from: actor, to: name, pane, reason: sent.trigger.refused });

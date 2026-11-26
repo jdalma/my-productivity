@@ -35,8 +35,8 @@ function setup() {
         schema_version: MAILBOX_SCHEMA_VERSION, worker: 'pm',
         inbox: { m1: { message_id: 'm1', from_worker: 'dev', body: 'x', created_at: '2026-01-01T01:00:00Z' } },
         sent_pending: {
-            q1: { message_id: 'q1', to_worker: 'dev', body: 'q', expects_reply: true, sent_at: '2026-01-01T02:00:00Z' },
-            q2: { message_id: 'q2', to_worker: 'dev', body: 'q', expects_reply: true, sent_at: '2026-01-01T03:00:00Z' },
+            q1: { message_id: 'q1', to_worker: 'dev', body: 'q', kind: 'question', sent_at: '2026-01-01T02:00:00Z' },
+            q2: { message_id: 'q2', to_worker: 'dev', body: 'q', kind: 'question', sent_at: '2026-01-01T03:00:00Z' },
         },
     }));
     writeFileSync(join(stateRoot, 'incoming-spool/dev/s1.json'), JSON.stringify({ message_id: 's1', from_worker: 'pm', body: 'y' }));

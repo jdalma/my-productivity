@@ -3,7 +3,7 @@
  * A team is a board team when its manifest carries the config's `board` item; its store is then
  * <state_root>/board.db (sqlite) or a memory store (tests). A team without the item gets board-unavailable
  * before any file is touched. The write service gets its ports here: the git checks (git.js), notices through
- * the mailbox (one line, no state: `[board] <ref> <action>`; docs/board.md, Commands), a `board` line in events.jsonl,
+ * the mailbox (kind `board`, one line, no state: `<ref> <action>`; docs/board.md, Commands), a `board` line in events.jsonl,
  * and the file check behind the ticket and report path warnings.
  */
 

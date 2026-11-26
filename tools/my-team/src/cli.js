@@ -38,6 +38,8 @@ import { runApiBoardWrite } from './commands/api/board-write.js';
 import { runApiBoardPushable } from './commands/api/board-pushable.js';
 import { runApiGoalOrder } from './commands/api/goal-order.js';
 import { runApiReviewCopy } from './commands/api/review-copy.js';
+import { loadManifest, rosterOf } from './commands/_manifest.js';
+import { pmsOf } from './board/core/rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -90,7 +92,15 @@ function blockedExample(opts, code, message) {
     return JSON.stringify(example).replaceAll("'", "'\\''");
 }
 
-async function boardRun(opts, fn) {
+// only a worker's refused write may stop its task: a read, and pm's own command, print no example (T56, R52 L2)
+function refusedWorker() {
+    const pinned = process.env.MY_TEAM_WORKER ?? '';
+    const slash = pinned.indexOf('/');
+    if (slash < 0) return false;
+    try { return !pmsOf(rosterOf(loadManifest(pinned.slice(0, slash)))).includes(pinned.slice(slash + 1)); } catch { return false; }
+}
+
+async function boardRun(opts, fn, mutating) {
     try {
         const result = await fn(parseApiInput(opts));
         emit(result, opts.json);
@@ -100,7 +110,7 @@ async function boardRun(opts, fn) {
         const code = typeof err?.code === 'string' && !err.code.startsWith('ERR_') ? err.code : 'error';
         if (opts.json) console.log(JSON.stringify({ ok: false, code, message: err.message }));
         console.error(`[my-team] error: ${code}: ${err.message}`);
-        console.error(`[my-team] if this stops your task, tell your orchestrator: my-team api send-message --input '${blockedExample(opts, code, err.message)}' --json`);
+        if (mutating && refusedWorker()) console.error(`[my-team] if this stops your task, tell your orchestrator: my-team api send-message --input '${blockedExample(opts, code, err.message)}' --json`);
         process.exit(1);
     }
 }
@@ -253,11 +263,11 @@ async function main() {
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiRoster(parseApiInput(opts)), opts.json));
 
-    const board = (name, description, fn) => api.command(name)
+    const board = (name, description, fn, mutating = false) => api.command(name)
         .description(description)
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output (errors too: {ok:false, code, message})')
-        .action((opts) => boardRun(opts, fn));
+        .action((opts) => boardRun(opts, fn, mutating));
     board('board-status', '[pure] The team board: every task, each worker\'s load, open findings, recent changes; with "task", that task\'s family. Optional input: task, open', runApiBoardStatus);
     board('board-inbox', '[pure] Your unfinished tasks, your review requests, notes to you and announcements after "since" (pass back "cursor"). Optional input: since', runApiBoardInbox);
     const WRITES = {
@@ -277,7 +287,7 @@ async function main() {
         'decision-edit': 'Correct an open decision (pm or the worker who asked): id (a decision D#…, or a waiting task), and what changed of question, context, options, recommendation, impact, refs; tasks (a D#… only)',
         progress: 'Say where your task is (the assignee, doing or changes): id, item (the ticket\'s numbered item, 0 for work outside them), note, done',
     };
-    for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name));
+    for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name), true);
     board('board-pushable', '[pure] Whether every outgoing commit has an approved review on the board or is within the baseline: commit, upstream (or remote, for a new branch); repo, baseline', runApiBoardPushable);
     board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle. Optional input: goal', runApiGoalOrder);
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);

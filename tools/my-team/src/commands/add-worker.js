@@ -319,10 +319,10 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
     // Awareness of a new peer is ALREADY solved by `mailbox-list`'s `roster`
     // field, which every worker polls each cycle — so a greeting to every peer
     // is a duplicate channel that costs 2N messages per join (N greetings, N
-    // expects_reply acks).
+    // answers).
     //
     // So: in a role-declaring team the newcomer reports ONLY to the
-    // orchestrator(s), one message, no expects_reply, so the orchestrator can
+    // orchestrator(s), one notice (kind notice), so the orchestrator can
     // tell the user who joined and why. File overlap is deliberately NOT part
     // of that report — parallel work on one repo runs on separate git
     // worktrees, so workers do not share a working tree and git resolves the
@@ -339,7 +339,7 @@ async function addValidatedWorker(opts, deps, manifest, anchor, newWorker) {
         .filter((w) => w.role === 'orchestrator')
         .map((w) => w.name);
     const reportIn = orchestrators.length > 0
-        ? ` Then send ONE message (no expects_reply) to ${orchestrators.join(', ')} `
+        ? ` Then send ONE notice (kind notice) to ${orchestrators.join(', ')} `
           + 'stating your name, your cwd, and your assignment in one line. '
           + 'Do not message any other worker.'
         : ' Do not introduce yourself to peers — they see you in the `roster` '

@@ -77,9 +77,9 @@
 ```
 sender 워커 LLM
     │
-    │ my-team api send-message --input {team_name, from_worker, to_worker, body, expects_reply?, reply_to?}
+    │ my-team api send-message --input {team_name, from_worker, to_worker, kind, body, reply_to?, task?, need?, board_error?}
     ▼
-[1] sender의 mailbox.sent_pending에 메시지 등록  (expects_reply=true일 때만)
+[1] sender의 mailbox.sent_pending에 메시지 등록  (kind가 question·closeout·team-handoff일 때만)
     │   ← 크래시 안전: 이 단계 후 어떤 실패가 나도 sender는 자기가 보낸 사실을 안다
 [2] sender archive/<from>.jsonl에 direction=out으로 append
     │   ← durable 송신 기록
@@ -117,13 +117,26 @@ events.jsonl에 append (audit log)
 | audit 보존 | ✅ | archive는 append-only jsonl + events.jsonl도 별도로 append |
 | 트리거 손실 복구 | ✅ | tmux trigger는 best-effort; mailbox-list 자가 폴링이 진짜 source of truth |
 
-### 3.2 expects_reply / reply_to 상관관계
+### 3.2 kind / reply_to 상관관계
 
-`expects_reply: true`를 설정한 송신은 sender의 `sent_pending` 맵에 등록된다. 그 메시지에 대한 답장은 `reply_to: <original_id>`로 송신하며, 수신자의 mailbox-list가 sent_pending에서 자동으로 해당 항목을 제거한다. 답장 자체는 `expects_reply: false`여야 한다 (`worker-bootstrap.md`의 발신 룰 참조).
+모든 메시지는 `kind`를 가진다(T54, 필수). 값과 뜻:
+
+| kind | 뜻 | 추가 필드 |
+|---|---|---|
+| `question` | 답을 기다린다(sender의 `sent_pending`에 등록) | |
+| `answer` | 답 | `reply_to` 필수 |
+| `blocked` | 작업판 태스크를 더 진행할 수 없다 | `task`, `need` 필수. 작업판 명령의 거부가 원인이면 `board_error {code, message}` |
+| `notice` | 답이 필요 없는 알림 | |
+| `board` | 작업판 변경 알림. 작업판 코드만 보낸다(send-message는 거부) | |
+| `closeout` | 종결 보고(my-team-closeout). 판정을 기다린다(`sent_pending`) | |
+| `team-handoff` | 팀 상태 수집 요청(my-team-handoff). 회신을 기다린다(`sent_pending`) | |
+| `team-takeover` | 재개 브리프(my-team-takeover) | |
+
+kind가 없거나 모르는 값이면 send-message가 받을 수 있는 목록을 적어 거부한다. 답은 `kind: answer`, `reply_to: <original_id>`로 보내며, 수신자의 mailbox-list가 sent_pending에서 자동으로 해당 항목을 제거한다. 작업판 명령이 실패하면 stderr에 그 거부를 `board_error`로 담은 blocked 메시지 예시가 함께 나온다.
 
 reply_to 해석 순서:
 1. **sent_pending hit** — 내가 보낸 질문에 대한 답이다.
-2. **archive-lookup (direction=out)** — 옛날 내가 expects_reply 없이 보낸 메시지에 누가 늦게 답한 경우.
+2. **archive-lookup (direction=out)** — 옛날 내가 답을 기다리지 않는 kind로 보낸 메시지에 누가 답한 경우.
 3. **archive-lookup (direction=in)** — 내가 옛날에 받은 메시지에 대한 follow-up.
 4. 어디서도 못 찾으면 → peer 버그. body 자체만으로 처리.
 
@@ -135,29 +148,30 @@ reply_to 해석 순서:
 
 ### 4.1 peer mailbox 메시지
 
-`mailbox/<to>.json` (스키마 v2):
+`mailbox/<to>.json` (스키마 v3. v2는 읽지 않는다):
 
 ```jsonc
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "worker": "<to>",
   "inbox": {
     "<message_id>": {
       "message_id": "<ts>-<rand>",
+      "kind": "notice",
       "from_worker": "<from>",
       "to_worker": "<to>",
       "body": "<자유 텍스트>",
       "reply_to": "<orig_id>" | null,
-      "expects_reply": false,
       "created_at": "<ISO>"
+      // kind blocked: "task", "need", "board_error"?
     }
   },
   "sent_pending": {
     "<message_id>": {
       "message_id": "<id>",
+      "kind": "question",
       "to_worker": "<peer>",
       "body": "...",
-      "expects_reply": true,
       "sent_at": "<ISO>"
     }
   }
@@ -170,7 +184,7 @@ reply_to 해석 순서:
 - `{ ...message, direction: "out" }` — 자기가 send-message 보낼 때 append
 - `{ ...message, direction: "in" }` — mailbox-mark-delivered 호출 시 append
 
-스키마 mismatch (v1 또는 schema_version 누락)는 mailbox-list가 throw한다. 자동 마이그레이션 없음 — 운영자가 shutdown 후 재시작하라는 메시지가 나온다.
+스키마 mismatch (v3이 아니거나 schema_version 누락)는 mailbox-list가 throw한다. 자동 마이그레이션 없음 — 운영자가 shutdown 후 재시작하라는 메시지가 나온다.
 
 ### 4.2 events.jsonl
 
@@ -178,7 +192,7 @@ reply_to 해석 순서:
 
 ```jsonc
 { "ts": "<ISO>", "type": "message", "team": "<보낸 팀>", "worker": "<from>", "from": "<from>", "to": "<to>",
-  "body": "...", "message_id": "<id>", "reply_to": "<id>" | null, "expects_reply": false }
+  "body": "...", "message_id": "<id>", "reply_to": "<id>" | null, "kind": "notice" }
 ```
 
 메시지 전달 뒤에 쓰므로, 기록에 실패해도 send-message는 ok와 `warning`을 돌려준다(재전송 중복 방지). `my-team monitor <team>`은 `readEvent`로 이 파일을 읽어 실시간 출력한다.
@@ -220,7 +234,7 @@ reply_to 해석 순서:
 | 두 송신자가 동시에 같은 수신자에게 send-message | spool 파일명이 `message_id`로 unique → 충돌 불가 |
 | send-message 도중 sender 크래시 | step 1(sent_pending)을 먼저 → 송신자가 자기 발송을 안다. step 3 전이면 수신자는 모름 (re-send 필요) |
 | mailbox-list 도중 수신자 크래시 또는 mailbox write 실패 | mailbox.json write가 끝난 뒤에 spool을 unlink → 중간에 멈추면 spool이 남고 다음 mailbox-list가 다시 흡수 (inbox가 `message_id` 키라 멱등). write와 unlink 사이 크래시면 같은 메시지가 한 번 더 보일 수 있다 (유실 대신 중복) |
-| 한 워커의 병렬 tool call (mailbox-list, mark-delivered, expects_reply 송신)이 같은 mailbox.json을 동시에 갱신 | 세 경로 모두 `tmux-comm.js`의 `<mailbox>.lock`(O_EXCL 생성, `pid:random` 토큰 기록)을 잡고 read-modify-write. holder pid가 죽었을 때만 회수하고, 살아 있으면 최대 10초 기다린 뒤 lock 경로와 pid를 담아 throw (느린 holder의 lock을 뺏지 않음). 회수·해제 모두 unlink 직전에 다시 읽은 내용이 기대한 토큰일 때만 지운다 |
+| 한 워커의 병렬 tool call (mailbox-list, mark-delivered, 답을 기다리는 kind의 송신)이 같은 mailbox.json을 동시에 갱신 | 세 경로 모두 `tmux-comm.js`의 `<mailbox>.lock`(O_EXCL 생성, `pid:random` 토큰 기록)을 잡고 read-modify-write. holder pid가 죽었을 때만 회수하고, 살아 있으면 최대 10초 기다린 뒤 lock 경로와 pid를 담아 throw (느린 holder의 lock을 뺏지 않음). 회수·해제 모두 unlink 직전에 다시 읽은 내용이 기대한 토큰일 때만 지운다 |
 | 같은 message_id 중복 흡수 | mailbox.inbox는 객체 키이므로 동일 id면 덮어쓰기 (멱등) |
 | schema 변경 | schema_version mismatch는 throw — 운영자가 강제 셔다운 |
 | add-worker 도중 팀 shutdown | 페인 생성 후 manifest append 직전 manifest를 **reload** — 사라졌으면("team shut down mid-operation") 새 페인 kill + abort. 락은 없음(레포의 직렬-인간 모델) |

@@ -401,7 +401,7 @@
           <div class="num">1</div>
           <div class="body">
             <h4><span class="who a">A 송신</span>내 "미해결 질문" 장부에 먼저 기록</h4>
-            <p><code>my-team api send-message</code> 호출. <code>expects_reply:true</code>일 때만, 답을 받기 전에 먼저 내 장부에 적는다 → 이후 무슨 실패가 나도 "내가 보냈다"는 사실은 남는다.</p>
+            <p><code>my-team api send-message</code> 호출. <code>kind</code>가 question(또는 closeout, team-handoff)일 때만, 답을 받기 전에 먼저 내 장부에 적는다 → 이후 무슨 실패가 나도 "내가 보냈다"는 사실은 남는다.</p>
             <div class="writes">
               <div class="w"><span class="tag file">쓰기</span><span class="path">mailbox/A.json</span><span class="note">→ <code>sent_pending</code> 맵에 이 질문 추가</span></div>
             </div>
@@ -478,7 +478,7 @@
           <div class="num">7</div>
           <div class="body">
             <h4><span class="who b">B 응답</span>(답이 필요했다면) 답장 송신</h4>
-            <p>B가 <code>reply_to:&lt;원본 id&gt;</code>를 달아 A에게 답장한다. 이건 1~6단계를 <strong>방향만 B→A로 바꿔</strong> 반복하는 것. 답장은 보통 <code>expects_reply:false</code>.</p>
+            <p>B가 <code>reply_to:&lt;원본 id&gt;</code>를 달아 A에게 답장한다. 이건 1~6단계를 <strong>방향만 B→A로 바꿔</strong> 반복하는 것. 답장은 <code>kind:"answer"</code>이고 <code>reply_to</code>가 필수다.</p>
             <div class="writes">
               <div class="w"><span class="tag file">append</span><span class="path">archive/B.jsonl</span><span class="note"><code>direction:"out"</code> (B의 송신)</span></div>
               <div class="w"><span class="tag file">쓰기</span><span class="path">incoming-spool/A/&lt;id2&gt;.json</span><span class="note">답장 본문</span></div>
@@ -578,26 +578,26 @@
     <pre class="code"><span class="cm">// incoming-spool/B/1717000000000-a1b2c3.json</span>
 {
   <span class="k">"message_id"</span>: <span class="s">"1717000000000-a1b2c3"</span>,
+  <span class="k">"kind"</span>: <span class="s">"question"</span>,      <span class="cm">// 필수: question|answer|blocked|notice|board|closeout|team-handoff|team-takeover</span>
   <span class="k">"from_worker"</span>: <span class="s">"A"</span>,
   <span class="k">"to_worker"</span>: <span class="s">"B"</span>,
   <span class="k">"body"</span>: <span class="s">"order 도메인의 캐시 키 설계 좀 검토해줘. PR #42 참고."</span>,
   <span class="k">"reply_to"</span>: null,            <span class="cm">// 답장이면 원본 message_id</span>
-  <span class="k">"expects_reply"</span>: true,
   <span class="k">"created_at"</span>: <span class="s">"2026-05-29T10:00:00.000Z"</span>
 }</pre>
 
     <h3>A의 mailbox — sent_pending (답 기다리는 질문 장부)</h3>
     <pre class="code"><span class="cm">// mailbox/A.json</span>
 {
-  <span class="k">"schema_version"</span>: 2,
+  <span class="k">"schema_version"</span>: 3,
   <span class="k">"worker"</span>: <span class="s">"A"</span>,
   <span class="k">"inbox"</span>: { <span class="cm">/* A가 받은 메시지들 */</span> },
   <span class="k">"sent_pending"</span>: {
     <span class="k">"1717000000000-a1b2c3"</span>: {       <span class="cm">// 8단계에서 답 오면 자동 삭제</span>
       <span class="k">"message_id"</span>: <span class="s">"1717000000000-a1b2c3"</span>,
+      <span class="k">"kind"</span>: <span class="s">"question"</span>,
       <span class="k">"to_worker"</span>: <span class="s">"B"</span>,
       <span class="k">"body"</span>: <span class="s">"order 도메인의 캐시 키 설계 좀 검토해줘. PR #42 참고."</span>,
-      <span class="k">"expects_reply"</span>: true,
       <span class="k">"sent_at"</span>: <span class="s">"2026-05-29T10:00:00.000Z"</span>
     }
   }

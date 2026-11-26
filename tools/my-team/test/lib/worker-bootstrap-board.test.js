@@ -25,10 +25,10 @@ test('a team without a board: no board section, and board: null renders the same
     }
 });
 
-test('a worker of a board team: inbox on a [board] notice, take, land instead of a status message, act on changes at once', () => {
+test('a worker of a board team: inbox on a board notice (kind board), take, land instead of a status message, act on changes at once', () => {
     const text = overlay('dev', 'worker', { board: { store: 'sqlite' } });
     assert.match(text, /## Team Board/);
-    assert.match(text, /\[board\][^\n]*board-inbox/);
+    assert.match(text, /A message of kind `board` is a notice[^\n]*board-inbox/);
     assert.match(text, /board-take/);
     assert.match(text, /board-land/);
     assert.match(text, /not in a message body|never in a message body/i);
@@ -193,7 +193,7 @@ test('pm of a board team: goal files with an order section, ready_now from goal-
     assert.doesNotMatch(overlay('dev', 'worker', { board: { store: 'sqlite' } }), /goal-order/, 'pm guidance only');
 });
 
-test('T226: every render forbids creating tmux panes or sessions; a board team\'s mailbox says how to read reply_to and expects_reply', () => {
+test('T226: every render forbids creating tmux panes or sessions; a board team\'s mailbox says how to read reply_to and kind', () => {
     const board = { store: 'sqlite' };
     const renders = {
         'orchestrator+board': overlay('pm', 'orchestrator', { board }),
@@ -208,7 +208,9 @@ test('T226: every render forbids creating tmux panes or sessions; a board team\'
         const mailbox = renders[name].split('### Mailbox: questions and notices only')[1].split('## Rules')[0];
         assert.match(mailbox, /"direction: out" is a message you sent, "in" one you received/, name);
         assert.match(mailbox, /no hit, say so\s+in this pane/, name);
-        assert.match(mailbox, /`expects_reply: false` is a notice: act on it, no reply/, name);
+        assert.match(mailbox, /Answer a question, closeout or team-handoff with kind `answer` and `reply_to`/, name);
+        assert.match(mailbox, /`blocked` \(a task you cannot go on with:\s+`task`, `need`, and the `board_error` a refused board command prints\)/, name);
+        assert.doesNotMatch(renders[name], /expects_reply|\[board\]|\[closeout\]/, name);
     }
 });
 

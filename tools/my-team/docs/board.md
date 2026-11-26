@@ -119,7 +119,7 @@ in a pane) is recorded by pm in one call: `board-ask` with `answered` `{chosen, 
   `D#…` the `tasks` it serves. A field is given whole (`options` is every option). The brief the edit leaves is
   checked as `board-ask` checks one, so options that no longer hold the recommendation kept are refused.
 - pm and the worker who asked edit it (`forbidden` for anyone else). The other of the two is told with a
-  `[board] <ref> edit` notice (the same `ref`).
+  `<ref> edit` notice of kind `board` (the same `ref`).
 - Only an open decision is edited: an answered or a withdrawn one, and a task that is not `waiting`, are refused
   (`invalid-transition`). An edit that changes nothing, or names another field, is `invalid`.
 - Who asked and when stay. A waiting task's state and `updated_at` stay too.
@@ -263,7 +263,7 @@ other input for its form and many boards already hold relative paths.
 - `review_report` is a suggestion for a file the reviewer writes later, so it is not checked.
 
 **Notices.** A write that concerns other workers sends each of them one mailbox line,
-`[board] <ref> <action>`. The line carries no state: the reader runs `board-inbox`. The pane trigger is typed
+`<ref> <action>`, of kind `board`. The line carries no state: the reader runs `board-inbox`. The pane trigger is typed
 only while the recipient's pane in the manifest is still that worker's pane in the team's session; otherwise
 the notice waits in the mailbox and the result carries a `warning`. Every write also adds a
 `board` line to `events.jsonl` (see `events-format.md`); `board-wait`, `board-answer` and `board-progress` add

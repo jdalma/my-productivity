@@ -23,9 +23,9 @@ const COMMON = ['ts', 'type', 'team', 'worker'];
 /** Per type: keys every line has, keys it may have, and keys still read from older lines (never written). */
 export const EVENT_TYPES = {
     message: {
-        required: ['from', 'to', 'body', 'message_id', 'reply_to', 'expects_reply'],
+        required: ['from', 'to', 'body', 'message_id', 'reply_to', 'kind'],
         optional: ['from_team', 'to_team'],
-        legacy: ['from_session', 'to_session'],
+        legacy: ['from_session', 'to_session', 'expects_reply'],   // expects_reply: before kind (T54)
     },
     'tmux-denied': { required: ['args'], optional: [], legacy: [] },   // the tmux shim (T56)
     'tool-denied': { required: ['tool', 'rule', 'target'], optional: [], legacy: [] },   // the worker guard hook (T59)
@@ -92,17 +92,17 @@ export async function appendEvent(stateRoot, fields) {
 }
 
 /** A message line: `team` is the sender's team, its `worker` the sender (also `from`, kept for older readers). */
-export async function appendMessageEvent(stateRoot, { team, from, to, body, message_id, reply_to, expects_reply, ...optional }) {
+export async function appendMessageEvent(stateRoot, { team, from, to, body, message_id, reply_to, kind, ...optional }) {
     return appendEvent(stateRoot, {
         type: 'message', team, worker: from, from, to, body,
-        message_id: message_id ?? null, reply_to: reply_to ?? null, expects_reply: Boolean(expects_reply), ...optional,
+        message_id: message_id ?? null, reply_to: reply_to ?? null, kind, ...optional,
     });
 }
 
 /**
  * Any line as the current format has it. `team` is the team whose log it was read from: lines written
  * before T60 carry none (a mirrored message carries its sender's as from_team). A line without type is a v1
- * message; missing message keys read as null/false; keys of older formats stay as they are.
+ * message; missing message keys read as null; keys of older formats stay as they are.
  */
 export function readEvent(raw, team) {
     const type = raw.type ?? 'message';
@@ -111,7 +111,8 @@ export function readEvent(raw, team) {
         line.worker = raw.worker ?? raw.from ?? null;
         line.message_id = raw.message_id ?? null;
         line.reply_to = raw.reply_to ?? null;
-        line.expects_reply = Boolean(raw.expects_reply);
+        // a line before T54 has expects_reply, no kind
+        line.kind = raw.kind ?? (raw.expects_reply ? 'question' : 'notice');
     } else {
         line.worker = raw.worker ?? null;
     }

@@ -89,8 +89,8 @@ test('mailbox-list absorbs spool files into inbox and deletes them', async () =>
     const ctx = setupTeam({
         mailbox: { schema_version: MAILBOX_SCHEMA_VERSION, worker: 'alice', inbox: {}, sent_pending: {} },
         spool: [
-            { message_id: 's-1', from_worker: 'bob', to_worker: 'alice', body: 'hi', reply_to: null, expects_reply: false, created_at: '2026-01-01T00:00:00Z' },
-            { message_id: 's-2', from_worker: 'bob', to_worker: 'alice', body: 'second', reply_to: null, expects_reply: false, created_at: '2026-01-02T00:00:00Z' },
+            { message_id: 's-1', from_worker: 'bob', to_worker: 'alice', body: 'hi', reply_to: null, kind: 'notice', created_at: '2026-01-01T00:00:00Z' },
+            { message_id: 's-2', from_worker: 'bob', to_worker: 'alice', body: 'second', reply_to: null, kind: 'notice', created_at: '2026-01-02T00:00:00Z' },
         ],
     });
     try {
@@ -110,11 +110,11 @@ test('mailbox-list spool absorption resolves matching sent_pending entry (reply 
             worker: 'alice',
             inbox: {},
             sent_pending: {
-                'q-1': { message_id: 'q-1', to_worker: 'bob', body: 'q', expects_reply: true, sent_at: '2026-01-01T00:00:00Z' },
+                'q-1': { message_id: 'q-1', to_worker: 'bob', body: 'q', kind: 'question', sent_at: '2026-01-01T00:00:00Z' },
             },
         },
         spool: [
-            { message_id: 'r-1', from_worker: 'bob', to_worker: 'alice', body: 'a', reply_to: 'q-1', expects_reply: false, created_at: '2026-01-01T00:01:00Z' },
+            { message_id: 'r-1', from_worker: 'bob', to_worker: 'alice', body: 'a', reply_to: 'q-1', kind: 'answer', created_at: '2026-01-01T00:01:00Z' },
         ],
     });
     try {
@@ -177,8 +177,8 @@ test('mailbox-list returns sent_pending sorted by sent_at', async () => {
             worker: 'alice',
             inbox: {},
             sent_pending: {
-                'q-b': { message_id: 'q-b', to_worker: 'bob', body: 'q1', expects_reply: true, sent_at: '2026-01-02T00:00:00Z' },
-                'q-a': { message_id: 'q-a', to_worker: 'bob', body: 'q0', expects_reply: true, sent_at: '2026-01-01T00:00:00Z' },
+                'q-b': { message_id: 'q-b', to_worker: 'bob', body: 'q1', kind: 'question', sent_at: '2026-01-02T00:00:00Z' },
+                'q-a': { message_id: 'q-a', to_worker: 'bob', body: 'q0', kind: 'question', sent_at: '2026-01-01T00:00:00Z' },
             },
         },
     });
@@ -199,6 +199,36 @@ test('mailbox-list throws on malformed mailbox JSON', async () => {
             () => runApiMailboxList({ team_name: ctx.teamName, worker: ctx.worker }),
             /is not valid JSON/
         );
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('mailbox-list keeps a message kind and the fields of a blocked through absorption (T54)', async () => {
+    const ctx = setupTeam({
+        mailbox: { schema_version: MAILBOX_SCHEMA_VERSION, worker: 'alice', inbox: {}, sent_pending: {} },
+        spool: [
+            { message_id: 'b-1', kind: 'blocked', from_worker: 'bob', to_worker: 'alice', body: 'stuck', reply_to: null,
+                task: 'T1', need: 'a decision', board_error: { code: 'refused', message: 'no' }, created_at: '2026-01-01T00:00:00Z' },
+            { message_id: 'b-2', kind: 'board', from_worker: 'bob', to_worker: 'alice', body: 'T1 add', reply_to: null, created_at: '2026-01-02T00:00:00Z' },
+        ],
+    });
+    try {
+        const [blocked, board] = (await runApiMailboxList({ team_name: ctx.teamName, worker: ctx.worker })).messages;
+        assert.equal(blocked.kind, 'blocked');
+        assert.deepEqual([blocked.task, blocked.need, blocked.board_error], ['T1', 'a decision', { code: 'refused', message: 'no' }]);
+        assert.equal(board.kind, 'board');
+        assert.equal('task' in board, false);
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('mailbox-list refuses a v2 mailbox: v3 reads no older format (T54)', async () => {
+    const ctx = setupTeam({ mailbox: { schema_version: 2, worker: 'alice', inbox: {}, sent_pending: {} } });
+    try {
+        assert.equal(MAILBOX_SCHEMA_VERSION, 3);
+        await assert.rejects(() => runApiMailboxList({ team_name: ctx.teamName, worker: ctx.worker }), /schema_version=2, expected 3/);
     } finally {
         cleanup(ctx);
     }

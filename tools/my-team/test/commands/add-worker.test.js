@@ -437,7 +437,7 @@ test('in a role team, the join notice tells the newcomer to report in to the orc
         assert.doesNotMatch(notices[0].msg, /bob/, 'non-orchestrator peers are not named as recipients');
         // The greeting-to-everyone behaviour is gone: the notice must say the
         // report-in is one-way, not request an ack from every peer.
-        assert.match(notices[0].msg, /no expects_reply/, 'report-in is explicitly one-way, no ack storm');
+        assert.match(notices[0].msg, /ONE notice \(kind notice\)/, 'report-in is explicitly one-way, no ack storm');
         assert.match(notices[0].msg, /Do not message any other worker/i, 'no fan-out to peers');
         assert.match(notices[0].msg, /cwd/, 'report-in carries cwd so the orchestrator can narrate the join');
         assert.doesNotMatch(notices[0].msg, /files\/dirs you expect to touch/,
@@ -464,7 +464,7 @@ test('in a peer team (no roles) the newcomer is told NOT to introduce itself', a
         assert.equal(notices.length, 1, 'still exactly one notice — to the new pane only');
         assert.equal(notices[0].paneId, '%9');
         assert.match(notices[0].msg, /Do not introduce yourself/i, 'no peer greeting in a roleless team');
-        assert.doesNotMatch(notices[0].msg, /expects_reply/, 'no ack storm');
+        assert.doesNotMatch(notices[0].msg, /kind question|expects_reply/, 'no ack storm');
         assert.match(notices[0].msg, /roster/, 'peers learn of it through the roster instead');
         const existingPanes = notices.filter((n) => n.paneId === '%1' || n.paneId === '%2');
         assert.equal(existingPanes.length, 0, 'existing worker panes are NOT poked in-pane');

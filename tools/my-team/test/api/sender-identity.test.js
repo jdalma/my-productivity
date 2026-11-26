@@ -48,7 +48,7 @@ function setup(t) {
 test('a worker cannot send as another worker: refused before anything is written (a, R56 b)', async (t) => {
     const s = setup(t);
     await assert.rejects(
-        runApiSendMessage({ team_name: 'tt', from_worker: 'pm', to_worker: 'core', body: 'x' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' })),
+        runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'pm', to_worker: 'core', body: 'x' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' })),
         /started as 'rv'.*from_worker "rv"/s,
     );
     assert.deepEqual(s.files(s.t1), [], 'no spool, archive, mailbox or events: no notification either');
@@ -56,25 +56,25 @@ test('a worker cannot send as another worker: refused before anything is written
 
 test('the same name passes (b), and an omitted from_worker is filled from the environment (c)', async (t) => {
     const s = setup(t);
-    const r1 = await runApiSendMessage({ team_name: 'tt', from_worker: 'rv', to_worker: 'core', body: 'b' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' }));
+    const r1 = await runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'rv', to_worker: 'core', body: 'b' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' }));
     assert.equal(r1.ok, true);
-    const r2 = await runApiSendMessage({ team_name: 'tt', to_worker: 'core', body: 'c' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' }));
+    const r2 = await runApiSendMessage({ kind: 'notice', team_name: 'tt', to_worker: 'core', body: 'c' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' }));
     assert.equal(r2.ok, true);
     assert.deepEqual(s.events(s.t1).map((e) => [e.from, e.body]), [['rv', 'b'], ['rv', 'c']]);
 });
 
 test('without the variable the input is trusted as before; from_worker is then required (d)', async (t) => {
     const s = setup(t);
-    const r = await runApiSendMessage({ team_name: 'tt', from_worker: 'pm', to_worker: 'core', body: 'd' }, s.deps({}));
+    const r = await runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'pm', to_worker: 'core', body: 'd' }, s.deps({}));
     assert.equal(r.ok, true);
     assert.equal(s.events(s.t1)[0].from, 'pm');
-    await assert.rejects(runApiSendMessage({ team_name: 'tt', to_worker: 'core', body: 'd' }, s.deps({})), /from_worker is required/);
+    await assert.rejects(runApiSendMessage({ kind: 'notice', team_name: 'tt', to_worker: 'core', body: 'd' }, s.deps({})), /from_worker is required/);
 });
 
 test('a worker of another team cannot send as a member of this one', async (t) => {
     const s = setup(t);
     await assert.rejects(
-        runApiSendMessage({ team_name: 'tt', from_worker: 'pm', to_worker: 'core', body: 'x' }, s.deps({ MY_TEAM_WORKER: 'uu/lead' })),
+        runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'pm', to_worker: 'core', body: 'x' }, s.deps({ MY_TEAM_WORKER: 'uu/lead' })),
         /team 'uu'.*team_name "uu"/s,
     );
     assert.deepEqual(s.files(s.t1), []);
@@ -83,13 +83,13 @@ test('a worker of another team cannot send as a member of this one', async (t) =
 test('cross-team sends work as before, from the sender\'s own team (f)', async (t) => {
     const s = setup(t);
     process.env.MY_TEAM_STATE_ROOT = s.t1;
-    const r = await runApiSendMessage({ team_name: 'tt', from_worker: 'pm', to_team: 'uu', to_worker: 'lead', body: 'f' },
+    const r = await runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'pm', to_team: 'uu', to_worker: 'lead', body: 'f' },
         s.deps({ MY_TEAM_WORKER: 'tt/pm' }));
     assert.equal(r.ok, true);
     assert.equal(r.delivered_to_team, 'uu');
     assert.deepEqual(s.events(s.t2).map((e) => [e.from, e.from_team]), [['pm', 'tt']]);
     await assert.rejects(
-        runApiSendMessage({ team_name: 'tt', from_worker: 'pm', to_team: 'uu', to_worker: 'lead', body: 'f' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' })),
+        runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'pm', to_team: 'uu', to_worker: 'lead', body: 'f' }, s.deps({ MY_TEAM_WORKER: 'tt/rv' })),
         /started as 'rv'/,
     );
 });
@@ -113,7 +113,7 @@ test('a message delivered but not logged is still ok, with a warning, and delive
         async () => { throw new Error("events: 'message' has no key oops"); },   // a shape mistake in a future change
         async () => false,                                                        // the file could not be written
     ]) {
-        const r = await runApiSendMessage({ team_name: 'tt', from_worker: 'rv', to_worker: 'core', body: 'once' },
+        const r = await runApiSendMessage({ kind: 'notice', team_name: 'tt', from_worker: 'rv', to_worker: 'core', body: 'once' },
             { ...s.deps({ MY_TEAM_WORKER: 'tt/rv' }), appendMessageEvent });
         assert.equal(r.ok, true);
         assert.match(r.warning, /events\.jsonl/);

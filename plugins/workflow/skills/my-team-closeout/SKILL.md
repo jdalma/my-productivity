@@ -1,6 +1,6 @@
 ---
 name: my-team-closeout
-description: my-team 워커의 작업 종결(closeout) 프로토콜 — 보고 → 검증 → 제거 또는 재개 브리프. 두 상황에서 반드시 사용한다. (1) 보고자: my-team 워커 pane에서 사용자가 "/my-team-closeout", "closeout", "마무리 보고해", "작업 끝났으니 PM(생성자)에게 보고하고 정리해", "이 워커 정리해"라고 하면, 자신을 생성한 워커(spawner, 보통 orchestrator)에게 증거 기반 완료 보고를 보낸다. (2) 수신자: 메일박스에 본문이 `[closeout]`로 시작하는 메시지가 도착한 워커는 이 스킬의 수신자 절차로 처리한다 — 티켓과 대조 검증 후 전부 완료면 remove-worker + 종결 문서, 미완료면 다른 워커가 add-worker로 바로 이어받을 수 있는 재개 브리프를 쓴다(전임 유지). 단일 세션 인계용 /handoff·/takeover와 다르다 — 팀 메일박스·roster·remove-worker를 다루는 쪽이 이 스킬이다.
+description: my-team 워커의 작업 종결(closeout) 프로토콜 — 보고 → 검증 → 제거 또는 재개 브리프. 두 상황에서 반드시 사용한다. (1) 보고자: my-team 워커 pane에서 사용자가 "/my-team-closeout", "closeout", "마무리 보고해", "작업 끝났으니 PM(생성자)에게 보고하고 정리해", "이 워커 정리해"라고 하면, 자신을 생성한 워커(spawner, 보통 orchestrator)에게 증거 기반 완료 보고를 보낸다. (2) 수신자: 메일박스에 kind가 `closeout`인 메시지가 도착한 워커는 이 스킬의 수신자 절차로 처리한다 — 티켓과 대조 검증 후 전부 완료면 remove-worker + 종결 문서, 미완료면 다른 워커가 add-worker로 바로 이어받을 수 있는 재개 브리프를 쓴다(전임 유지). 단일 세션 인계용 /handoff·/takeover와 다르다 — 팀 메일박스·roster·remove-worker를 다루는 쪽이 이 스킬이다.
 ---
 
 # my-team closeout — 워커 종결 보고 · 검증 · 제거/재개 브리프
@@ -34,7 +34,7 @@ description: my-team 워커의 작업 종결(closeout) 프로토콜 — 보고 �
 
 ### A1. 티켓 확정
 
-`tickets[]`에서 이번 작업의 티켓(생성자가 `expects_reply`로 보낸 메시지)을 고른다. 여러 건이면 사용자에게 어느 것인지 묻는다. 티켓 본문과 거기 적힌 문서 경로를 다시 읽어 **요구된 산출물 목록**을 뽑는다. 작업 중 기억이 아니라 티켓 원문 기준이다 — 중간에 범위가 바뀌었으면 그 사실도 산출물 행으로 적는다.
+`tickets[]`에서 이번 작업의 티켓(생성자가 kind `question`으로 보낸 메시지)을 고른다. 여러 건이면 사용자에게 어느 것인지 묻는다. 티켓 본문과 거기 적힌 문서 경로를 다시 읽어 **요구된 산출물 목록**을 뽑는다. 작업 중 기억이 아니라 티켓 원문 기준이다 — 중간에 범위가 바뀌었으면 그 사실도 산출물 행으로 적는다.
 
 ### A2. 검증표 작성
 
@@ -49,11 +49,11 @@ description: my-team 워커의 작업 종결(closeout) 프로토콜 — 보고 �
 ### A4. 보고 전송
 
 ```bash
-my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<spawner>","reply_to":"<ticket message_id>","expects_reply":true,
- "body":"[closeout] <me>: 주장=완료|미완료, 산출물 <N>건 중 완료 <k>·미완료 <m>·미검증 <u>. 보고서=<report_path>. 수신 절차=my-team-closeout 스킬 §B. 미완료 요지: <한 줄, 없으면 없음>"}' --json
+my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<spawner>","kind":"closeout","reply_to":"<ticket message_id>",
+ "body":"<me>: 주장=완료|미완료, 산출물 <N>건 중 완료 <k>·미완료 <m>·미검증 <u>. 보고서=<report_path>. 수신 절차=my-team-closeout 스킬 §B. 미완료 요지: <한 줄, 없으면 없음>"}' --json
 ```
 
-본문은 `[closeout]`로 시작해야 수신자가 일반 보고와 구분한다. `reply_to`를 티켓에 걸어야 수신자의 `sent_pending`에서 그 티켓이 닫힌다. `expects_reply`는 수신자의 판정(제거 또는 브리프 경로)을 받기 위해 켠다.
+`kind: closeout`으로 수신자가 일반 보고와 구분한다. `reply_to`를 티켓에 걸어야 수신자의 `sent_pending`에서 그 티켓이 닫힌다. closeout은 질문처럼 내 `sent_pending`에 남아 수신자의 판정(제거 또는 브리프 경로)을 기다린다.
 
 ### A5. 전송 후
 
@@ -61,7 +61,7 @@ status.json을 갱신한다: 완료 주장이면 `{"state":"done","reason":"clos
 
 ---
 
-## B. 수신자 절차 (`[closeout]` 메시지를 받은 pane)
+## B. 수신자 절차 (kind `closeout` 메시지를 받은 pane)
 
 ### B1. 자료 모으기
 
@@ -75,7 +75,7 @@ status.json을 갱신한다: 완료 주장이면 `{"state":"done","reason":"clos
 - `미완료` — 요구와 다르거나 남은 일이 있음
 - `검증불가` — 증거가 없거나 수신자 환경에서 재현 못 함
 
-**검증불가는 제거 판단에서 미완료로 친다.** 워커의 말만으로 pane을 닫지 않기 위해서다. 보고서와 수신자 판정이 어긋나는 행이 있으면 질문을 **한 통에 묶어** `expects_reply`로 보내고 답을 받아 재판정한다. 한 왕복으로 해소되지 않는 행은 미완료로 두고 브리프에 그 경위를 적는다 — 끝없이 핑퐁하는 것보다 사용자가 보고 결정하는 편이 빠르다.
+**검증불가는 제거 판단에서 미완료로 친다.** 워커의 말만으로 pane을 닫지 않기 위해서다. 보고서와 수신자 판정이 어긋나는 행이 있으면 질문을 **한 통에 묶어** kind `question`으로 보내고 답을 받아 재판정한다. 한 왕복으로 해소되지 않는 행은 미완료로 두고 브리프에 그 경위를 적는다 — 끝없이 핑퐁하는 것보다 사용자가 보고 결정하는 편이 빠르다.
 
 ### B3-a. 전부 완료 → 종결 문서 → 제거
 
@@ -87,7 +87,7 @@ status.json을 갱신한다: 완료 주장이면 `{"state":"done","reason":"clos
 ### B3-b. 미완료 있음 → 재개 브리프 → 전임 유지
 
 1. 「재개 브리프 템플릿」으로 `<docs>/closeouts/<YYYY-MM-DD>-<worker>-RESUME.md`를 쓴다. 기준은 하나다: **이 파일과 코드만 가진 새 워커가 질문 없이 첫 커밋을 만들 수 있는가.** 미완료 항목마다 현재 상태·다음 액션·입력 경로·검증 방법·블로커·실행 주체를 적고, `add-worker --extra-prompt`에 그대로 넣을 수 있는 브리프 초안과 티켓 초안까지 포함한다. 완료된 행도 요약으로 남긴다 — 후임이 끝난 일을 다시 하지 않도록.
-2. 워커에게 `reply_to`로 답한다: 판정 결과(완료 k·미완료 m·검증불가 u), 브리프 경로, "pane 유지 — 추가 지시 대기". 후임 `add-worker`는 **하지 않는다.** 재개 시점·범위·누가 할지는 사용자 결정이다.
+2. 워커에게 kind `answer`와 `reply_to`로 답한다: 판정 결과(완료 k·미완료 m·검증불가 u), 브리프 경로, "pane 유지 — 추가 지시 대기". 후임 `add-worker`는 **하지 않는다.** 재개 시점·범위·누가 할지는 사용자 결정이다.
 3. `mailbox-mark-delivered`. stdout에 미완료 건수와 브리프 경로를 적어 사용자가 결정할 수 있게 한다.
 
 ---
@@ -149,7 +149,7 @@ ticket: <message_id> · 원 티켓 문서: <경로> · 전임 보고서: <report
 ## 환경
 cwd · branch@head · 워크트리 여부 · 빌드/테스트 명령 · 이번 작업에서 걸린 함정
 ## 후임 투입 초안 (사용자가 결정하면 그대로 사용)
-- add-worker: `my-team add-worker --team <team> --name <worker>-2 --agent-type <type> --cwd <repo> --worktree <branch> --description "<한 줄>" --extra-prompt "Spawned by <수신자>. 이 브리프 <경로>를 먼저 읽는다. Message <수신자> ONLY (a) 결정 필요 시 expects_reply 1통 (b) 완료 시 티켓에 reply_to 로 최종 보고 1회."`
+- add-worker: `my-team add-worker --team <team> --name <worker>-2 --agent-type <type> --cwd <repo> --worktree <branch> --description "<한 줄>" --extra-prompt "Spawned by <수신자>. 이 브리프 <경로>를 먼저 읽는다. Message <수신자> ONLY (a) 결정 필요 시 kind question 1통 (b) 완료 시 티켓에 kind answer·reply_to 로 최종 보고 1회."`
 - 티켓 초안: 목표 + 입력 경로 + 산출물 + "완료 시 이 메시지에 reply_to"
 ## 미해결 질문 (사용자 답 필요)
 ```

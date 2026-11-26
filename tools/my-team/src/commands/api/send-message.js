@@ -2,7 +2,12 @@
  * `my-team api send-message` — worker → worker mailbox.
  *
  * Input JSON:
- *   { team_name, from_worker, to_worker, body, reply_to?, expects_reply?, to_team? }
+ *   { team_name, from_worker, to_worker, kind, body, reply_to?, task?, need?, board_error?, to_team? }
+ *
+ * `kind` is required (T54), one of MESSAGE_KINDS but `board` (the board's own notices):
+ *   - question: waits for an answer (sent_pending); answer: reply_to is required.
+ *   - blocked: task and need are required; board_error {code, message} when a board command's refusal is why.
+ *   - closeout, team-handoff: wait for an answer like a question; team-takeover, notice: no answer.
  *
  * `to_worker` must be a worker name in the team. The legacy
  * `leader-fixed` recipient is no longer supported: peer-to-peer model
@@ -37,7 +42,7 @@
 
 import { loadManifest } from '../_manifest.js';
 import { setStateRoot } from '../../lib/state-root.js';
-import { logRefusedTrigger, queueDirectMessage } from '../../lib/tmux-comm.js';
+import { AWAITS_ANSWER, MESSAGE_KINDS, logRefusedTrigger, queueDirectMessage } from '../../lib/tmux-comm.js';
 import { appendMessageEvent } from '../../lib/events.js';
 import { sanitizeName, validateTeamName } from '../../lib/team-name.js';
 import { resolvePaneBySessionWorker } from '../../lib/tmux-utils.js';
@@ -92,17 +97,42 @@ function senderFrom(env, teamName, fromWorker) {
     return worker;
 }
 
+const SENDABLE_KINDS = MESSAGE_KINDS.filter((k) => k !== 'board');
+
+/** The kind's own fields, checked: what queueDirectMessage puts on the message beside kind. */
+function kindFieldsOf(input) {
+    const { kind, reply_to, task, need, board_error } = input;
+    if (!SENDABLE_KINDS.includes(kind)) {
+        const why = kind === 'board' ? 'board is sent by the board only' : kind === undefined ? 'kind is required' : `unknown kind ${JSON.stringify(kind)}`;
+        throw new Error(`${why}; kind is one of: ${SENDABLE_KINDS.join(', ')}`);
+    }
+    if (kind === 'answer' && !reply_to) throw new Error('an answer needs reply_to: the message_id it answers');
+    if (kind !== 'blocked') {
+        if (task !== undefined || need !== undefined || board_error !== undefined) {
+            throw new Error('task, need and board_error belong to kind blocked');
+        }
+        return {};
+    }
+    if (typeof task !== 'string' || !task) throw new Error('blocked needs task: the board task that cannot go on');
+    if (typeof need !== 'string' || !need) throw new Error('blocked needs need: what would let it go on');
+    if (board_error !== undefined && (typeof board_error?.code !== 'string' || typeof board_error?.message !== 'string')) {
+        throw new Error('board_error is {code, message}: the code and message of the board command\'s refusal');
+    }
+    return { task, need, ...(board_error ? { board_error: { code: board_error.code, message: board_error.message } } : {}) };
+}
+
 export async function runApiSendMessage(input, deps = {}) {
     const resolvePane = deps.resolvePaneBySessionWorker ?? resolvePaneBySessionWorker;
     const writeEvent = deps.appendMessageEvent ?? appendMessageEvent;
-    const { team_name, to_worker, body, reply_to, expects_reply, to_team, to_session } = input ?? {};
+    const { team_name, to_worker, kind, body, reply_to, to_team, to_session } = input ?? {};
     if (!team_name) throw new Error('team_name is required');
     const from_worker = senderFrom(deps.env ?? process.env, team_name, input?.from_worker);
     if (!to_worker) throw new Error('to_worker is required');
     if (typeof body !== 'string' || !body) throw new Error('body is required');
-    if (expects_reply !== undefined && typeof expects_reply !== 'boolean') {
-        throw new Error('expects_reply must be a boolean when provided');
+    if (input.expects_reply !== undefined) {
+        throw new Error('expects_reply was removed; a question is kind "question", an answer kind "answer" with reply_to.');
     }
+    const fields = kindFieldsOf(input);
     if (to_session !== undefined) {
         throw new Error('to_session was removed; address other teams by name with to_team.');
     }
@@ -115,17 +145,17 @@ export async function runApiSendMessage(input, deps = {}) {
     validateTeamName(team_name);
     const safeFrom = sanitizeName(from_worker);
     const safeTo = sanitizeName(to_worker);
-    const expectsReply = Boolean(expects_reply);
+    const awaitsAnswer = AWAITS_ANSWER.has(kind);
 
     const isCrossTeam = Boolean(to_team);
 
     // Same-team only: with to_team set, an identically-named worker
     // in another team is a different worker entirely, so a reply can resolve.
-    if (!isCrossTeam && safeFrom === safeTo && expectsReply) {
+    if (!isCrossTeam && safeFrom === safeTo && awaitsAnswer) {
         throw new Error(
-            `Self-message with expects_reply=true is not supported (from_worker === to_worker === "${safeFrom}"). ` +
+            `Self-message of kind ${kind} is not supported (from_worker === to_worker === "${safeFrom}"). ` +
             `Self-replies cannot resolve sent_pending because the same worker owns both sides; ` +
-            `use expects_reply=false for self-notifications or send to a peer.`
+            `use kind notice for self-notifications or send to a peer.`
         );
     }
 
@@ -203,22 +233,13 @@ export async function runApiSendMessage(input, deps = {}) {
         recipientPaneId = recipient.pane_id;
     }
 
-    // Soft guard: a body containing '?' usually implies a question. Warn (not
-    // throw) when expects_reply was not explicitly set. The sender remains in
-    // charge — the warning surfaces only on stderr.
-    let expectsReplyHint = null;
-    if (expects_reply === undefined && /[?？]/.test(body)) {
-        expectsReplyHint = 'body contains "?" but expects_reply was not provided — pass expects_reply:true if you need an answer';
-        process.stderr.write(`[my-team] ${expectsReplyHint}\n`);
-    }
-
     const parentDir = manifest.state_root.replace(/\/[^/]+$/, '');
     const message = await queueDirectMessage(
-        team_name, safeFrom, safeTo, body, recipientPaneId, parentDir,
+        team_name, safeFrom, safeTo, kind, body, recipientPaneId, parentDir,
         reply_to ?? null,
-        expectsReply,
         crossTeam,
-        recipientSession
+        recipientSession,
+        fields
     );
 
     // The message is delivered by now: a log line that cannot be made or written is a warning, never an
@@ -238,7 +259,7 @@ export async function runApiSendMessage(input, deps = {}) {
         body,
         message_id: message.message_id,
         reply_to: message.reply_to,
-        expects_reply: message.expects_reply,
+        kind,
         ...eventExtra,
     });
     // Mirror the event into the recipient team's log too. Without this the
@@ -252,7 +273,7 @@ export async function runApiSendMessage(input, deps = {}) {
             body,
             message_id: message.message_id,
             reply_to: message.reply_to,
-            expects_reply: message.expects_reply,
+            kind,
             from_team: team_name,
             ...eventExtra,
         });
@@ -270,9 +291,8 @@ export async function runApiSendMessage(input, deps = {}) {
         delivered_to: safeTo,
         message_id: message.message_id,
         reply_to: message.reply_to,
-        expects_reply: message.expects_reply,
+        kind,
         ...(crossTeam ? { delivered_to_team: crossTeam.toTeam } : {}),
-        ...(expectsReplyHint ? { hint: expectsReplyHint } : {}),
         ...(logWarnings.length ? { warning: `delivered, but ${logWarnings.join('; ')}` } : {}),
     };
 }

@@ -303,10 +303,13 @@ of it left out. The rest of the file is free text for people; the command reads 
 
 - Every non-blank line of the section is `- <before> -> <after>`, each side a comma list, or a list line
   `- T201, T202`: tasks of the goal with no order among them (T222). A listed task with no order line is in the
-  first wave; one an order line names too keeps that order. Any other line is an error with its line number. The section ends at the next `#` or `##` heading; a `## 순서` inside a code fence
+  first wave; one an order line names too keeps that order. Any other line is an error with its line number,
+  the line as written, and in `formats` the forms a line takes (`- T1 -> T2`, `- T1, T2`, `T177:4-7`). The section ends at the next `#` or `##` heading; a `## 순서` inside a code fence
   does not count.
 - A reference is a whole task (`T177`) or numbered items of its ticket (`T181:1`, `T177:4-7`, items 1 to 1000).
 - A goal file without the section is listed with no waves.
+- `goal-order` with `"template":true` returns only `{ ok, template }`: a new goal file (title, 요청, 목표, 가정,
+  `## 순서`) to fill in. Its order lines are placeholders that read as errors until they name tasks.
 - Only regular files count (a link to one too): a directory named `G<n>-x.md` is skipped.
 - One G number in two or more files is one entry: `path` the first by name, `title` null, no waves, and in
   `errors` one `{line: null, text: <path>, reason}` per file. Which file is meant is for a person to fix; the

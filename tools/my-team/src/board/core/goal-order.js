@@ -8,6 +8,26 @@ const HEADING = '## 순서';
 const REF = /^([A-Za-z]\w*)(?::(\d+)(?:-(\d+))?)?$/;
 const MAX_ITEM = 1000; // a ticket's What list; a bigger range would only allocate (R6 L1)
 
+/** The forms a line of the section takes, sent with each line that is none of them (T52, D18). */
+export const ORDER_FORMATS = ['- T1 -> T2', '- T1, T2', 'T177:4-7'];
+
+/** A new goal file (T52, D18): its order section reads as errors until the placeholders are tasks. */
+export const GOAL_TEMPLATE = `# G<n> <title>
+
+## 요청
+<who asked, when, the request in their words>
+
+## 목표
+<what is true when the goal is met>
+
+## 가정
+- <an assumption the tasks rest on>
+
+## 순서
+- <before> -> <after>
+- <task>, <task>
+`;
+
 /** `T177`, `T181:1` or `T177:4-7` -> { ref, task, items } (items null for the whole task), or a reason string. */
 function parseRef(text) {
     const m = REF.exec(text);
@@ -23,7 +43,7 @@ function parseRef(text) {
  * The `## 순서` section as edges and listed refs. Every non-blank line there is `- before -> after`, each side a
  * comma list, or `- T1, T2`: tasks of the goal with no order among them (T222), listed again or not elsewhere.
  * Headings inside ``` fences do not count. A section that is missing gives found: false.
- * @returns {{ found: boolean, edges: { from: object, to: object, line: number }[], listed: object[], invalid: { line: number, text: string, reason: string }[] }}
+ * @returns {{ found: boolean, edges: { from: object, to: object, line: number }[], listed: object[], invalid: { line: number, text: string, reason: string, formats: string[] }[] }}
  */
 export function parseOrder(markdown) {
     const lines = markdown.split(/\r?\n/);
@@ -38,7 +58,7 @@ export function parseOrder(markdown) {
             return;
         }
         if (!inSection || line === '') return;
-        const bad = (reason) => invalid.push({ line: i + 1, text: raw, reason });
+        const bad = (reason) => invalid.push({ line: i + 1, text: raw, reason, formats: ORDER_FORMATS });
         if (fenced || line.startsWith('```')) return bad('code block inside the order section');
         const m = /^[-*]\s+(.*)$/.exec(line);
         if (!m) return bad('expected "- before -> after" or "- T1, T2"');

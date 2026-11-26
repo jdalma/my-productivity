@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { annotate, parseOrder, waves } from '../../src/board/core/goal-order.js';
+import { annotate, GOAL_TEMPLATE, ORDER_FORMATS, parseOrder, waves } from '../../src/board/core/goal-order.js';
 
 const order = (...lines) => `# G1 goal\n\n## 순서\n${lines.map((l) => `- ${l}`).join('\n')}\n`;
 const refsOf = (md) => { const o = parseOrder(md); return waves(o.edges, o.listed).waves.map((w) => w.map((n) => n.ref)); };
@@ -124,6 +124,22 @@ test('syntax errors carry their line numbers', () => {
     assert.equal(r.found, true);
     assert.deepEqual(r.invalid.map((e) => e.line), [4, 5, 6, 7]);
     assert.deepEqual(r.edges.map((e) => [e.from.ref, e.to.ref, e.line]), [['A', 'B', 3]]);
+    // T52 (D18): each error names its line as written and the forms the section takes
+    assert.deepEqual(r.invalid[0], { line: 4, text: 'A -> C', reason: 'expected "- before -> after" or "- T1, T2"', formats: ORDER_FORMATS });
+    assert.deepEqual(ORDER_FORMATS, ['- T1 -> T2', '- T1, T2', 'T177:4-7']);
+    assert.ok(r.invalid.every((e) => e.formats === ORDER_FORMATS));
+});
+
+test('T52: the goal template has an order section that reads as errors until its placeholders are filled', () => {
+    assert.match(GOAL_TEMPLATE, /^# G<n> <title>\n/);
+    const r = parseOrder(GOAL_TEMPLATE);
+    assert.equal(r.found, true);
+    assert.deepEqual([r.edges, r.listed], [[], []]);
+    assert.equal(r.invalid.length, 2);
+    // filled in, it is an order
+    const filled = GOAL_TEMPLATE.replace('<before> -> <after>', 'T1 -> T2').replace('<task>, <task>', 'T3, T4');
+    assert.deepEqual(parseOrder(filled).invalid, []);
+    assert.deepEqual(refsOf(filled), [['T1', 'T3', 'T4'], ['T2']]);
 });
 
 test('an item of a cancelled task does not count as complete', () => {

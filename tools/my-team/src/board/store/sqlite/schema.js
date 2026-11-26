@@ -102,4 +102,13 @@ CREATE INDEX decisions_state ON decisions("state");
         to: 6,
         sql: `ALTER TABLE tasks ADD COLUMN "deliverable" TEXT;`,
     },
+    {
+        // a check and a rerun as data, and what a landing did not verify (T53)
+        to: 7,
+        sql: `
+ALTER TABLE landings ADD COLUMN "check_detail" TEXT;
+ALTER TABLE landings ADD COLUMN "unverified" TEXT;
+ALTER TABLE verdicts ADD COLUMN "rerun_detail" TEXT;
+`,
+    },
 ];

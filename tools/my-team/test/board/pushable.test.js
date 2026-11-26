@@ -43,7 +43,7 @@ async function world(t) {
     let tick = 0;
     const now = () => new Date(Date.UTC(2026, 10, 11, 0, 0, tick++)).toISOString();
     const as = (actor) => createBoard({ store, roster: () => ROSTER, actor, now, git: gitRange });
-    const land = (id, commit, extra = {}) => as('core').land({ id, repo, commit, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], report: '/r', ...extra });
+    const land = (id, commit, extra = {}) => as('core').land({ id, repo, commit, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], unverified: [], report: '/r', ...extra });
     await as('pm').add({ id: 'T1', title: 'approved', assignee: 'core', reviewer: 'rv', base: c.base });
     await as('core').take({ id: 'T1' });
     await land('T1', c.a2);
@@ -136,7 +136,7 @@ async function worktreeWorld(t) {
     const as = (actor) => createBoard({ store, roster: () => ROSTER, actor, now, git: gitRange });
     await as('pm').add({ id: 'T3', title: 'from a worktree', assignee: 'core', reviewer: 'rv', base: w.c.a2 });
     await as('core').take({ id: 'T3' });
-    await as('core').land({ id: 'T3', repo: wt, commit: s2, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], report: '/r' });
+    await as('core').land({ id: 'T3', repo: wt, commit: s2, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], unverified: [], report: '/r' });
     await as('rv').verdict({ landing: 'T3#1', verdict: 'approve', verified_commit: s2, report: '/R', rerun: { cmd: 'x', result: 'y' }, findings: [] });
     assert.equal((await store.get('landing', 'T3#1')).repo, wt, 'the landing keeps the worktree path it was landed from');
     await store.close();

@@ -12,6 +12,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 
+import { openBoard } from '../../src/board/compose.js';
 import { createBoard } from '../../src/board/core/service.js';
 import { SCHEMA_VERSION, StoreError } from '../../src/board/core/contract.js';
 import { gitRange } from '../../src/board/git.js';
@@ -23,6 +24,8 @@ const needsSqlite = sqlite ? {} : { skip: 'node:sqlite needs Node >= 22.13' };
 const DatabaseSync = sqlite?.Database ?? sqlite?.DatabaseSync;
 const ROSTER = [{ name: 'pm', role: 'orchestrator' }, { name: 'core', role: 'worker' }, { name: 'rv', role: 'worker' }];
 const OLD = SCHEMA_VERSION - 1;
+/** Takes a board.db back one schema: what migration 7 added (T53). */
+const UNDO_LAST_MIGRATION = 'ALTER TABLE landings DROP COLUMN "check_detail"; ALTER TABLE landings DROP COLUMN "unverified"; ALTER TABLE verdicts DROP COLUMN "rerun_detail"';
 
 function scratch(t, prefix) {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -63,7 +66,7 @@ async function oldBoard(file, repo, commits) {
     let tick = 0;
     const now = () => new Date(Date.UTC(2026, 10, 11, 0, 0, tick++)).toISOString();
     const as = (actor) => createBoard({ store, roster: () => ROSTER, actor, now, git: gitRange });
-    const landing = (id, commit) => ({ id, repo, commit, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], report: '/r.md', review_report: '/R.md' });
+    const landing = (id, commit) => ({ id, repo, commit, check: { cmd: 'npm test', result: 'ok' }, focus: ['f'], closes: [], unverified: [], report: '/r.md', review_report: '/R.md' });
     const verdict = (l, commit, v, findings = []) => ({ landing: l, verdict: v, verified_commit: commit, rerun: { cmd: 'npm test', result: 'ok' }, findings });
     await as('pm').add({ id: 'T1', title: 'one', assignee: 'core', reviewer: 'rv', ticket: '/t.md', constraints: 'c', base: commits.base });
     await as('core').take({ id: 'T1' });
@@ -82,7 +85,7 @@ async function oldBoard(file, repo, commits) {
     await store.close();
     const raw = new DatabaseSync(file);
     raw.exec('PRAGMA journal_mode = DELETE');   // one file, so its bytes are the whole board
-    raw.exec(`ALTER TABLE tasks DROP COLUMN "deliverable"; PRAGMA user_version = ${OLD}`);
+    raw.exec(`${UNDO_LAST_MIGRATION}; PRAGMA user_version = ${OLD}`);
     raw.close();
 }
 
@@ -170,7 +173,7 @@ test(`a write command migrates a schema ${OLD} board.db and first leaves board.d
     // a copy that is there is kept: a later migration from the same schema does not write over it
     const kept = readFileSync(bak);
     const raw = new DatabaseSync(w.file);
-    raw.exec(`ALTER TABLE tasks DROP COLUMN "deliverable"; PRAGMA user_version = ${OLD}`);
+    raw.exec(`${UNDO_LAST_MIGRATION}; PRAGMA user_version = ${OLD}`);
     raw.close();
     assert.equal(cli(w.base, 'board-note', { team_name: 'old', body: 'second' }, 'old/pm').code, 0);
     assert.equal(pragma(w.file, 'user_version'), SCHEMA_VERSION);
@@ -215,6 +218,37 @@ test(`a schema ${OLD} board.db in WAL mode, with a writer's connection open, is 
     assert.equal(status.code, 0, status.err);
     assert.equal(status.json.tasks.find((x) => x.id === 'T2').title, 'renamed in the WAL', 'what is in the WAL is read too');
     assert.equal(writer.prepare('PRAGMA user_version').get().user_version, OLD);
-    assert.equal(writer.prepare(`SELECT count(*) AS n FROM pragma_table_info('tasks') WHERE name = 'deliverable'`).get().n, 0);
+    assert.equal(writer.prepare(`SELECT count(*) AS n FROM pragma_table_info('landings') WHERE name = 'unverified'`).get().n, 0);
     writer.exec(`UPDATE tasks SET "title" = 'two' WHERE "id" = 'T2'`);   // and the writer is not locked out
+});
+
+test(`a write on a running team's schema ${OLD} board.db is refused, and migrates once the team is down (T50)`, needsSqlite, async (t) => {
+    const w = await world(t);
+    const saved = process.env.MY_TEAM_STATE_ROOT_BASE;
+    process.env.MY_TEAM_STATE_ROOT_BASE = w.base;
+    t.after(() => { if (saved === undefined) delete process.env.MY_TEAM_STATE_ROOT_BASE; else process.env.MY_TEAM_STATE_ROOT_BASE = saved; });
+    const running = async () => [{ session: 'my-team-old-x', worker: 'core', paneId: '%999' }];
+    const before = readFileSync(w.file);
+
+    await assert.rejects(openBoard('old', { write: true, panes: running }), (err) => {
+        assert.equal(err.code, 'migration-refused');
+        assert.match(err.message, new RegExp(`schema ${OLD}, older than this my-team's ${SCHEMA_VERSION}`));
+        assert.match(err.message, /MY_TEAM_STATE_ROOT_BASE/);
+        assert.match(err.message, /state_root/);
+        assert.match(err.message, /session_name/);
+        assert.match(err.message, /start it again with --continue/);
+        return true;
+    });
+    assert.ok(readFileSync(w.file).equals(before), 'the file is left as it was');
+    assert.deepEqual(readdirSync(w.root).filter((f) => f.endsWith('.bak')), [], 'and no copy is made');
+
+    const read = await openBoard('old', { panes: running });   // a read migrates nothing, so it is not refused
+    await read.close();
+
+    const down = await openBoard('old', { write: true, panes: async () => [] });
+    await down.close();
+    assert.equal(pragma(w.file, 'user_version'), SCHEMA_VERSION);
+
+    const current = await openBoard('old', { write: true, panes: running });   // at SCHEMA_VERSION a running team writes as before
+    await current.close();
 });

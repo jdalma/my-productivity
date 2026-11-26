@@ -2,7 +2,7 @@
 # closeout-context.sh [worker-name]
 # my-team closeout 에 필요한 컨텍스트를 JSON 한 덩어리로 출력한다(읽기 전용).
 # 인자 없음 = 이 pane 의 워커(보고자 모드). 인자 있음 = 그 워커를 조사(수신자 모드).
-# 출력: team, state_root, worker, spawner, orchestrators, tickets(수신한 expects_reply 메시지),
+# 출력: team, state_root, worker, spawner, orchestrators, tickets(수신한 kind question 메시지),
 #       sent_pending, status, report_path(+존재 여부), git(cwd 기준), roster
 set -u
 ID="${MY_TEAM_WORKER:-${OMC_TEAM_WORKER:-}}"
@@ -44,7 +44,7 @@ if arch.exists():
     for l in arch.read_text().splitlines():
         try: e=json.loads(l)
         except Exception: continue
-        if e.get('direction')=='in' and e.get('expects_reply') and not e.get('reply_to'):
+        if e.get('direction')=='in' and e.get('kind')=='question' and not e.get('reply_to'):
             tickets.append({k:e.get(k) for k in ('message_id','from_worker','created_at')}|{'body_head':(e.get('body') or '')[:160]})
 status={}
 sp=pathlib.Path(root)/'workers'/target/'status.json'

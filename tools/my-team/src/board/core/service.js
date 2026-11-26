@@ -34,6 +34,29 @@ const texts = (v, name, { nonEmpty = false } = {}) => {
     return v;
 };
 
+/**
+ * The part of a check or a rerun the board can compare (T53): {counts, failures, excused}, null when `v` gives
+ * none of them. The text (cmd, result) stays what a person reads.
+ */
+function checkDetail(v, name) {
+    if (v?.counts === undefined && v?.failures === undefined && v?.excused === undefined) return null;
+    const count = (k, or) => {
+        const n = v.counts?.[k] ?? or;
+        return Number.isInteger(n) && n >= 0 ? n : fail('invalid', `${name}.counts.${k} must be a whole number, 0 or more`);
+    };
+    const excused = v.excused ?? [];
+    if (!Array.isArray(excused)) fail('invalid', `${name}.excused must be a list of {name, why}`);
+    return {
+        counts: v.counts === undefined ? null : { pass: count('pass'), fail: count('fail'), skip: count('skip', 0) },
+        failures: v.failures === undefined ? null : texts(v.failures, `${name}.failures`),
+        excused: excused.map((e) => ({ name: text(e?.name, `${name}.excused name`), why: text(e?.why, `${name}.excused why`) })),
+    };
+}
+/** Failures counted and not named cannot be compared with anyone's (T53). */
+const unnamedWarning = (d, name) => (d?.counts?.fail > 0 && !d.failures?.length
+    ? `${name}.counts says fail ${d.counts.fail} but ${name}.failures names none: name the failing tests, so the board can compare them`
+    : null);
+
 /** The states a task reports progress in: the assignee has it in hand (T127). */
 const PROGRESS_STATES = ['doing', 'changes'];
 
@@ -439,6 +462,10 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const repo = doc ? '' : text(input.repo, 'repo');
             const commit = doc ? '' : COMMIT.test(input.commit ?? '') ? input.commit : fail('invalid', 'commit must be a full commit hash');
             const check = { cmd: text(input.check?.cmd, 'check.cmd'), result: text(input.check?.result, 'check.result') };
+            const checkData = checkDetail(input.check, 'check');
+            const unverified = input.unverified === undefined
+                ? fail('invalid', 'unverified is required: what you did not check, as a list of sentences; [] when there is none')
+                : texts(input.unverified, 'unverified');
             const focus = texts(input.focus, 'focus', { nonEmpty: true });
             const closes = texts(input.closes ?? [], 'closes');
             const report = text(input.report, 'report');
@@ -495,7 +522,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const row = {
                 id, task_id: task.id, repo, commit, base_commit: base, commits, check_cmd: check.cmd, check_result: check.result,
                 focus, closes, report_path: report, review_report_path: reviewReport, deployed: input.deployed ?? null,
-                left_out: range.commits.filter((c) => !commits.includes(c)), ...created(),
+                left_out: range.commits.filter((c) => !commits.includes(c)), check_detail: checkData, unverified, ...created(),
             };
             const states = { state_from: task.state, state_to: state };
             return {
@@ -503,7 +530,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 changes: { creates: [{ kind: 'landing', row }], updates, log: [log('land', 'landing', id, { ...states, detail: { task: task.id, superseded: previous?.id ?? null } })] },
                 // the judge only: pm hears of a reviewed task at its verdict (R70 L2); and the families it fixes for
                 notify: [...judgesOf(task), ...toldOutside],
-                warnings: [pathWarning('report', report, fileExists)],
+                warnings: [pathWarning('report', report, fileExists), unnamedWarning(checkData, 'check')],
                 result: () => ({ task: { ...task, state }, landing: { ...row, superseded_by: null, version: 1 }, fixed }),
             };
         }),
@@ -523,6 +550,12 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 ? landing.review_report_path ?? fail('invalid', `report is required: ${landing.id} suggests no review report path`)
                 : text(input.report, 'report');
             const rerun = { cmd: text(input.rerun?.cmd, 'rerun.cmd'), result: text(input.rerun?.result, 'rerun.result') };
+            const rerunData = checkDetail(input.rerun, 'rerun');
+            // what failed here and the landing neither named nor excused (T53): a name is compared as it is written,
+            // an excuse covers every failure whose name holds its `name` (a file, for all its tests)
+            const told = landing.check_detail;
+            const excusedNames = [...(told?.excused ?? []), ...(rerunData?.excused ?? [])].map((e) => e.name);
+            const unseen = told ? (rerunData?.failures ?? []).filter((f) => !told.failures?.includes(f) && !excusedNames.some((n) => f.includes(n))) : [];
             const raised = input.findings ?? [];
             if (!Array.isArray(raised)) fail('invalid', 'findings must be a list');
             const reopen = texts(input.reopen ?? [], 'reopen');
@@ -576,7 +609,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const reopenLocks = await outsideLocks([...reopened, ...fixing].filter((f) => !famIds.includes(f.task_id)), new Set(famIds));
             const row = {
                 id: vid, landing_id: landing.id, verdict, verified_commit: landing.commit, report_path: report,
-                rerun_cmd: rerun.cmd, rerun_result: rerun.result, side_notes: input.side_notes ?? null, ...created(),
+                rerun_cmd: rerun.cmd, rerun_result: rerun.result, side_notes: input.side_notes ?? null, rerun_detail: rerunData, ...created(),
             };
             const states = { state_from: task.state, state_to: state };
             return {
@@ -591,6 +624,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                     log: [log('verdict', 'verdict', vid, { ...states, detail: { landing: landing.id, verdict } })],
                 },
                 notify: [...pms(), task.assignee],
+                warnings: [unseen.length && `failures the landing did not name: ${unseen.join(', ')}`, unnamedWarning(rerunData, 'rerun')],
                 result: () => ({ verdict: row, task: { ...task, state }, findings: newFindings.map((f) => f.id), reopened: reopened.map((f) => f.id), fixed: fixing.map((f) => f.id) }),
             };
         }),

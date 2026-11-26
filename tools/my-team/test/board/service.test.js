@@ -65,7 +65,7 @@ async function rejects(promise, code) {
 }
 
 const land = (id, commit, extra = {}) => ({
-    id, repo: '/repo', commit, check: { cmd: 'npm test', result: '1/1' }, focus: ['one'], closes: [],
+    id, repo: '/repo', commit, check: { cmd: 'npm test', result: '1/1' }, focus: ['one'], closes: [], unverified: [],
     report: '/r/c.md', review_report: '/r/R.md', ...extra,
 });
 const judge = (landing, commit, verdict, extra = {}) => ({
@@ -1143,7 +1143,7 @@ both('edit: a finished task stays as it was', async (setup) => {
     await rejects(b.as('pm').edit({ id: 'T2', title: 'late' }), 'invalid-transition');
 });
 
-const report = (id, extra = {}) => ({ id, check: { cmd: 'read the report against the ticket', result: 'every item answered' }, focus: ['one'], closes: [], report: '/r/advice.md', ...extra });
+const report = (id, extra = {}) => ({ id, check: { cmd: 'read the report against the ticket', result: 'every item answered' }, focus: ['one'], closes: [], unverified: [], report: '/r/advice.md', ...extra });
 
 both('a document task lands a report with no commit, is judged, and is done', async (setup) => {
     const b = await setup();
@@ -1332,4 +1332,67 @@ both('land: a report path that is relative or missing is a warning; the landing 
     const gone = await b.as('core', { fileExists: () => false }).land(land('T1', H('2')));
     assert.match(gone.warnings[0], /report \/r\/c.md does not exist/);
     assert.equal((await b.as('core').land(land('T1', H('3')))).warnings, undefined);
+});
+
+// structured checks, excused failures and what was not verified (T53)
+
+both('land keeps the structured check and what was not verified; unverified is required (T53)', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'doing');
+    const { unverified: _, ...without } = land('T1', H('1'));
+    await assert.rejects(b.as('core').land(without), (err) => {
+        assert.equal(err.code, 'invalid');
+        assert.match(err.message, /unverified is required: what you did not check, as a list of sentences; \[\] when there is none/);
+        return true;
+    });
+    const check = (extra) => ({ check: { cmd: 'npm test', result: 'r', ...extra } });
+    for (const bad of [
+        { unverified: 'nothing' }, { unverified: [''] },
+        check({ counts: { pass: 3 } }), check({ counts: { pass: 3, fail: -1 } }), check({ counts: { pass: '3', fail: 0 } }), check({ counts: [3, 0] }),
+        check({ failures: 'a.test.js' }), check({ failures: [''] }),
+        check({ excused: ['deploy.test.js'] }), check({ excused: [{ name: 'deploy.test.js' }] }), check({ excused: [{ name: '', why: 'w' }] }),
+    ]) await rejects(b.as('core').land(land('T1', H('1'), bad)), 'invalid');
+
+    const plain = await b.as('core').land(land('T1', H('1')));
+    assert.deepEqual([plain.landing.check_detail, plain.landing.unverified, plain.warnings], [null, [], undefined], 'cmd and result alone are a check, as before');
+
+    const detail = { counts: { pass: 3, fail: 1 }, failures: ['a.test.js: x'], excused: [{ name: 'deploy.test.js', why: 'the copy has no .git' }] };
+    const r = await b.as('core').land(land('T1', H('2'), { ...check(detail), unverified: ['not run on a real tmux team'] }));
+    assert.deepEqual(r.landing.check_detail, { ...detail, counts: { pass: 3, fail: 1, skip: 0 } });
+    assert.equal(r.warnings, undefined);
+    const stored = await b.store.get('landing', 'T1#2');
+    assert.deepEqual([stored.check_cmd, stored.check_result, stored.check_detail, stored.unverified],
+        ['npm test', 'r', r.landing.check_detail, ['not run on a real tmux team']], 'the text stays beside it');
+
+    const unnamed = await b.as('core').land(land('T1', H('3'), check({ counts: { pass: 3, fail: 2, skip: 1 } })));
+    assert.deepEqual(unnamed.landing.check_detail, { counts: { pass: 3, fail: 2, skip: 1 }, failures: null, excused: [] });
+    assert.match(unnamed.warnings[0], /check\.counts says fail 2 but check\.failures names none/);
+});
+
+both('a verdict keeps its structured rerun and warns of failures the landing did not name (T53)', async (setup) => {
+    const b = await setup();
+    await taskIn(b, 'doing');
+    await b.as('core').land(land('T1', H('1'), {
+        check: { cmd: 'npm test', result: '9 pass, 1 fail', counts: { pass: 9, fail: 1 }, failures: ['flaky: a'], excused: [{ name: 'lint.test.js', why: 'needs the network' }] },
+    }));
+    for (const bad of [{ counts: { fail: 1 } }, { failures: [1] }, { excused: [{ why: 'w' }] }]) {
+        await rejects(b.as('rv').verdict(judge('T1#1', H('1'), 'hold', { rerun: { cmd: 'npm test', result: 'r', ...bad } })), 'invalid');
+    }
+    const rerun = {
+        cmd: 'npm test', result: '6 pass, 4 fail', counts: { pass: 6, fail: 4 },
+        failures: ['flaky: a', 'test/scripts/deploy.test.js: deploy installs the commit', 'test/lint.test.js: lints', 'new: b'],
+        excused: [{ name: 'deploy.test.js', why: 'the copy has no .git' }],
+    };
+    const r = await b.as('rv').verdict(judge('T1#1', H('1'), 'changes', { rerun, findings: [must('M1')] }));
+    assert.deepEqual(r.warnings, ['failures the landing did not name: new: b'], 'not the landing\'s own, nor one either side excused');
+    assert.deepEqual((await b.store.get('verdict', 'R1')).rerun_detail, { counts: { pass: 6, fail: 4, skip: 0 }, failures: rerun.failures, excused: rerun.excused });
+
+    // nothing to compare with: a landing with no structured check
+    await b.as('core').take({ id: 'T1' });
+    await b.as('core').land(land('T1', H('2'), { closes: ['R1 M1'] }));
+    const quiet = await b.as('rv').verdict(judge('T1#2', H('2'), 'approve', { rerun }));
+    assert.equal(quiet.warnings, undefined);
+    const plain = await b.store.get('verdict', 'R1a');
+    assert.equal((await b.store.get('landing', 'T1#2')).check_detail, null);
+    assert.deepEqual(plain.rerun_detail.failures, rerun.failures);
 });

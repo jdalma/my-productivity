@@ -16,7 +16,7 @@ import { runApiMailboxMarkDelivered } from '../../src/commands/api/mailbox-mark-
 import { runApiArchiveLookup } from '../../src/commands/api/archive-lookup.js';
 import { MAILBOX_SCHEMA_VERSION } from '../../src/lib/tmux-comm.js';
 
-const MSG = { message_id: 'm-1', from_worker: 'alice', to_worker: 'bob', body: 'hi', reply_to: null, expects_reply: false, created_at: '2026-01-01T00:00:00Z' };
+const MSG = { message_id: 'm-1', from_worker: 'alice', to_worker: 'bob', body: 'hi', reply_to: null, kind: 'notice', created_at: '2026-01-01T00:00:00Z' };
 
 /** Team t1 of alice and bob. bob has m-1 unread in his mailbox, s-1 in his spool, m-1 in his archive. */
 function setup(t) {

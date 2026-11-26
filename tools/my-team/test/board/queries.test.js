@@ -47,7 +47,7 @@ function both(name, fn) {
 }
 
 const land = (id, commit, extra = {}) => ({
-    id, repo: '/repo', commit, check: { cmd: 'npm test', result: '1/1' }, focus: ['one'], closes: [],
+    id, repo: '/repo', commit, check: { cmd: 'npm test', result: '1/1' }, focus: ['one'], closes: [], unverified: [],
     report: '/r/c.md', review_report: '/r/R.md', ...extra,
 });
 const judge = (landing, commit, verdict, extra = {}) => ({
@@ -390,7 +390,7 @@ both('a document task in board-status: its landing has every field a landing has
     await as('pm').add({ id: 'T1', title: 'advice', assignee: 'core', reviewer: 'rv', deliverable: 'document', ticket: '/t/T.md', constraints: '없음' });
     await as('pm').add({ id: 'T2', title: 'code', assignee: 'core', reviewer: 'rv', ...full });
     for (const id of ['T1', 'T2']) await as('core').take({ id });
-    await as('core').land({ id: 'T1', check: { cmd: 'read', result: 'ok' }, focus: ['one'], closes: [], report: '/r/a.md', review_report: '/r/R.md' });
+    await as('core').land({ id: 'T1', check: { cmd: 'read', result: 'ok' }, focus: ['one'], closes: [], unverified: [], report: '/r/a.md', review_report: '/r/R.md' });
     await as('core').land(land('T2', H('2')));
     assert.deepEqual((await reviewQueue(store, ROSTER, 'rv')).queue.map((r) => [r.landing.id, r.landing.commit, r.previous_commit]), [['T1#1', '', null], ['T2#1', H('2'), null]]);
     await as('rv').verdict({ landing: 'T1#1', verdict: 'changes', report: '/r/R.md', rerun: { cmd: 'read', result: 'ok' }, findings: [] });
@@ -401,7 +401,7 @@ both('a document task in board-status: its landing has every field a landing has
     assert.equal((await reviewQueue(store, ROSTER, 'rv')).queue.find((r) => r.task.id === 'T1').previous_commit, null);
     await as('pm').add({ id: 'T3', title: 'advice', assignee: 'core', reviewer: 'rv', deliverable: 'document', ticket: '/t/T.md', constraints: '없음' });
     await as('core').take({ id: 'T3' });
-    await as('core').land({ id: 'T3', check: { cmd: 'read', result: 'ok' }, focus: ['one'], closes: [], report: '/r/a.md', review_report: '/r/R.md' });
+    await as('core').land({ id: 'T3', check: { cmd: 'read', result: 'ok' }, focus: ['one'], closes: [], unverified: [], report: '/r/a.md', review_report: '/r/R.md' });
     await as('rv').verdict({ landing: 'T3#1', verdict: 'approve', report: '/r/R.md', rerun: { cmd: 'read', result: 'ok' }, findings: [] });
 
     const all = await status(store, ROSTER);
@@ -430,4 +430,22 @@ both('status with open: unfinished tasks and unanswered decisions only, the whol
     assert.deepEqual(open.tasks.map((t) => t.id).sort(), ['T1', 'T2'], 'a cancelled task is left out');
     assert.deepEqual(open.decisions.map((d) => d.question), ['Still open?'], 'an answered decision is left out');
     assert.deepEqual(open.workers, all.workers, 'loads are counted the same');
+});
+
+both('status: a failure named in three landings or more is listed as repeated (T53)', async ({ store, as }) => {
+    const failing = (names) => ({ check: { cmd: 'npm test', result: 'r', counts: { pass: 1, fail: names.length }, failures: names } });
+    for (const [id, commit] of [['T1', H('1')], ['T2', H('2')], ['T3', H('3')]]) {
+        await as('pm').add({ id, title: id, assignee: 'core', reviewer: 'rv', ...full });
+        await as('core').take({ id });
+        if (id === 'T3') break;
+        await as('core').land(land(id, commit, failing(['flaky: a', `only ${id}`])));
+    }
+    // the reviewer's rerun of T2#1 names it too: the same landing, counted once
+    await as('rv').verdict(judge('T2#1', H('2'), 'approve', { rerun: { cmd: 'npm test', result: 'r', failures: ['flaky: a'] } }));
+    assert.equal((await status(store, ROSTER)).repeated_failures, undefined, 'two landings are not yet a pattern');
+
+    await as('core').land(land('T3', H('3')));
+    await as('rv').verdict(judge('T3#1', H('3'), 'approve', { rerun: { cmd: 'npm test', result: 'r', failures: ['flaky: a'] } }));
+    assert.deepEqual((await status(store, ROSTER)).repeated_failures, [{ name: 'flaky: a', count: 3, landings: ['T1#1', 'T2#1', 'T3#1'] }]);
+    assert.deepEqual((await status(store, ROSTER, { open: true })).repeated_failures?.length, 1, 'with open too: it is what pm acts on');
 });

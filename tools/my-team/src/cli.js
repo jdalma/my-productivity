@@ -9,6 +9,7 @@
  *   api archive-lookup, api roster
  *   api board-status, api board-inbox, api board-review-queue (the team's board, T63)
  *   api goal-order (each goal's task order from its goal file and the board)
+ *   api review-copy (a commit's files in a temporary folder, for a reviewer's rerun)
  *   api board-add, -assign, -take, -note, -land, -verdict, -finding, -cancel, -announce, -wait, -answer, -ask, -decision-edit, -progress, board-pushable
  */
 
@@ -36,6 +37,9 @@ import { runApiBoardReviewQueue } from './commands/api/board-review-queue.js';
 import { runApiBoardWrite } from './commands/api/board-write.js';
 import { runApiBoardPushable } from './commands/api/board-pushable.js';
 import { runApiGoalOrder } from './commands/api/goal-order.js';
+import { runApiReviewCopy } from './commands/api/review-copy.js';
+import { loadManifest, rosterOf } from './commands/_manifest.js';
+import { pmsOf } from './board/core/rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -75,7 +79,28 @@ function parseApiInput(opts) {
  * with --json the error is also {ok:false, code, message} on stdout so the app can branch on the code
  * (docs/board.md, Commands).
  */
-async function boardRun(opts, fn) {
+/**
+ * The send-message input of a blocked message for a board refusal (T54): its task when the input named one,
+ * the refusal as board_error. Printed on stderr beside the error, so the worker copies the code and message
+ * instead of retyping them in a message body.
+ */
+function blockedExample(opts, code, message) {
+    let task = '<task>';
+    try { task = JSON.parse(opts.input)?.id ?? task; } catch { /* the error was the input itself */ }
+    const example = { to_worker: '<orchestrator>', kind: 'blocked', task: String(task), need: '<what would let it go on>',
+        board_error: { code, message }, body: '<one line>' };
+    return JSON.stringify(example).replaceAll("'", "'\\''");
+}
+
+// only a worker's refused write may stop its task: a read, and pm's own command, print no example (T56, R52 L2)
+function refusedWorker() {
+    const pinned = process.env.MY_TEAM_WORKER ?? '';
+    const slash = pinned.indexOf('/');
+    if (slash < 0) return false;
+    try { return !pmsOf(rosterOf(loadManifest(pinned.slice(0, slash)))).includes(pinned.slice(slash + 1)); } catch { return false; }
+}
+
+async function boardRun(opts, fn, mutating) {
     try {
         const result = await fn(parseApiInput(opts));
         emit(result, opts.json);
@@ -85,6 +110,7 @@ async function boardRun(opts, fn) {
         const code = typeof err?.code === 'string' && !err.code.startsWith('ERR_') ? err.code : 'error';
         if (opts.json) console.log(JSON.stringify({ ok: false, code, message: err.message }));
         console.error(`[my-team] error: ${code}: ${err.message}`);
+        if (mutating && refusedWorker()) console.error(`[my-team] if this stops your task, tell your orchestrator: my-team api send-message --input '${blockedExample(opts, code, err.message)}' --json`);
         process.exit(1);
     }
 }
@@ -208,7 +234,7 @@ async function main() {
     const api = program.command('api').description('Internal API used by worker LLMs for peer messaging. Each command\'s --help names its --input fields: required ones, then after ";" optional ones. In a worker process MY_TEAM_WORKER gives team_name and the worker it acts as (worker, from_worker, by): leave them out');
 
     api.command('send-message')
-        .description('[mutating] Send a peer message — drops a spool file, appends sender archive, records sent_pending. Add "to_team":"<team name>" to reach a worker in another running team. Input: to_worker, body; reply_to, expects_reply, to_team')
+        .description('[mutating] Send a peer message — drops a spool file, appends sender archive, records sent_pending. Add "to_team":"<team name>" to reach a worker in another running team. kind: question (waits for an answer) | answer (reply_to required) | blocked (task, need; board_error {code, message} when a board refusal is why) | notice | closeout | team-handoff | team-takeover. Input: to_worker, kind, body; reply_to, task, need, board_error, to_team')
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiSendMessage(parseApiInput(opts)), opts.json));
@@ -237,11 +263,11 @@ async function main() {
         .option('--json', 'JSON output')
         .action(async (opts) => emit(await runApiRoster(parseApiInput(opts)), opts.json));
 
-    const board = (name, description, fn) => api.command(name)
+    const board = (name, description, fn, mutating = false) => api.command(name)
         .description(description)
         .requiredOption('--input <json>', 'JSON payload')
         .option('--json', 'JSON output (errors too: {ok:false, code, message})')
-        .action((opts) => boardRun(opts, fn));
+        .action((opts) => boardRun(opts, fn, mutating));
     board('board-status', '[pure] The team board: every task, each worker\'s load, open findings, recent changes; with "task", that task\'s family. Optional input: task, open', runApiBoardStatus);
     board('board-inbox', '[pure] Your unfinished tasks, your review requests, notes to you and announcements after "since" (pass back "cursor"). Optional input: since', runApiBoardInbox);
     const WRITES = {
@@ -250,8 +276,8 @@ async function main() {
         assign: '(Re)assign (pm): id with assignee → ready; a held task without one → review again; reviewer alone changes the reviewer',
         take: 'Start your task (ready or changes → doing): id',
         note: 'A note: body; id, to (workers told)',
-        land: 'Ask for review of your work: id, commit, check {cmd,result}, focus, report; closes, review_report, base, commits, deployed. A document task: no commit, base or commits',
-        verdict: 'Judge a review request: landing, verdict (approve|changes|hold), verified_commit (none for a document task\'s landing), report, rerun {cmd,result}; findings, reopen',
+        land: 'Ask for review of your work: id, commit, check {cmd,result; counts {pass,fail,skip}, failures, excused [{name,why}]}, focus, report, unverified (what you did not check; [] when none); closes, review_report, base, commits, deployed. A document task: no commit, base or commits',
+        verdict: 'Judge a review request: landing, verdict (approve|changes|hold), verified_commit (none for a document task\'s landing), report, rerun {cmd,result; counts {pass,fail,skip}, failures, excused [{name,why}]}; findings, reopen',
         finding: 'Settle, reopen or record the fix of a finding: id, state; landing (an approved one, with state fixed)',
         cancel: 'Cancel a task (pm): id; findings (backlog|accepted-limit|rejected) for its unsettled ones',
         announce: 'Tell the whole team (pm): body',
@@ -261,10 +287,11 @@ async function main() {
         'decision-edit': 'Correct an open decision (pm or the worker who asked): id (a decision D#…, or a waiting task), and what changed of question, context, options, recommendation, impact, refs; tasks (a D#… only)',
         progress: 'Say where your task is (the assignee, doing or changes): id, item (the ticket\'s numbered item, 0 for work outside them), note, done',
     };
-    for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name));
+    for (const [name, description] of Object.entries(WRITES)) board(`board-${name}`, `[mutating] ${description}`, runApiBoardWrite(name), true);
     board('board-pushable', '[pure] Whether every outgoing commit has an approved review on the board or is within the baseline: commit, upstream (or remote, for a new branch); repo, baseline', runApiBoardPushable);
     board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle. Optional input: goal; template:true prints a new goal file instead', runApiGoalOrder);
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
+    board('review-copy', '[mutating] A copy of a commit\'s files in a new temporary folder, for a rerun away from every working tree; it has no .git. Input: commit; repo (default: the current folder\'s), install (true: npm ci in every folder with a package-lock.json, or a list of those folders)', runApiReviewCopy);
 
     try {
         await program.parseAsync(process.argv);

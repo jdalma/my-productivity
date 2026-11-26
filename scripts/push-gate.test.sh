@@ -57,7 +57,7 @@ const roster = [{ name: "pm", role: "orchestrator" }, { name: "core", role: "wor
 const as = (actor) => createBoard({ store, roster: () => roster, actor, now: () => new Date().toISOString(), git: gitRange, notify: async () => [] });
 await as("pm").add({ id, title: id, assignee: "core", reviewer: "rv", base });
 await as("core").take({ id });
-await as("core").land({ id, repo, commit, check: { cmd: "c", result: "r" }, focus: ["f"], closes: [], report: "/r" });
+await as("core").land({ id, repo, commit, check: { cmd: "c", result: "r" }, focus: ["f"], closes: [], unverified: [], report: "/r" });
 await as("rv").verdict({ landing: `${id}#1`, verdict: "approve", verified_commit: commit, report: "/R", rerun: { cmd: "c", result: "r" }, findings: [] });
 await store.close();
 ' "$my_team_dir" "$work/state/gt" "$(git rev-parse --show-toplevel)" "$1" "$2" "$3"

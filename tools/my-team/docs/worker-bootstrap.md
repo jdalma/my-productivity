@@ -57,14 +57,14 @@ my-team start --config my-team.json
 | `## Team Roster` | 모든 워커 한 줄씩: `- **name** [agent_type] — role`. role은 config의 `description` (없으면 `extra_prompt` 첫 줄). 최신 로스터가 `mailbox-list` 응답의 `roster`라는 점은 메일박스 절이 말한다. WORKER role은 "로스터에 보인다고 메시지 보낼 이유는 아니다"(orchestrator 경유)로, peer 팀은 "범위 밖이면 그 피어에게 직접 보내라"로 분기 |
 | `## Liveness` | `status.json` 갱신 안내 (`my-team status`가 읽는다). 막히면 `{"state": "blocked", "reason": "..."}`를 쓰고 pane stdout에 알린다 |
 | `## Message Protocol` | user와는 pane stdout과 CLI 확인 프롬프트로 말한다. peer 채널을 api send-message 하나로 제한하는 금지(`tmux send-keys`, `my-team msg`)는 `## Rules`에 있다 |
-| `## Message Protocol > Talk to other workers via CLI API` | 6개 명령 한 줄씩 (send-message 1-way / send-message expects_reply / 답장 / mailbox-list / mark-delivered / archive-lookup) |
+| `## Message Protocol > Talk to other workers via CLI API` | 6개 명령 한 줄씩 (send-message kind notice / kind question / kind answer 답장 / mailbox-list / mark-delivered / archive-lookup). `kind`는 필수이고 틀리면 오류가 받을 수 있는 목록을 알려 준다 |
 | `### Messaging a worker in ANOTHER team (cross-team)` | 다른 팀 워커에게 보내는 방법. orchestrator와 역할 없는 peer 팀에만 있고, WORKER에는 없다 |
 | `### All worker-to-worker messaging is ASYNCHRONOUS` | 절대 블로킹하지 말라는 원칙 — **작업판이 없는 팀만** |
 | `### Message correlation` | message_id / reply_to / sent_pending 메커니즘 설명 — 작업판이 없는 팀만 |
 | `### MANDATORY — Mailbox self-poll discipline` | 사이클 끝마다 + new-message 트리거 받을 때 mailbox-list, 처리 후 mark-delivered — 작업판이 없는 팀만 |
 | `### Handling a received message — reply_to resolution order` | sent_pending hit → archive-lookup 순서 — 작업판이 없는 팀만 |
-| `### Asking several peers` | broadcast는 없다. 여럿에게 물으려면 각자에게 `expects_reply`로 보낸다 — 작업판이 없는 팀만 |
-| `### Mailbox: questions and notices only` | 위 네 절(비동기, correlation, self-poll, reply_to 해석)과 여럿에게 묻기를 불릿으로 압축한 절. archive-lookup의 direction 해석, 못 찾은 reply_to는 pane에 남기기, `expects_reply: false`에는 답장하지 않기를 포함한다 — **작업판 팀만** |
+| `### Asking several peers` | broadcast는 없다. 여럿에게 물으려면 각자에게 kind question으로 보낸다 — 작업판이 없는 팀만 |
+| `### Mailbox: questions and notices only` | 위 네 절(비동기, correlation, self-poll, reply_to 해석)과 여럿에게 묻기를 불릿으로 압축한 절. archive-lookup의 direction 해석, 못 찾은 reply_to는 pane에 남기기, question·closeout·team-handoff가 아닌 kind에는 답장하지 않기, 막힌 태스크를 kind `blocked`(task, need, board_error)로 알리기를 포함한다 — **작업판 팀만** |
 | `## Team Role: ORCHESTRATOR` | 위임 규율 + cross-team 게이트웨이 + **Team changes**(합류 보고 1통을 받아 사용자에게 stdout으로 알림, 파일 겹침은 관리하지 않음) — `workerRole`이 non-null일 때만 |
 | `## Team Board` | 작업판 사용법. config `board`가 있는 팀에만 |
 | `## Team Role: WORKER` | 오케스트레이터에게만 blocked/done 보고, 파일 조율 없음(워크트리가 워킹 트리를 분리하므로 피어에게 편집 중인 파일을 묻지 않음), 합류 시 자기소개 금지 — `workerRole`이 non-null일 때만 |

@@ -1,6 +1,6 @@
 ---
 name: my-team-takeover
-description: /my-team-handoff로 저장한 팀 handoff 묶음(~/.my-team/handoffs/{team}/)을 재기동된 팀의 PM(orchestrator)이 로드·검증하고, 결정 필요 항목을 사용자와 정리한 뒤 워커별 재개 브리프를 메일박스로 전달한다. 두 상황에서 반드시 사용한다. (1) PM — 같은 config로 my-team start 한 뒤 PM pane에서 사용자가 "/my-team-takeover", "팀 takeover", "지난번 팀 작업 이어서", "handoff 로드해서 워커들한테 나눠줘" 라고 하면 실행한다. (2) 워커 — 메일박스에 본문이 `[team-takeover]`로 시작하는 메시지가 도착한 워커는 이 스킬의 §B 절차로 브리프를 받아 재개한다. 단일 pane의 /takeover나 워커 1명 복구(/my-team-resume)와 다르다 — 팀 전체 재기동 후의 로드 전용이다.
+description: /my-team-handoff로 저장한 팀 handoff 묶음(~/.my-team/handoffs/{team}/)을 재기동된 팀의 PM(orchestrator)이 로드·검증하고, 결정 필요 항목을 사용자와 정리한 뒤 워커별 재개 브리프를 메일박스로 전달한다. 두 상황에서 반드시 사용한다. (1) PM — 같은 config로 my-team start 한 뒤 PM pane에서 사용자가 "/my-team-takeover", "팀 takeover", "지난번 팀 작업 이어서", "handoff 로드해서 워커들한테 나눠줘" 라고 하면 실행한다. (2) 워커 — 메일박스에 kind가 `team-takeover`인 메시지가 도착한 워커는 이 스킬의 §B 절차로 브리프를 받아 재개한다. 단일 pane의 /takeover나 워커 1명 복구(/my-team-resume)와 다르다 — 팀 전체 재기동 후의 로드 전용이다.
 ---
 
 # my-team takeover — 팀 재기동 후 로드 · 검증 · 재배분
@@ -18,7 +18,7 @@ echo "worker=$MY_TEAM_WORKER state_root=$MY_TEAM_STATE_ROOT"
 ```
 
 비어 있으면 my-team 워커 pane이 아니다 — 알리고 중단한다.
-`[team-takeover]` 메시지로 호출됐으면 **§B**, 사용자가 호출했으면 **§A**.
+kind `team-takeover` 메시지로 호출됐으면 **§B**, 사용자가 호출했으면 **§A**.
 
 ---
 
@@ -95,15 +95,15 @@ D1. <질문> (출처 <워커>, 막히는 것 <항목>)
 워커마다 한 통:
 
 ```bash
-my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<w>",
- "body":"[team-takeover] 상태 파일=<bundle>/workers/<w>.md. 수신 절차=my-team-takeover 스킬 §B.\nPM 검증: <유효|부분 stale: 파일들|stale>. shutdown 이후 커밋: <없음|요약>.\n재개 범위: <항목들>\n보류: <항목> (D<n> 미결)\n결정 반영: D<n>=<답> → <영향>\n의존: <누구>의 <무엇> 대기 / <누구>에게 <무엇> 제공\n처리됨 추정(재작업 금지): <항목>"}' --json
+my-team api send-message --input '{"team_name":"<team>","from_worker":"<me>","to_worker":"<w>","kind":"team-takeover",
+ "body":"상태 파일=<bundle>/workers/<w>.md. 수신 절차=my-team-takeover 스킬 §B.\nPM 검증: <유효|부분 stale: 파일들|stale>. shutdown 이후 커밋: <없음|요약>.\n재개 범위: <항목들>\n보류: <항목> (D<n> 미결)\n결정 반영: D<n>=<답> → <영향>\n의존: <누구>의 <무엇> 대기 / <누구>에게 <무엇> 제공\n처리됨 추정(재작업 금지): <항목>"}' --json
 ```
 
 원칙:
 - **경로 + PM 분석만.** 상태 파일 본문은 복사하지 않는다 — 워커가 읽는다.
 - **그 워커에 해당하는 결정만.** 팀 전체 결정 목록을 뿌리지 않는다.
 - 사용자가 재개하지 않기로 한 워커에게는 보내지 않는다.
-- `expects_reply`는 끈다. 워커가 상태 파일과 코드의 어긋남을 발견하면 그때 워커가 질문한다.
+- `team-takeover`는 답을 기다리지 않는다. 워커가 상태 파일과 코드의 어긋남을 발견하면 그때 워커가 질문한다.
 
 ### A7. 종료 보고
 
@@ -111,11 +111,11 @@ pane에 한 줄씩: 브리프 보낸 워커, 보류·미배분 항목, 사용자
 
 ---
 
-## B. 워커 절차 (`[team-takeover]` 메시지를 받은 pane)
+## B. 워커 절차 (kind `team-takeover` 메시지를 받은 pane)
 
 1. 메시지가 가리킨 상태 파일을 읽는다. PM의 메시지가 파일보다 우선한다 — 결정 반영·보류·처리됨 추정은 PM이 사용자와 정리한 최신 정보다.
 2. Relevant Files를 실제로 열어 파일의 서술과 대조한다. 특히 PM이 `부분 stale`로 지목한 파일.
-3. 어긋남이 작업 전제를 바꾸면 PM에게 `expects_reply`로 한 통에 묶어 묻고, 답이 올 때까지 그 항목은 손대지 않는다. 사소한 라인 drift는 묻지 않고 넘어간다.
+3. 어긋남이 작업 전제를 바꾸면 PM에게 kind `question`으로 한 통에 묶어 묻고, 답이 올 때까지 그 항목은 손대지 않는다. 사소한 라인 drift는 묻지 않고 넘어간다.
 4. `mailbox-mark-delivered` 후 **재개 범위**에 있는 항목만 진행한다. 보류 항목은 시작하지 않는다.
 5. pane에 한 줄: 무엇부터 재개하는지.
 

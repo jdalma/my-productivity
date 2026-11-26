@@ -14,6 +14,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { runRemoveWorker } from '../../src/commands/remove-worker.js';
+import { MAILBOX_SCHEMA_VERSION } from '../../src/lib/tmux-comm.js';
 
 function setupTeam({ teamName = 't1', workers = ['alice', 'bob', 'carol'] } = {}) {
     const base = mkdtempSync(join(tmpdir(), 'my-team-test-'));
@@ -52,10 +53,10 @@ function cleanup(ctx) {
 function seedPendingQuestion(ctx, from, to) {
     mkdirSync(join(ctx.stateRoot, 'mailbox'), { recursive: true });
     writeFileSync(join(ctx.stateRoot, 'mailbox', `${from}.json`), JSON.stringify({
-        schema_version: 2,
+        schema_version: MAILBOX_SCHEMA_VERSION,
         worker: from,
         inbox: {},
-        sent_pending: { 'msg-1': { to_worker: to, body: 'still there?', expects_reply: true, sent_at: '2026-01-01T00:00:00Z' } },
+        sent_pending: { 'msg-1': { to_worker: to, body: 'still there?', kind: 'question', sent_at: '2026-01-01T00:00:00Z' } },
     }), 'utf-8');
 }
 

@@ -94,7 +94,7 @@ test('one task from add to approve through the CLI: notices to the right workers
     as(base, 'core', 'board-take', { id: 'T1' });
     const c1 = repo.commit('one');
     const l1 = as(base, 'core', 'board-land', {
-        id: 'T1', commit: c1, check: { cmd: 'npm test', result: '1/1' }, focus: ['the change'], closes: [],
+        id: 'T1', commit: c1, check: { cmd: 'npm test', result: '1/1' }, focus: ['the change'], closes: [], unverified: [],
         report: '/r/T1.md', review_report: '/r/R1.md',
     });
     assert.deepEqual([l1.landing.repo, l1.landing.commits, l1.task.state], [repo.dir, [c1], 'review']);
@@ -105,7 +105,7 @@ test('one task from add to approve through the CLI: notices to the right workers
     as(base, 'core', 'board-take', { id: 'T1' });
     const c2 = repo.commit('two');
     const l2 = as(base, 'core', 'board-land', {
-        id: 'T1', commit: c2, check: { cmd: 'npm test', result: '2/2' }, focus: ['M1'], closes: ['R1 M1'],
+        id: 'T1', commit: c2, check: { cmd: 'npm test', result: '2/2' }, focus: ['M1'], closes: ['R1 M1'], unverified: [],
         report: '/r/T1.md', review_report: '/r/R1.md', base: c1,
     });
     assert.deepEqual(l2.fixed, ['R1 M1']);
@@ -117,8 +117,8 @@ test('one task from add to approve through the CLI: notices to the right workers
     const notices = { pm: spool(root, 'pm'), core: spool(root, 'core'), rv: spool(root, 'rv') };
     assert.deepEqual(Object.fromEntries(Object.entries(notices).map(([w, n]) => [w, n.length])), { pm: 2, core: 3, rv: 2 }, 'R70 L2: 7 a cycle; land goes to the reviewer only');
     for (const n of Object.values(notices).flat()) {
-        assert.match(n.body, /^\[board\] T1(#\d)? (add|land)$|^\[board\] R1a? verdict$/, n.body);
-        assert.equal(n.expects_reply, false);
+        assert.match(n.body, /^T1(#\d)? (add|land)$|^R1a? verdict$/, n.body);
+        assert.equal(n.kind, 'board');
     }
     assert.deepEqual(notices.core.map((n) => n.from_worker).sort(), ['pm', 'rv', 'rv']);
 
@@ -147,7 +147,7 @@ test('write commands refuse what the worker may not do, as JSON errors', { skip:
     assert.deepEqual(run('core', 'board-add', { title: 'x' }).json.code, 'forbidden');
     as(base, 'pm', 'board-add', { id: 'T1', title: 'first', single: true, assignee: 'core', reviewer: 'rv', base: base0, ticket: '/t', constraints: 'c' });
     as(base, 'core', 'board-take', { id: 'T1' });
-    const missing = run('core', 'board-land', { id: 'T1', commit: 'f'.repeat(40), check: { cmd: 'x', result: 'y' }, focus: ['f'], closes: [], report: '/r', review_report: '/R' });
+    const missing = run('core', 'board-land', { id: 'T1', commit: 'f'.repeat(40), check: { cmd: 'x', result: 'y' }, focus: ['f'], closes: [], unverified: [], report: '/r', review_report: '/R' });
     assert.deepEqual([missing.code, missing.json.code], [1, 'invalid']);
     assert.match(missing.json.message, /no commit/);
     const posing = run('core', 'board-take', { id: 'T1', by: 'rv' });
@@ -168,7 +168,7 @@ test('through the CLI: pm edits a task; a document task lands from a folder that
         assert.equal(r.status, 1, r.stdout);
         return JSON.parse(r.stdout);
     };
-    const handIn = { check: { cmd: 'read it against the ticket', result: 'every item answered' }, focus: ['the advice'], closes: [], report: '/r/T1.md' };
+    const handIn = { check: { cmd: 'read it against the ticket', result: 'every item answered' }, focus: ['the advice'], closes: [], unverified: [], report: '/r/T1.md' };
 
     // rv's folder is no repository: a task that needs commits cannot land from it, with or without a commit
     as(base, 'pm', 'board-add', { id: 'T1', title: 'advice', single: true, assignee: 'rv', reviewer: 'core', ticket: '/t/T1.md', base: base0 });
@@ -184,7 +184,7 @@ test('through the CLI: pm edits a task; a document task lands from a folder that
     assert.equal(done.task.state, 'done');
     assert.equal(refused('pm', 'board-edit', { id: 'T1', title: 'late' }).code, 'invalid-transition');
 
-    assert.deepEqual(spool(root, 'rv').map((n) => n.body), ['[board] T1 add', '[board] T1 edit', '[board] R1 verdict']);
+    assert.deepEqual(spool(root, 'rv').map((n) => n.body), ['T1 add', 'T1 edit', 'R1 verdict']);
     const status = as(base, 'pm', 'board-status', {});
     assert.deepEqual(status.recent.map((e) => e.action), ['add', 'take', 'edit', 'land', 'verdict']);
     assert.deepEqual(status.recent[2].detail.changed.deliverable, { from: null, to: 'document' });

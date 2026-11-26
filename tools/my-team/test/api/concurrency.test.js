@@ -79,7 +79,7 @@ test('SCENARIO A: 20 concurrent senders → one recipient, every spool file surv
     try {
         const results = await Promise.all(
             senders.map((s, i) =>
-                runApiSendMessage({
+                runApiSendMessage({ kind: 'notice',
                     team_name: ctx.teamName,
                     from_worker: s,
                     to_worker: 'bob',
@@ -114,7 +114,7 @@ test('SCENARIO A: concurrent sends do not corrupt the recipient mailbox JSON', a
     try {
         await Promise.all(
             senders.map((s) =>
-                runApiSendMessage({
+                runApiSendMessage({ kind: 'notice',
                     team_name: ctx.teamName,
                     from_worker: s,
                     to_worker: 'bob',
@@ -142,7 +142,7 @@ test('SCENARIO C: interleaved mailbox-list + mark-delivered preserves every arch
         const sendResults = [];
         for (let i = 0; i < 10; i++) {
             sendResults.push(
-                await runApiSendMessage({
+                await runApiSendMessage({ kind: 'notice',
                     team_name: ctx.teamName,
                     from_worker: 'alice',
                     to_worker: 'bob',
@@ -187,7 +187,7 @@ test('SCENARIO C: interleaved mailbox-list + mark-delivered preserves every arch
 test('SCENARIO C: concurrent mailbox-list calls on a worker do not crash', async () => {
     const ctx = setupTeam();
     try {
-        await runApiSendMessage({
+        await runApiSendMessage({ kind: 'notice',
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', body: 'hi',
         });
         const results = await Promise.all([

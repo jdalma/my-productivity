@@ -9,6 +9,7 @@
  *   api archive-lookup, api roster
  *   api board-status, api board-inbox, api board-review-queue (the team's board, T63)
  *   api goal-order (each goal's task order from its goal file and the board)
+ *   api review-copy (a commit's files in a temporary folder, for a reviewer's rerun)
  *   api board-add, -assign, -take, -note, -land, -verdict, -finding, -cancel, -announce, -wait, -answer, -ask, -decision-edit, -progress, board-pushable
  */
 
@@ -36,6 +37,7 @@ import { runApiBoardReviewQueue } from './commands/api/board-review-queue.js';
 import { runApiBoardWrite } from './commands/api/board-write.js';
 import { runApiBoardPushable } from './commands/api/board-pushable.js';
 import { runApiGoalOrder } from './commands/api/goal-order.js';
+import { runApiReviewCopy } from './commands/api/review-copy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -279,6 +281,7 @@ async function main() {
     board('board-pushable', '[pure] Whether every outgoing commit has an approved review on the board or is within the baseline: commit, upstream (or remote, for a new branch); repo, baseline', runApiBoardPushable);
     board('goal-order', '[pure] Each goal\'s task order: waves from the `## 순서` section of ~/.my-team/docs/<team>/goals/G<n>-*.md with board state, ready_now, cycle. Optional input: goal', runApiGoalOrder);
     board('board-review-queue', '[pure] The review requests you judge, each with what the review needs (ticket, commits, focus, findings)', runApiBoardReviewQueue);
+    board('review-copy', '[mutating] A copy of a commit\'s files in a new temporary folder, for a rerun away from every working tree; it has no .git. Input: commit; repo (default: the current folder\'s), install (true: npm ci in every folder with a package-lock.json, or a list of those folders)', runApiReviewCopy);
 
     try {
         await program.parseAsync(process.argv);

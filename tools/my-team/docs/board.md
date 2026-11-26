@@ -22,10 +22,14 @@ with `board-unavailable` before any file is made.
   migrates the file, and first leaves a copy of it beside it: `board.db.v<n>.bak`, n the schema before. A copy
   already there is kept.
 - A board file a newer my-team migrated is refused by an older one (`schema-too-new`), for every team that
-  uses it. So a my-team of another version than the installed one (a branch under work or review) is never run
-  on a running team's board: try it on a copy in a temporary folder, with `MY_TEAM_STATE_ROOT_BASE` set to
-  that folder and the copied manifest's `state_root` changed to the copy's own folder. `state_root` is an
-  absolute path, so a copied manifest still names the running team's board.
+  uses it. So a write that would migrate the board of a running team (one of its worker panes is alive) is
+  refused (`migration-refused`), and the file is left as it is. `start --continue` migrates it while the team
+  is down, so a team restarted on a newer my-team writes at once; a write while the team is down migrates it too.
+  A my-team of another version than the installed one (a branch under work or review) is tried on a copy in
+  a temporary folder, with `MY_TEAM_STATE_ROOT_BASE` set to that folder, the copied manifest's `state_root`
+  changed to the copy's own folder and its `session_name` to one no tmux session has. `state_root` is an
+  absolute path, so a copied manifest still names the running team's board; and a copy that names the
+  running team's session reads as running too.
 - The board needs Node 22.13 or later (23.4 on the 23 line) for `node:sqlite`. On an older Node, only the
   board commands fail (`board-unavailable`), and the rest of my-team runs as before.
 - Workers of a board team find a `## Team Board` section in their AGENTS.md. It tells them which commands
@@ -280,6 +284,7 @@ also printed on stdout as `{"ok": false, "code", "message"}`.
 | `conflict` | someone changed the same task three times while this command ran; run it again |
 | `board-unavailable` | the team has no board, or this Node has no `node:sqlite` |
 | `busy` | the board file stayed locked for 5 seconds |
+| `migration-refused` | a write would migrate the board of a running team: run it on a copy of the team's state, or restart the team with `start --continue` |
 | `schema-too-new` | a newer my-team wrote this board: install a newer my-team, or put back the copy its migration left (`board.db.v<n>.bak`) |
 | `invalid-row`, `invalid-query`, `store` | a bug in my-team; report it |
 | `error` | any other failure (a Node error, an unreadable manifest); the message says what |

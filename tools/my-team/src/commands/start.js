@@ -39,7 +39,7 @@ import { lastHandoff, sendStartupNotices, startupNotice } from '../lib/startup-n
 import { mailAndState } from './status.js';
 import { decisionsOf } from '../board/core/queries.js';
 import { TERMINAL } from '../board/core/rules.js';
-import { openBoardFileReadonly } from '../board/compose.js';
+import { migrateBoardFile, openBoardFileReadonly } from '../board/compose.js';
 
 /** AGENT_TYPE → CLI binary name + install hint. */
 export const AGENT_CLI = {
@@ -157,6 +157,11 @@ export async function prepareStateRoot(stateRoot, { keep }) {
     if (keep) {
         if (!existsSync(stateRoot)) {
             console.log(`[my-team] --continue: no previous state at ${stateRoot}; starting a new team.`);
+        } else if (existsSync(join(stateRoot, 'board.db'))) {
+            // the team is down here (runStart's running guard): the one time its board may move to this schema (T50)
+            await migrateBoardFile(join(stateRoot, 'board.db')).catch((err) => {
+                console.warn(`[my-team] --continue: the board was not migrated (${err.message}); its board commands may fail.`);
+            });
         }
     } else if (existsSync(stateRoot)) {
         if (!isSafeToWipe(stateRoot)) {

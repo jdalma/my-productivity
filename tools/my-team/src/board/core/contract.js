@@ -4,9 +4,11 @@
  * The checks below are shared so every adapter accepts and refuses the same rows.
  *
  * A store is an object with these async methods:
- *   open({readonly})            make the store usable; create or migrate its schema, unless `readonly`: then the
+ *   open({readonly, beforeMigrate})
+ *                               make the store usable; create or migrate its schema, unless `readonly`: then the
  *                               stored board is left as it is, read as the migration would leave it, and apply() is
- *                               refused (T159). Safe to call again and
+ *                               refused (T159). beforeMigrate(version), when given, is awaited before a stored board
+ *                               of an older schema is migrated; it may throw MigrationRefused (T50). Safe to call again and
  *                               from several processes at once. A schema newer than SCHEMA_VERSION: SchemaTooNew
  *   close()                     release it; safe to call twice
  *   describe()                  { adapter, schema_version, location, board_id }; board_id is made once when
@@ -127,6 +129,8 @@ export class StoreError extends Error {
 export class Conflict extends StoreError { constructor(m) { super(m, 'conflict'); } }
 export class Busy extends StoreError { constructor(m) { super(m, 'busy'); } }
 export class SchemaTooNew extends StoreError { constructor(m) { super(m, 'schema-too-new'); } }
+/** open()'s beforeMigrate refused to move the board to this schema (T50: its team is running). */
+export class MigrationRefused extends StoreError { constructor(m) { super(m, 'migration-refused'); } }
 export class InvalidQuery extends StoreError { constructor(m) { super(m, 'invalid-query'); } }
 export class InvalidRow extends StoreError { constructor(m) { super(m, 'invalid-row'); } }
 /** The store cannot run here at all (a Node without its driver): every board command fails, the rest of my-team runs. */

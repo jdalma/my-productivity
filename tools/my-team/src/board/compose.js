@@ -42,7 +42,8 @@ export async function openBoard(teamName, { write = false, panes = listPanes } =
             + 'a write would migrate it, and the my-team the team runs would then refuse it. Run this my-team on a copy: copy '
             + `${manifest.state_root} into a temporary folder, set MY_TEAM_STATE_ROOT_BASE to that folder, and in the copied manifest.json `
             + "change state_root to the copy's own folder (it is an absolute path) and session_name to one no tmux session has (the copy "
-            + 'is running too while it names this one). Or shut the team down first; reads work as they are.',
+            + "is running too while it names this one). Or shut the team down and start it again with --continue: start migrates its "
+            + 'board. Reads work as they are.',
         );
     };
     await store.open({ readonly: !write, beforeMigrate });
@@ -54,6 +55,16 @@ export async function openBoardFileReadonly(file) {
     const store = createSqliteStore(file);
     await store.open({ readonly: true });
     return store;
+}
+
+/**
+ * A board.db opened for writing once, outside any team's manifest, so it is migrated to this my-team's schema:
+ * start --continue does it while the team is down (T50 R51 M1), since a write of the running team is refused.
+ */
+export async function migrateBoardFile(file) {
+    const store = createSqliteStore(file);
+    await store.open();
+    await store.close();
 }
 
 /** The write service for `actor`, with the team's notices, events and git checks wired in. */

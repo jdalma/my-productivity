@@ -11,6 +11,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdi
 import { tmpdir, homedir } from 'os';
 import { join, dirname, basename } from 'path';
 
+import { SCHEMA_VERSION } from '../../src/board/core/contract.js';
 import { createSqliteStore } from '../../src/board/store/sqlite/index.js';
 
 import { isSafeToWipe, backupAndRemoveStateRoot, backupPathFor, prepareStateRoot, unfinishedBoardSummary, runStart } from '../../src/commands/start.js';
@@ -257,6 +258,25 @@ test('--continue keeps mail (undelivered too), work files and events as they are
         assert.equal(readFileSync(join(stateRoot, 'work', 'notes.md'), 'utf-8'), 'half done\n');
         assert.equal(readFileSync(join(stateRoot, 'events.jsonl'), 'utf-8'), '{"ts":"run-1"}\n');
         assert.deepEqual(backups(stateRoot), []);
+    } finally {
+        rmSync(base, { recursive: true, force: true });
+    }
+});
+
+test('--continue migrates a board.db of an older schema, and leaves the copy beside it (T50 R51 M1)', needsSqlite, async () => {
+    const { base, stateRoot } = makeStateRoot();
+    try {
+        const file = join(stateRoot, 'board.db');
+        const store = createSqliteStore(file);
+        await store.open();
+        await store.close();
+        const raw = new sqlite.DatabaseSync(file);
+        raw.exec(`ALTER TABLE tasks DROP COLUMN "deliverable"; PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+        raw.close();
+        await prepareStateRoot(stateRoot, { keep: true });
+        const version = (f) => { const db = new sqlite.DatabaseSync(f); try { return db.prepare('PRAGMA user_version').get().user_version; } finally { db.close(); } };
+        assert.equal(version(file), SCHEMA_VERSION, 'the restarted team writes to its board at once: no migration is left for a running team');
+        assert.equal(version(`${file}.v${SCHEMA_VERSION - 1}.bak`), SCHEMA_VERSION - 1);
     } finally {
         rmSync(base, { recursive: true, force: true });
     }

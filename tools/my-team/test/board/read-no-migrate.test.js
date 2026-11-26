@@ -234,6 +234,7 @@ test(`a write on a running team's schema ${OLD} board.db is refused, and migrate
         assert.match(err.message, /MY_TEAM_STATE_ROOT_BASE/);
         assert.match(err.message, /state_root/);
         assert.match(err.message, /session_name/);
+        assert.match(err.message, /start it again with --continue/);
         return true;
     });
     assert.ok(readFileSync(w.file).equals(before), 'the file is left as it was');

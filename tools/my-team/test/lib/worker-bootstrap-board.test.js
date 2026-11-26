@@ -5,6 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { generateWorkerOverlay } from '../../src/lib/worker-bootstrap.js';
 
@@ -36,17 +37,20 @@ test('a worker of a board team: inbox on a board notice (kind board), take, land
     assert.match(text, /send-message/, 'questions and decisions still go by message');
     assert.match(text, /board-review-queue[\s\S]*board-verdict/, 'any worker may be a task\'s reviewer');
     assert.match(text, /code, severity and a repro command/);
-    assert.match(text, /give each review request to one[^\n]*one sub-agent per request at the same time[^\n]*the verdict is yours/);
-    assert.match(text, /Every rerun[^\n]*on a copy of the submitted commit in a folder of its own[^\n]*git archive[^\n]*install the dependencies[^\n]*never in a working tree that a worker or another sub-agent uses[^\n]*The copy has no \.git/);
+    // B9 (T55): the reviewer's procedure is read when reviewing, in the my-team skill
+    assert.match(text, /Before you judge a landing, read "Reviewing a landing" in the `my-team` skill[^\n]*`review-copy`[^\n]*never in a working tree/);
+    assert.doesNotMatch(text, /mktemp|git archive/);
     assert.doesNotMatch(text, /board-add/, 'adding tasks is pm\'s');
     // T43 (D15, D16): how to run a command is said once; team_name and the worker come from MY_TEAM_WORKER
     assert.match(text, /Run a command as `my-team api <command> --input '<json>' --json`[^\n]*Leave team_name and yourself[^\n]*MY_TEAM_WORKER gives them[^\n]*--help` lists every field/);
     assert.doesNotMatch(text, /"team_name\\?":\\?"demo/, 'no command repeats the team');
     assert.match(text, /without "since"/, 'R71 R3: a lost cursor');
     // R71 R1: the reviewer's rules after a verdict
-    assert.match(text, /Do not send pm or the assignee a message about a verdict/);
+    // A4 (T55): what the board tells whom is said once, for every role
+    assert.match(text, /\nThe board tells whom it concerns: a land the reviewer[^\n]*a verdict the assignee and pm\. Do not relay review requests or fix requests, nor send a message about a verdict\./);
     assert.match(text, /assigned to you or that you landed[^\n]*send-message/);
-    assert.match(text, /open must finding/);
+    // C11 (T55): the refusal says how to settle an open must finding (service.test.js)
+    assert.doesNotMatch(text, /open must finding/);
     assert.match(text, /left_out[^\n]*next_verdict/);
     assert.match(text, /"reopen"/);
     // R71a L1, L2
@@ -69,10 +73,12 @@ test('every --input example is one single-quoted JSON a shell passes as is (R71 
 test('an orchestrator of a board team: tasks through board-add, no relaying, decisions as announcements, recovery from board-status', () => {
     const text = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
     for (const re of [/board-add/, /ticket[^\n]*constraints[^\n]*base[^\n]*reviewer/, /없음/, /Do not relay review requests or fix requests/,
-        /never the same worker/, /assign yourself[^\n]*reviewer/,
         /board-announce/, /board-finding[^\n]*backlog/, /board-status/]) {
         assert.match(text, re);
     }
+    // C10 (T55): board-add and board-land refuse a task its assignee would judge, and say how (service.test.js)
+    assert.doesNotMatch(text, /never the same worker/);
+    assert.equal(text.match(/Do not relay review requests/g).length, 1, 'A4: once');
 });
 
 test('a board team hands out, reports and follows work on the board: no line of the role or of the add-worker recipe sends it by message', () => {
@@ -86,7 +92,9 @@ test('a board team hands out, reports and follows work on the board: no line of 
     assert.doesNotMatch(plain, /board-assign them to the successor/);
 
     assert.match(pm, /Delegate in ticket form[^\n]*put on the board as one task[^\n]*One task = one deliverable/);
-    assert.match(pm, /when a task is done the board tells you at its verdict[^\n]*read the task's progress on the board/);
+    assert.match(pm, /at most a question when it is blocked; the rest reaches you on the board/);
+    assert.match(pm, /Delegate in ticket form: a ticket file \(what it holds: Spawn protocol, Rules\)/, 'A1: the ticket file is described in the Spawn protocol');
+    assert.equal(pm.match(/expected deliverable/g).length, 1, 'A1: once');
     assert.match(dev, /Message your orchestrator ONLY when you need a decision[^\n]*tells you to tell or ask pm something[^\n]*Do not message when a task is done: board-land records it[^\n]*at the verdict[^\n]*board-progress/);
     assert.match(dev, /in the report you land \(the `report` of board-land\)/);
     assert.match(pm, /Then put its work on the board as a task assigned to it \(board-add, or board-assign to move one\)/);
@@ -143,7 +151,8 @@ test('T203: a worker corrects an open decision it asked, and pm any, with board-
     assert.match(dev, /open decision you asked[^\n]*correct that entry instead of asking a new one[^\n]*board-decision-edit[^\n]*D#… or the waiting task[^\n]*pm is told/);
     assert.doesNotMatch(dev, /instead of withdrawing it/);
     const pm = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
-    assert.match(pm, /instead of withdrawing it and asking again[^\n]*board-decision-edit[^\n]*only the fields that changed[^\n]*An answered decision is not edited/);
+    assert.match(pm, /Correct any open decision[^\n]*the same way \(board-decision-edit, As a worker\), instead of withdrawing it and asking again[^\n]*An answered decision is not edited/);
+    assert.equal(pm.match(/`board-decision-edit` \(/g).length, 1, 'A5: the command and its fields once');
 });
 
 test('T127: a worker leaves progress by the ticket\'s item numbers; pm writes numbered items and reads progress', () => {
@@ -176,17 +185,19 @@ test('T158: a worker lands a document task without a commit, a reviewer judges i
 test('T159: every worker is told not to run another my-team version on a running board, and how to try it on a copy', () => {
     for (const role of ['worker', 'orchestrator']) {
         const text = overlay('dev', role, { board: { store: 'sqlite' } });
-        assert.match(text, /Never run a my-team of another version[^\n]*running team's board[^\n]*MY_TEAM_STATE_ROOT_BASE[^\n]*AND change `state_root`/);
-        assert.match(text, /changes my-team itself is verified on a copy[^\n]*sub-agent/);
+        assert.match(text, /Never run a my-team of another version[^\n]*running team's board[^\n]*MY_TEAM_STATE_ROOT_BASE[^\n]*AND change `state_root`[^\n]*and `session_name`/);
+        // A6, D17 (T55): a migrating write is refused while the team runs (read-no-migrate.test.js); said once
+        assert.equal(text.match(/running team's board/g).length, 1);
     }
 });
 
 test('pm of a board team: goal files with an order section, ready_now from goal-order with the team filled in', () => {
     const text = overlay('pm', 'orchestrator', { board: { store: 'sqlite' } });
-    assert.match(text, /goal file `~\/\.my-team\/docs\/demo\/goals\/G<n>-<slug>\.md`[^\n]*## 순서[^\n]*- <before> -> <after>/);
-    assert.match(text, /holds only lines `- <before> -> <after>`, and `- T1, T2` for tasks with no order among them/);
-    assert.match(text, /first write a goal file[^\n]*names every task, then add the tasks with `"goal":"G<n>"`/);
-    assert.match(text, /A task with no `parent`[^\n]*board-add refuses it[^\n]*`"single":true`/);
+    // D18, C14 (T55): goal-order prints a goal file and lists the line forms; board-add says what a task with no parent needs
+    assert.match(text, /goal file `~\/\.my-team\/docs\/demo\/goals\/G<n>-<slug>\.md` \(`goal-order` with `"template":true` prints one\) whose `## 순서` names every task, then add the tasks with `"goal":"G<n>"`/);
+    assert.match(text, /no order among them go on one line `- T1, T2`: never invent an order/);
+    assert.match(text, /`"single":true` instead of goal/);
+    assert.doesNotMatch(text, /board-add refuses it/);
     assert.match(text, /read `ready_now`[^\n]*`goal-order`/);
     assert.match(text, /`cycle` or `errors`[^\n]*`cancelled`[^\n]*rewrite its `## 순서` section/);
     assert.doesNotMatch(text, /<team>/, 'the team name is filled in, not left as a placeholder');
@@ -212,6 +223,21 @@ test('T226: every render forbids creating tmux panes or sessions; a board team\'
         assert.match(mailbox, /`blocked` \(a task you cannot go on with:\s+`task`, `need`, and the `board_error` a refused board command prints\)/, name);
         assert.doesNotMatch(renders[name], /expects_reply|\[board\]|\[closeout\]/, name);
     }
+});
+
+test('T55: a land names its unchecked parts and the check as data; the reviewer procedure lives in the my-team skill', () => {
+    const dev = overlay('dev', 'worker', { board: { store: 'sqlite' } });
+    assert.match(dev, /`board-land` \([^)]*check \{cmd, result, counts, failures, excused\}[^)]*unverified\)/);
+    assert.match(dev, /`board-verdict` \([^)]*rerun \{cmd, result, counts, failures, excused\}/);
+    const skill = readFileSync(new URL('../../../../plugins/workflow/skills/my-team/SKILL.md', import.meta.url), 'utf-8');
+    const section = skill.split('### Reviewing a landing')[1]?.split('\n## ')[0] ?? '';
+    for (const re of [/sub-agent를 동시에/, /직접 돌린다/, /review-copy/, /working tree에서는 돌리지 않는다/, /`excused`/, /board 사본/, /brief에 그대로/]) assert.match(section, re);
+});
+
+test('E21 (T55, D#25): in a board team a blocked task waits on the board; status.json blocked is for a block no task explains', () => {
+    const dev = overlay('dev', 'worker', { board: { store: 'sqlite' } });
+    assert.match(dev, /## Liveness[\s\S]*A task you cannot go on with waits on the board \(board-wait\)[\s\S]*only for a block no task explains/);
+    assert.match(overlay('dev', 'worker'), /When blocked, write \{"state": "blocked"/, 'a team without a board keeps its one channel');
 });
 
 test('T46, T47 (R44 L1, R46 S1): every overlay says how to write a quote inside a single-quoted --input, by closing and reopening the quote only', () => {

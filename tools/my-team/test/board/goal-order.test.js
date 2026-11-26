@@ -126,7 +126,9 @@ test('syntax errors carry their line numbers', () => {
     assert.deepEqual(r.edges.map((e) => [e.from.ref, e.to.ref, e.line]), [['A', 'B', 3]]);
     // T52 (D18): each error names its line as written and the forms the section takes
     assert.deepEqual(r.invalid[0], { line: 4, text: 'A -> C', reason: 'expected "- before -> after" or "- T1, T2"', formats: ORDER_FORMATS });
-    assert.deepEqual(ORDER_FORMATS, ['- T1 -> T2', '- T1, T2', 'T177:4-7']);
+    assert.deepEqual(ORDER_FORMATS, ['- T1 -> T2', '- T1, T2', '- T1:4-7 -> T2:1']);
+    // R50 L1: a line written as a format reads, never refused again
+    for (const f of ORDER_FORMATS) assert.deepEqual(parseOrder(`## 순서\n${f}\n`).invalid, [], f);
     assert.ok(r.invalid.every((e) => e.formats === ORDER_FORMATS));
 });
 

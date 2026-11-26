@@ -431,12 +431,15 @@ both('cancel: the task\'s own unsettled findings must be settled with it; its un
 both('a worker is never the judge of its own task', async (setup) => {
     const b = await setup();
     await rejects(b.as('pm').add({ title: 't', assignee: 'core', reviewer: 'core' }), 'invalid');
+    // C10 (T55): the refusal says how to fix it, so AGENTS.md need not
+    await assert.rejects(b.as('pm').add({ title: 't', assignee: 'core', reviewer: 'core' }), /cannot review their own task: name another worker as reviewer/);
     await b.as('pm').add({ id: 'T1', title: 't', assignee: 'core', reviewer: 'rv' });
     await rejects(b.as('pm').assign({ id: 'T1', reviewer: 'core' }), 'invalid');
     await rejects(b.as('pm').assign({ id: 'T1', assignee: 'rv' }), 'invalid');
     await b.as('pm').add({ id: 'T2', title: 'pm work', assignee: 'pm', base: BASE });
     await b.as('pm').take({ id: 'T2' });
     await rejects(b.as('pm').land(land('T2', H('1'))), 'invalid', 'pm with no reviewer would judge itself');
+    await assert.rejects(b.as('pm').land(land('T2', H('1'))), /give T2 a reviewer first/);
     await b.as('pm').assign({ id: 'T2', reviewer: 'rv' });
     await b.as('pm').land(land('T2', H('1')));
 });
@@ -880,6 +883,8 @@ both('approve: refused while the family has an open must finding, from any of it
     await b.as('app').take({ id: 'T1a' });
     await b.as('app').land(land('T1a', H('5')));
     await rejects(b.as('rv').verdict(judge('T1a#1', H('5'), 'approve')), 'invalid');
+    // C11 (T55): the refusal names the way out, so AGENTS.md need not
+    await assert.rejects(b.as('rv').verdict(judge('T1a#1', H('5'), 'approve')), /Answer changes, or have pm settle them with board-finding \(backlog, accepted-limit, rejected\)/);
     await rejects(b.as('rv').verdict(judge('T1a#1', H('5'), 'approve', { findings: [must('M9')] })), 'invalid');
     await b.as('pm').finding({ id: 'R1 M1', state: 'backlog' });
     assert.equal((await b.as('rv').verdict(judge('T1a#1', H('5'), 'approve'))).task.state, 'done');

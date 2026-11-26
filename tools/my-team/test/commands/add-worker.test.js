@@ -363,7 +363,7 @@ test('refuses a --cwd an existing worker already uses, before any side effect', 
         const deps = okDeps({ addWorkerPane: async () => { split = true; return { paneId: '%9' }; } });
         await assert.rejects(
             () => runAddWorker(validOpts(), deps),
-            /already used by 'alice'.*--worktree/s
+            /already used by 'alice'.*--worktree.*--allow-shared-cwd is the user's decision, not a worker's/s
         );
         assert.equal(split, false, 'refused before the pane split — no side effect');
         assert.equal(readManifest(ctx).workers.length, 1, 'manifest untouched');

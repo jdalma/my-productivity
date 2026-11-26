@@ -14,6 +14,7 @@
  * - open({ readonly: true }) never changes the file (T159): a read of a board must not move it to a schema the
  *   my-team installed for everyone else refuses. A file behind SCHEMA_VERSION is copied into memory and migrated
  *   there; a file that is not there yet reads as an empty board and is not made. apply() is refused.
+ * - open({ beforeMigrate }) awaits it before a file that holds a board of an older schema is migrated (T50).
  * - A migration of a file that holds a board first leaves a copy beside it, <file>.v<n>.bak (n its schema before);
  *   a copy already there is kept.
  * - node:sqlite needs Node 22.13 / 23.4; on an older Node, open() throws Unavailable and only the board stops.
@@ -204,7 +205,7 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
     }
 
     return {
-        async open({ readonly: forReading = false } = {}) {
+        async open({ readonly: forReading = false, beforeMigrate = async () => {} } = {}) {
             if (db) return;
             let mod;
             try {
@@ -219,6 +220,8 @@ export function createSqliteStore(file, { load = loadSqlite, trace = () => {} } 
                 closeSync(openSync(file, 'a', 0o600));
                 db = new Database(file);
                 exec(`PRAGMA busy_timeout = ${BUSY_MS}`);
+                const behind = versionNow();   // before the WAL switch, so a refused migration leaves the file as it is
+                if (behind > 0 && behind < SCHEMA_VERSION) await beforeMigrate(behind);
                 await toWal();
                 migrate();
             } catch (err) {

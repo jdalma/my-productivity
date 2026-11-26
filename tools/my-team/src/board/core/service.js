@@ -254,7 +254,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             const title = text(input.title, 'title');
             const assignee = input.assignee ? member(input.assignee, 'assignee') : null;
             const reviewer = input.reviewer ? member(input.reviewer, 'reviewer') : null;
-            if (assignee && assignee === reviewer) fail('invalid', `${assignee} cannot review their own task`);
+            if (assignee && assignee === reviewer) fail('invalid', `${assignee} cannot review their own task: name another worker as reviewer`);
             if (input.base !== undefined && !COMMIT.test(input.base)) fail('invalid', 'base must be a full commit hash');
             const deliverable = input.deliverable === undefined ? null : deliverableOf(input.deliverable);
             const priority = input.priority ?? 100;
@@ -340,7 +340,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
             if (input.assignee === undefined && input.reviewer === undefined && task.state !== 'held') {
                 fail('invalid', 'give assignee or reviewer');
             }
-            if (assignee && assignee === reviewer) fail('invalid', `${assignee} cannot review their own task`);
+            if (assignee && assignee === reviewer) fail('invalid', `${assignee} cannot review their own task: name another worker as reviewer`);
             if (input.reviewer !== undefined && assignee && judgesOf({ reviewer }).every((j) => j === assignee)) {
                 fail('invalid', `without a reviewer only ${assignee}, the assignee, could judge ${task.id}; name another reviewer`);
             }
@@ -604,7 +604,7 @@ export function createBoard({ store, roster, actor, now, git, notify = async () 
                 const pendingOutside = (f) => f.state === 'fixed' && !famLandings.has(f.fixed_in) && !approvedIds.has(f.fixed_in);
                 const must = [...findings.filter((f) => f.state === 'open' || reopened.some((r) => r.id === f.id) || pendingOutside(f)), ...newFindings]
                     .filter((f) => f.severity === 'must').map((f) => f.id);
-                if (must.length) fail('invalid', `cannot approve with open must findings in the family: ${must.join(', ')}`);
+                if (must.length) fail('invalid', `cannot approve with open must findings in the family: ${must.join(', ')}. Answer changes, or have pm settle them with board-finding (backlog, accepted-limit, rejected)`);
             }
             const reopenLocks = await outsideLocks([...reopened, ...fixing].filter((f) => !famIds.includes(f.task_id)), new Set(famIds));
             const row = {

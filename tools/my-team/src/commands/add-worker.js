@@ -167,7 +167,7 @@ export async function runAddWorker(opts, deps = {}) {
                 `--cwd ${opts.cwd} is already used by ${sharing.map((w) => `'${w.name}'`).join(', ')}. `
                 + 'Two workers in one working tree overwrite each other silently (same branch, so git '
                 + 'never reports a conflict). Use --worktree <branch> to give this worker its own '
-                + 'working tree, or pass --allow-shared-cwd if they will not edit the same files.'
+                + 'working tree. --allow-shared-cwd is the user\'s decision, not a worker\'s.'
             );
         }
     }

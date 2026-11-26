@@ -8,8 +8,8 @@ const HEADING = '## 순서';
 const REF = /^([A-Za-z]\w*)(?::(\d+)(?:-(\d+))?)?$/;
 const MAX_ITEM = 1000; // a ticket's What list; a bigger range would only allocate (R6 L1)
 
-/** The forms a line of the section takes, sent with each line that is none of them (T52, D18). */
-export const ORDER_FORMATS = ['- T1 -> T2', '- T1, T2', 'T177:4-7'];
+/** The forms a line of the section takes, sent with each line that is none of them (T52, D18); each one is a line (R50 L1). */
+export const ORDER_FORMATS = ['- T1 -> T2', '- T1, T2', '- T1:4-7 -> T2:1'];
 
 /** A new goal file (T52, D18): its order section reads as errors until the placeholders are tasks. */
 export const GOAL_TEMPLATE = `# G<n> <title>

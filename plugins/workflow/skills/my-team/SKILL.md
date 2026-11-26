@@ -132,6 +132,20 @@ my-team은 기본이 **peer-to-peer 모델**이다 (task lifecycle 없음). 채�
 - Node 22.13 이상이 필요하다. 그보다 낮으면 작업판 명령만 `board-unavailable`로 실패한다.
 - 명령표, 오류 코드, 상태 전이, 한 주기 예시는 `tools/my-team/docs/board.md`에 있다.
 
+### Reviewing a landing
+
+작업판 워커의 AGENTS.md가 판정 전에 이 절을 읽으라고 한다. 리뷰할 때만 필요한 절차라 AGENTS.md에 두지 않는다.
+
+- **sub-agent**: CLI에 sub-agent가 있으면 리뷰 요청 하나를 sub-agent 하나에 준다. sub-agent는 티켓과 diff를 대조하고 check를 다시 돌린다. 큐에 요청이 둘 이상이면(결과에 `hint`가 붙는다) 차례로 판정하지 말고 요청마다 sub-agent를 동시에 띄운다. 작은 변경(문서, 한두 줄)은 직접 읽어도 된다.
+- **판정은 본인 것**: verdict에 적는 것(rerun, must 지적마다의 repro)은 기록하기 전에 직접 돌린다.
+- **rerun은 사본에서**: 본인 것이든 sub-agent 것이든 rerun은 제출된 commit의 사본에서 돌린다. 워커나 다른 sub-agent가 쓰는 working tree에서는 돌리지 않는다. 한 tree에서 두 check가 돌면 서로 덮어쓰고, 그 tree에서 checkout하면 주인 워커의 파일이 바뀐다.
+  ```bash
+  my-team api review-copy --input '{"commit":"<commit>","install":true}' --json   # path에 사본, npm ci까지
+  ```
+- **사본에는 .git이 없다**: git 저장소가 있어야 하는 check는 그 이유만으로 실패할 수 있다. 그런 실패는 rerun의 `excused`에 `{"name":"…","why":"no .git in the review copy"}`로 적고 landing의 결함으로 세지 않는다.
+- **my-team 자체를 바꾸는 landing**: 실행 중인 팀의 board가 아니라 임시 폴더의 board 사본에서 확인한다(AGENTS.md Team Board의 다른 버전 규칙).
+- 위 내용을 sub-agent마다 brief에 그대로 적는다.
+
 ## 팀 공통 지식 (`knowledge`)
 
 팀 config 최상위의 `knowledge`(문서마다 `path`와 한 줄 `about`)는 모든 워커의 AGENTS.md에 `## Team Knowledge` 절로 들어간다. start, start --continue, add-worker 모두 같다. 본문은 복사하지 않고 경로와 about만 넣는다. 없는 파일이면 start가 경고하고 계속한다. 문서에는 접속 방법만 두고 키·토큰·비밀번호는 넣지 않는다. 변경 권한은 `deny` 규칙이나 워커 지침으로 따로 제한한다. 설정은 my-team-config 스킬(Step 6a)로 한다.

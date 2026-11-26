@@ -36,7 +36,9 @@ export function runApiReviewCopy(input = {}) {
         try {
             execFileSync('npm', ['ci', '--no-audit', '--no-fund'], { cwd: join(path, dir), stdio: ['ignore', 'pipe', 'pipe'] });
         } catch (err) {
-            throw new BoardError('invalid', `npm ci failed in ${join(path, dir)}: ${String(err.stderr ?? err.message).trim().split('\n').slice(-5).join('\n')}`);
+            // npm writes the code and the cause first, then usage text and the log path (R48 L1)
+            const cause = String(err.stderr ?? err.message).split('\n').filter((l) => l.trim() && l.trim() !== 'npm error').slice(0, 5);
+            throw new BoardError('invalid', `npm ci failed in ${join(path, dir)}: ${cause.join('\n')}`);
         }
     }
     return { ok: true, path, commit, repo, git: existsSync(join(path, '.git')), note: NOTE, installable, installed: wanted };

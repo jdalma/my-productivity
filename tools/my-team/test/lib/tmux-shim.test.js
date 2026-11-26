@@ -138,7 +138,7 @@ test('12:51 again: kill-server without -L from inside a script, TMUX_TMPDIR miss
     writeFileSync(join(s.dir, 'trap.sh'), 'TMUX_TMPDIR=/nonexistent-t56 tmux kill-server\n');
     const r = s.sh(`sh ${join(s.dir, 'trap.sh')}`);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /사용자 tmux 서버에 대한 쓰기 명령은 거부됨\. -L 또는 -S로 격리 서버를 지정/);
+    assert.match(r.stderr, /사용자 tmux 서버에 대한 쓰기 명령은 거부됨\. -L 또는 -S로 격리 서버를 지정\. 다른 워커에게는 my-team api send-message로 보낸다/, 'C12 (T55): the peer channel');
     assert.equal(s.ctlAlive(), true);
 });
 

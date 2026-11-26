@@ -25,7 +25,7 @@ if (tmuxShimVerdict(args).allow) {
     process.exit(r.status ?? 1);
 }
 
-process.stderr.write('사용자 tmux 서버에 대한 쓰기 명령은 거부됨. -L 또는 -S로 격리 서버를 지정\n');
+process.stderr.write('사용자 tmux 서버에 대한 쓰기 명령은 거부됨. -L 또는 -S로 격리 서버를 지정. 다른 워커에게는 my-team api send-message로 보낸다\n');
 const stateRoot = process.env.MY_TEAM_STATE_ROOT;
 if (stateRoot) {
     const [team, worker] = (process.env.OMC_TEAM_WORKER ?? '').split('/');

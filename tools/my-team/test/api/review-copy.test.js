@@ -80,6 +80,15 @@ test('install runs npm ci in the folders asked, and refuses one with no package-
     assert.throws(() => runApiReviewCopy({ commit: 'HEAD', repo, install: ['nope'] }), { code: 'invalid', message: /it has: pkg/ });
 });
 
+test('R48 L1: a failed npm ci names its cause, not the usage text after it', (t) => {
+    const { repo } = repository(t);
+    writeFileSync(join(repo, 'pkg', 'package-lock.json'), 'not json');
+    git(repo, 'commit', '-q', '-am', 'broken lock');
+    assert.throws(() => runApiReviewCopy({ commit: 'HEAD', repo, install: true }),
+        (err) => err.code === 'invalid' && /npm ci failed in [\s\S]*can only install with an existing package-lock\.json/.test(err.message)
+            && !/Usage:|A complete log/.test(err.message));
+});
+
 test('a commit that is not there, or none, is refused', (t) => {
     const { repo } = repository(t);
     assert.throws(() => runApiReviewCopy({ commit: 'abc1234', repo }), { code: 'invalid' });

@@ -97,6 +97,20 @@ test('a team without a board item: board-unavailable, as JSON on stdout and a li
     assert.equal(plain.out, '', 'without --json, stdout stays empty');
 });
 
+test('a refused board command prints the blocked message to send, with its task and the refusal; it sends as is (T54)', needsSqlite, async (t) => {
+    const { base, root } = team(t, 'bb');
+    await fill(root);
+    const r = cli(base, ['board-take', '--input', '{"team_name":"bb","id":"T9"}', '--json'], { worker: 'bb/core' });
+    assert.equal(r.code, 1);
+    const line = r.err.split('\n').find((l) => l.includes('kind'));
+    assert.match(line, /^\[my-team\] if this stops your task, tell your orchestrator: my-team api send-message --input '/);
+    const example = JSON.parse(line.slice(line.indexOf("'") + 1, line.lastIndexOf("'")));
+    assert.deepEqual([example.kind, example.task, example.board_error], ['blocked', 'T9', { code: r.json.code, message: r.json.message }]);
+    const sent = cli(base, ['send-message', '--input', JSON.stringify({ ...example, to_worker: 'pm' }), '--json'], { worker: 'bb/core' });
+    assert.equal(sent.code, 0, sent.err);
+    assert.equal(sent.json.kind, 'blocked');
+});
+
 test('who asks: MY_TEAM_WORKER of another team is refused; without it the input must name the worker', needsSqlite, async (t) => {
     const { base, root } = team(t, 'bt');
     await fill(root);

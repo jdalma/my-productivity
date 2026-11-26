@@ -46,7 +46,8 @@ function renderEvent(raw, team) {
         return `[${ts}] ${entry.worker}: board ${entry.action} ${entry.ref}${move}\n\n`;
     }
     if (entry.type !== 'message') return `[${ts}] ${entry.type} (${entry.worker ?? '?'})\n\n`;
-    const header = `[${ts}] ${entry.from} → ${entry.to}`;
+    // the kind stands where a body prefix like [closeout] used to (T54)
+    const header = `[${ts}] ${entry.from} → ${entry.to} (${entry.kind})`;
     const body = formatBody(entry.body ?? '');
     // Trailing blank line separates this event from the next.
     return `${header}\n${body}\n\n`;

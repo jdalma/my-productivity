@@ -74,7 +74,7 @@ const paneDeps = { resolvePaneBySessionWorker: async () => '%99' };
 test('to_team delivers into the target team spool by TEAM NAME (no session name needed)', async () => {
     const ctx = setup();
     try {
-        const r = await runApiSendMessage({
+        const r = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-a', from_worker: 'pm-a',
             to_team: 'team-b', to_worker: 'pm-b', body: 'hello by name',
         }, paneDeps);
@@ -93,7 +93,7 @@ test('to_team rejects an unknown team with a clear error', async () => {
     const ctx = setup();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'pm-a',
                 to_team: 'team-nope', to_worker: 'ghost', body: 'hi',
             }, paneDeps),
@@ -108,7 +108,7 @@ test('to_team with a dead tmux session fails the send (liveness stays tmux-autho
     const ctx = setup();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'pm-a',
                 to_team: 'team-b', to_worker: 'pm-b', body: 'hi',
             }, { resolvePaneBySessionWorker: async () => { throw new Error('tmux session not found or has no panes.'); } }),
@@ -127,7 +127,7 @@ test('role worker CAN initiate to a sibling worker (same-team peer messaging is 
     try {
         const r = await runApiSendMessage({
             team_name: 'team-a', from_worker: 'dev-a', to_worker: 'aux-a', body: 'does your change touch OrderService?',
-            expects_reply: true,
+            kind: 'question',
         }, paneDeps);
         assert.equal(r.ok, true);
         assert.equal(readSpool(ctx.teamA.stateRoot, 'aux-a').length, 1);
@@ -141,11 +141,11 @@ test('role worker may message its orchestrator, and may REPLY to a sibling', asy
     try {
         const toOrch = await runApiSendMessage({
             team_name: 'team-a', from_worker: 'dev-a', to_worker: 'pm-a',
-            body: 'report', expects_reply: true,
+            body: 'report', kind: 'question',
         }, paneDeps);
         assert.equal(toOrch.ok, true);
 
-        const reply = await runApiSendMessage({
+        const reply = await runApiSendMessage({ kind: 'answer',
             team_name: 'team-a', from_worker: 'dev-a', to_worker: 'aux-a',
             body: 'answering your question', reply_to: 'some-earlier-id',
         }, paneDeps);
@@ -156,10 +156,10 @@ test('role worker may message its orchestrator, and may REPLY to a sibling', asy
     }
 });
 
-test('role worker self-notification (expects_reply=false) still works', async () => {
+test('role worker self-notification (kind notice) still works', async () => {
     const ctx = setup();
     try {
-        const r = await runApiSendMessage({
+        const r = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-a', from_worker: 'dev-a', to_worker: 'dev-a', body: 'note to self',
         }, paneDeps);
         assert.equal(r.ok, true);
@@ -172,7 +172,7 @@ test('role worker cannot send cross-team', async () => {
     const ctx = setup();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'dev-a',
                 to_team: 'team-b', to_worker: 'pm-b', body: 'hi',
             }, paneDeps),
@@ -189,7 +189,7 @@ test('cross-team into a role team must address an orchestrator', async () => {
     const ctx = setup();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-a', from_worker: 'pm-a',
                 to_team: 'team-b', to_worker: 'dev-b', body: 'hi',
             }, paneDeps),
@@ -206,7 +206,7 @@ test('gateway guard applies to legacy senders too (legacy team → role team)', 
     try {
         process.env.MY_TEAM_STATE_ROOT = ctx.teamC.stateRoot;
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: 'team-c', from_worker: 'carol',
                 to_team: 'team-b', to_worker: 'dev-b', body: 'hi',
             }, paneDeps),
@@ -223,13 +223,13 @@ test('legacy team without roles has no guard: worker-to-worker initiation still 
     const ctx = setup();
     try {
         process.env.MY_TEAM_STATE_ROOT = ctx.teamC.stateRoot;
-        const r = await runApiSendMessage({
+        const r = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-c', from_worker: 'carol', to_worker: 'dan', body: 'peer hello',
         }, paneDeps);
         assert.equal(r.ok, true);
         assert.equal(readSpool(ctx.teamC.stateRoot, 'dan').length, 1);
 
-        const cross = await runApiSendMessage({
+        const cross = await runApiSendMessage({ kind: 'notice',
             team_name: 'team-c', from_worker: 'carol',
             to_team: 'team-b', to_worker: 'pm-b', body: 'legacy cross-team to orchestrator',
         }, paneDeps);

@@ -32,7 +32,7 @@ function dropSpool(ctx, worker, id) {
     const file = join(dir, `${id}.json`);
     writeFileSync(file, JSON.stringify({
         message_id: id, from_worker: 'alice', to_worker: worker, body: `body ${id}`,
-        reply_to: null, expects_reply: false, created_at: new Date().toISOString(),
+        reply_to: null, kind: 'notice', created_at: new Date().toISOString(),
     }));
     return file;
 }
@@ -65,7 +65,7 @@ const [team, base, proc, rounds, startAt] = process.argv.slice(1);
 while (Date.now() < Number(startAt)) { /* spin so siblings collide */ }
 for (let j = 0; j < Number(rounds); j++) {
     runApiMailboxMarkDelivered({ team_name: team, worker: 'bob', message_id: 'in-' + proc + '-' + j });
-    await queueDirectMessage(team, 'bob', 'alice', 'q ' + proc + '-' + j, null, base, null, true);
+    await queueDirectMessage(team, 'bob', 'alice', 'question', 'q ' + proc + '-' + j, null, base, null);
     await absorbIncomingSpool(team, 'bob', base);
 }
 `;

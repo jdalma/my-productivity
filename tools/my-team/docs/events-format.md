@@ -25,7 +25,7 @@ appended, and existing lines are never rewritten. The format is defined in one p
 
 | type | written by | required keys | optional keys |
 |---|---|---|---|
-| `message` | `api send-message` | `from`, `to`, `body`, `message_id`, `reply_to`, `expects_reply` | `from_team`, `to_team` |
+| `message` | `api send-message` | `from`, `to`, `body`, `message_id`, `reply_to`, `kind` | `from_team`, `to_team` |
 | `tmux-denied` | the tmux shim on a worker's PATH | `args` | |
 | `tool-denied` | the worker guard hook (`deny` rules) | `tool`, `rule`, `target` | |
 | `board` | a board write command (`api board-*`), after its change is applied | `action`, `kind`, `ref`, `log_seq` | `state_from`, `state_to` |
@@ -52,8 +52,8 @@ appended, and existing lines are never rewritten. The format is defined in one p
 ## Example lines
 
 ```json
-{"ts":"2026-11-11T05:52:08.453Z","type":"message","team":"team-a","worker":"pm","from":"pm","to":"core","body":"[T1 발행] …","message_id":"…","reply_to":null,"expects_reply":false}
-{"ts":"2026-11-11T05:52:09.000Z","type":"message","team":"team-a","worker":"alice","from":"alice","to":"bob","body":"hi","message_id":"…","reply_to":null,"expects_reply":false,"from_team":"team-a","to_team":"team-b"}
+{"ts":"2026-11-11T05:52:08.453Z","type":"message","team":"team-a","worker":"pm","from":"pm","to":"core","body":"[T1 발행] …","message_id":"…","reply_to":null,"kind":"notice"}
+{"ts":"2026-11-11T05:52:09.000Z","type":"message","team":"team-a","worker":"alice","from":"alice","to":"bob","body":"hi","message_id":"…","reply_to":null,"kind":"notice","from_team":"team-a","to_team":"team-b"}
 {"ts":"2026-11-11T04:55:21.414Z","type":"tmux-denied","team":"team-a","worker":"w","args":["kill-session","-t","nothing"]}
 {"ts":"2026-11-11T05:52:11.148Z","type":"tool-denied","team":"team-a","worker":"w","tool":"Write","rule":"repo-write","target":"/…/repo/inside.txt"}
 {"ts":"2026-11-11T08:50:02.000Z","type":"board","team":"team-a","worker":"core","action":"land","kind":"landing","ref":"T1#1","log_seq":3,"state_from":"doing","state_to":"review"}
@@ -65,7 +65,8 @@ appended, and existing lines are never rewritten. The format is defined in one p
 
 | older line | read as |
 |---|---|
-| no `type` (v1: `ts`, `from`, `to`, `body`) | `type: "message"`, `message_id: null`, `reply_to: null`, `expects_reply: false` |
+| no `type` (v1: `ts`, `from`, `to`, `body`) | `type: "message"`, `message_id: null`, `reply_to: null`, `kind: "notice"` |
+| a message with `expects_reply`, no `kind` (before T54) | `kind: "question"` when it was true, else `"notice"` |
 | no `team` | `from_team` when present (a mirrored message), otherwise the log's team |
 | no `worker` on a message | `from` |
 | `from_session` / `to_session` (sends addressed by tmux session) | kept as they are, as optional keys no longer written |

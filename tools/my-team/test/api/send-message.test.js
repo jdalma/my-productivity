@@ -1,16 +1,15 @@
 /**
- * Unit tests for `my-team api send-message` (schema v2, Phase B).
+ * Unit tests for `my-team api send-message` (schema v3: kind, T54).
  *
  * Owner model:
  *   - Sender writes the recipient's incoming-spool file, the sender's own
- *     mailbox.sent_pending (when expects_reply=true), and the sender's own
+ *     mailbox.sent_pending (when the kind awaits an answer), and the sender's own
  *     archive jsonl (direction: out).
  *   - The recipient mailbox.json is NOT touched on send — that happens when
  *     the recipient calls mailbox-list (spool→inbox absorption).
  *
- * Phase B additions:
- *   - expects_reply parameter (default false)
- *   - events.jsonl line carries message_id / reply_to / expects_reply
+ * kind (required): question | answer | blocked | notice | closeout | team-handoff | team-takeover
+ * (board is the board's own); events.jsonl lines carry message_id / reply_to / kind.
  *
  * No tmux pane exists in tests; sendTmuxTrigger silently returns false.
  */
@@ -76,41 +75,99 @@ function readEvents(ctx) {
 
 test('send-message requires team_name', async () => {
     await assert.rejects(
-        () => runApiSendMessage({ from_worker: 'alice', to_worker: 'bob', body: 'hi' }),
+        () => runApiSendMessage({ kind: 'notice', from_worker: 'alice', to_worker: 'bob', body: 'hi' }),
         /team_name is required/
     );
 });
 
 test('send-message requires from_worker', async () => {
     await assert.rejects(
-        () => runApiSendMessage({ team_name: 't1', to_worker: 'bob', body: 'hi' }),
+        () => runApiSendMessage({ kind: 'notice', team_name: 't1', to_worker: 'bob', body: 'hi' }),
         /from_worker is required/
     );
 });
 
 test('send-message requires to_worker', async () => {
     await assert.rejects(
-        () => runApiSendMessage({ team_name: 't1', from_worker: 'alice', body: 'hi' }),
+        () => runApiSendMessage({ kind: 'notice', team_name: 't1', from_worker: 'alice', body: 'hi' }),
         /to_worker is required/
     );
 });
 
 test('send-message requires body', async () => {
     await assert.rejects(
-        () => runApiSendMessage({ team_name: 't1', from_worker: 'alice', to_worker: 'bob' }),
+        () => runApiSendMessage({ kind: 'notice', team_name: 't1', from_worker: 'alice', to_worker: 'bob' }),
         /body is required/
     );
 });
 
-test('send-message rejects non-boolean expects_reply', async () => {
+test('send-message refuses expects_reply: kind replaced it (T54)', async () => {
     const ctx = setupTeam();
     try {
         await assert.rejects(
             () => runApiSendMessage({
-                team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
-                body: 'hi', expects_reply: 'yes',
+                team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'question',
+                body: 'hi', expects_reply: true,
             }),
-            /expects_reply must be a boolean/
+            /expects_reply was removed; a question is kind "question"/
+        );
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('a missing, unknown or board kind is refused with the kinds a sender may use', async () => {
+    const ctx = setupTeam();
+    const send = (extra) => runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', body: 'hi', ...extra });
+    const kinds = /kind is one of: question, answer, blocked, notice, closeout, team-handoff, team-takeover$/;
+    try {
+        await assert.rejects(() => send({}), (e) => /^kind is required;/.test(e.message) && kinds.test(e.message));
+        await assert.rejects(() => send({ kind: 'ask' }), (e) => /^unknown kind "ask";/.test(e.message) && kinds.test(e.message));
+        await assert.rejects(() => send({ kind: 'board' }), /board is sent by the board only;/);
+        assert.deepEqual(readSpoolFiles(ctx, 'bob'), []);
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('an answer needs reply_to', async () => {
+    const ctx = setupTeam();
+    try {
+        await assert.rejects(
+            () => runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'answer', body: 'yes' }),
+            /an answer needs reply_to/
+        );
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('blocked carries task, need and the board refusal; without task or need it is refused', async () => {
+    const ctx = setupTeam();
+    const send = (extra) => runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'blocked', body: 'stuck', ...extra });
+    try {
+        await assert.rejects(() => send({ need: 'x' }), /blocked needs task/);
+        await assert.rejects(() => send({ task: 'T1' }), /blocked needs need/);
+        await assert.rejects(() => send({ task: 'T1', need: 'x', board_error: 'refused' }), /board_error is \{code, message\}/);
+        const r = await send({ task: 'T1', need: 'pm to mark it a document', board_error: { code: 'no-commit', message: 'a landing needs a commit', extra: 1 } });
+        const [m] = readSpoolFiles(ctx, 'bob');
+        assert.equal(m.message_id, r.message_id);
+        assert.equal(m.kind, 'blocked');
+        assert.equal(m.task, 'T1');
+        assert.equal(m.need, 'pm to mark it a document');
+        assert.deepEqual(m.board_error, { code: 'no-commit', message: 'a landing needs a commit' });
+        assert.equal(readMailbox(ctx, 'alice').sent_pending[r.message_id], undefined);   // blocked waits for nothing
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('task, need and board_error belong to blocked only', async () => {
+    const ctx = setupTeam();
+    try {
+        await assert.rejects(
+            () => runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'notice', body: 'hi', task: 'T1' }),
+            /task, need and board_error belong to kind blocked/
         );
     } finally {
         cleanup(ctx);
@@ -120,7 +177,7 @@ test('send-message rejects non-boolean expects_reply', async () => {
 test('send-message drops a message into recipient spool, recipient mailbox untouched', async () => {
     const ctx = setupTeam();
     try {
-        const result = await runApiSendMessage({
+        const result = await runApiSendMessage({ kind: 'notice',
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', body: 'hello',
         });
         assert.equal(result.ok, true);
@@ -142,17 +199,18 @@ test('send-message drops a message into recipient spool, recipient mailbox untou
     }
 });
 
-test('send-message defaults reply_to=null and expects_reply=false', async () => {
+test('send-message writes the kind and defaults reply_to=null', async () => {
     const ctx = setupTeam();
     try {
-        const result = await runApiSendMessage({
+        const result = await runApiSendMessage({ kind: 'notice',
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', body: 'hello',
         });
         assert.equal(result.reply_to, null);
-        assert.equal(result.expects_reply, false);
+        assert.equal(result.kind, 'notice');
         const spool = readSpoolFiles(ctx, 'bob');
         assert.equal(spool[0].reply_to, null);
-        assert.equal(spool[0].expects_reply, false);
+        assert.equal(spool[0].kind, 'notice');
+        assert.equal('expects_reply' in spool[0], false);
     } finally {
         cleanup(ctx);
     }
@@ -161,7 +219,7 @@ test('send-message defaults reply_to=null and expects_reply=false', async () => 
 test('send-message preserves reply_to when provided', async () => {
     const ctx = setupTeam();
     try {
-        const result = await runApiSendMessage({
+        const result = await runApiSendMessage({ kind: 'answer',
             team_name: ctx.teamName, from_worker: 'bob', to_worker: 'alice',
             body: 'here is the answer', reply_to: 'orig-msg-123',
         });
@@ -176,7 +234,7 @@ test('send-message preserves reply_to when provided', async () => {
 test('send-message records direction=out in sender archive', async () => {
     const ctx = setupTeam();
     try {
-        const result = await runApiSendMessage({
+        const result = await runApiSendMessage({ kind: 'notice',
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', body: 'hi',
         });
         const archive = readArchiveLines(ctx, 'alice');
@@ -191,95 +249,83 @@ test('send-message records direction=out in sender archive', async () => {
     }
 });
 
-test('send-message with expects_reply=true populates sender sent_pending', async () => {
+test('a question, a closeout and a team-handoff wait in the sender sent_pending', async () => {
     const ctx = setupTeam();
     try {
         const result = await runApiSendMessage({
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
-            body: '주문 상태 enum 알려줘', expects_reply: true,
+            body: '주문 상태 enum 알려줘', kind: 'question',
         });
-        assert.equal(result.expects_reply, true);
+        assert.equal(result.kind, 'question');
+        const others = [];
+        for (const kind of ['closeout', 'team-handoff']) {
+            others.push(await runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind, body: kind }));
+        }
         const mbox = readMailbox(ctx, 'alice');
         const pending = mbox.sent_pending[result.message_id];
         assert.ok(pending, 'sent_pending entry exists');
         assert.equal(pending.to_worker, 'bob');
-        assert.equal(pending.expects_reply, true);
+        assert.equal(pending.kind, 'question');
         assert.equal(typeof pending.sent_at, 'string');
+        assert.deepEqual(others.map((o) => mbox.sent_pending[o.message_id]?.kind), ['closeout', 'team-handoff']);
     } finally {
         cleanup(ctx);
     }
 });
 
-test('send-message with expects_reply=false does NOT populate sent_pending', async () => {
+test('notice, answer and team-takeover do NOT populate sent_pending', async () => {
     const ctx = setupTeam();
     try {
         const result = await runApiSendMessage({
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
-            body: '작업 완료', expects_reply: false,
+            body: '작업 완료', kind: 'notice',
         });
+        await runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'answer', reply_to: 'x', body: 'a' });
+        await runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'team-takeover', body: 'b' });
         // sender mailbox should either not exist or have empty sent_pending.
         const mboxPath = join(ctx.stateRoot, 'mailbox', 'alice.json');
         if (existsSync(mboxPath)) {
             const mbox = readMailbox(ctx, 'alice');
-            assert.equal(mbox.sent_pending[result.message_id], undefined);
+            assert.deepEqual(mbox.sent_pending, {});
         }
+        assert.equal(result.kind, 'notice');
     } finally {
         cleanup(ctx);
     }
 });
 
-test('send-message returns a hint when body contains "?" but expects_reply is omitted', async () => {
+test('a "?" in a notice is just text: no hint (T54 removed the guess)', async () => {
     const ctx = setupTeam();
     try {
         const result = await runApiSendMessage({
-            team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
+            team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'notice',
             body: '주문 상태 enum 알려줘?',
         });
-        assert.equal(result.expects_reply, false);
-        assert.ok(typeof result.hint === 'string' && result.hint.includes('expects_reply'),
-            `hint should mention expects_reply: ${result.hint}`);
+        assert.equal(result.hint, undefined);
     } finally {
         cleanup(ctx);
     }
 });
 
-test('send-message omits hint when expects_reply was explicitly provided', async () => {
-    const ctx = setupTeam();
-    try {
-        const r1 = await runApiSendMessage({
-            team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
-            body: '주문 상태 enum 알려줘?', expects_reply: true,
-        });
-        assert.equal(r1.hint, undefined);
-        const r2 = await runApiSendMessage({
-            team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
-            body: '진짜 별일 없지?', expects_reply: false,
-        });
-        assert.equal(r2.hint, undefined);
-    } finally {
-        cleanup(ctx);
-    }
-});
-
-test('send-message rejects self-message with expects_reply=true', async () => {
+test('send-message rejects a self-question', async () => {
     const ctx = setupTeam();
     try {
         await assert.rejects(
             () => runApiSendMessage({
                 team_name: ctx.teamName, from_worker: 'alice', to_worker: 'alice',
-                body: '나에게 메모', expects_reply: true,
+                body: '나에게 메모', kind: 'question',
             }),
-            /Self-message with expects_reply=true is not supported/
+            /Self-message of kind question is not supported/
         );
     } finally {
         cleanup(ctx);
     }
 });
 
-test('send-message allows self-message when expects_reply is false (memo)', async () => {
+test('send-message allows a self-notice (memo)', async () => {
     const ctx = setupTeam();
     try {
-        const result = await runApiSendMessage({
+        const result = await runApiSendMessage({ kind: 'notice',
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'alice', body: '나에게 메모',
         });
         assert.equal(result.ok, true);
@@ -293,7 +339,7 @@ test('send-message allows self-message when expects_reply is false (memo)', asyn
 
 test('send-message rejects from_worker made entirely of disallowed characters', async () => {
     await assert.rejects(
-        () => runApiSendMessage({
+        () => runApiSendMessage({ kind: 'notice',
             team_name: 't1', from_worker: '../', to_worker: 'bob', body: 'hi',
         }),
         /no valid characters/
@@ -304,7 +350,7 @@ test('send-message rejects unknown recipient', async () => {
     const ctx = setupTeam();
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: ctx.teamName, from_worker: 'alice', to_worker: 'ghost', body: 'hi',
             }),
             /not in team/
@@ -318,7 +364,7 @@ test('send-message rejects unknown sender (guards against hallucinated from_work
     const ctx = setupTeam(); // roster is alice + bob; "ghost" is not a worker
     try {
         await assert.rejects(
-            () => runApiSendMessage({
+            () => runApiSendMessage({ kind: 'notice',
                 team_name: ctx.teamName, from_worker: 'ghost', to_worker: 'bob', body: 'hi',
             }),
             /Sender 'ghost' not in team/
@@ -328,25 +374,25 @@ test('send-message rejects unknown sender (guards against hallucinated from_work
     }
 });
 
-test('events.jsonl carries message_id, reply_to, expects_reply', async () => {
+test('events.jsonl carries message_id, reply_to, kind', async () => {
     const ctx = setupTeam();
     try {
         const r1 = await runApiSendMessage({
             team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob',
-            body: 'q', expects_reply: true,
+            body: 'q', kind: 'question',
         });
-        const r2 = await runApiSendMessage({
+        const r2 = await runApiSendMessage({ kind: 'answer',
             team_name: ctx.teamName, from_worker: 'bob', to_worker: 'alice',
             body: 'a', reply_to: r1.message_id,
         });
         const events = readEvents(ctx);
         assert.equal(events.length, 2);
         assert.equal(events[0].message_id, r1.message_id);
-        assert.equal(events[0].expects_reply, true);
+        assert.equal(events[0].kind, 'question');
         assert.equal(events[0].reply_to, null);
         assert.equal(events[1].message_id, r2.message_id);
         assert.equal(events[1].reply_to, r1.message_id);
-        assert.equal(events[1].expects_reply, false);
+        assert.equal(events[1].kind, 'answer');
     } finally {
         cleanup(ctx);
     }

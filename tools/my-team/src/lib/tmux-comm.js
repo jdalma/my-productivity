@@ -4,24 +4,27 @@
  *
  * Source: dist/team/tmux-comm.js (low-level functions only)
  *
- * Schema v2 (Phase B — incoming-spool + sent_pending):
+ * Schema v3 (incoming-spool + sent_pending; v3 replaced expects_reply and body prefixes with `kind`, T54):
  *
  *   mailbox/<worker>.json   ← worker-owned (worker is sole writer)
  *     {
- *       "schema_version": 2,
+ *       "schema_version": 3,
  *       "worker": <name>,
- *       "inbox":        { [message_id]: { from_worker, body, reply_to,
- *                                          expects_reply, created_at,
+ *       "inbox":        { [message_id]: { kind, from_worker, body, reply_to,
+ *                                          created_at, task?, need?, board_error?,
  *                                          notified_at?, consumed_at? } },
- *       "sent_pending": { [message_id]: { to_worker, body, expects_reply,
- *                                          sent_at } }
+ *       "sent_pending": { [message_id]: { kind, to_worker, body, sent_at } }
  *     }
  *
  *   incoming-spool/<to_worker>/<message_id>.json   ← sender writes, receiver consumes
  *     {
- *       "message_id", "from_worker", "to_worker", "body",
- *       "reply_to", "expects_reply", "created_at"
+ *       "message_id", "kind", "from_worker", "to_worker", "body",
+ *       "reply_to", "created_at", "task"?, "need"?, "board_error"?
  *     }
+ *
+ *   `kind` (MESSAGE_KINDS) says what a message is. A question, a closeout report and a team-handoff request
+ *   wait for an answer (AWAITS_ANSWER): the sender keeps them in sent_pending until a message with
+ *   reply_to = their id arrives.
  *
  *   archive/<worker>.jsonl  ← worker-owned append-only
  *     One JSON object per line. direction "out" on send, "in" on
@@ -51,7 +54,19 @@ import { TeamPaths, absPath } from './state-paths.js';
 import { atomicWriteJson, appendFileWithMode, ensureDirWithMode } from './fs-utils.js';
 import { appendEvent } from './events.js';
 
-export const MAILBOX_SCHEMA_VERSION = 2;
+export const MAILBOX_SCHEMA_VERSION = 3;
+
+export const MESSAGE_KINDS = ['question', 'answer', 'blocked', 'notice', 'board', 'closeout', 'team-handoff', 'team-takeover'];
+export const AWAITS_ANSWER = new Set(['question', 'closeout', 'team-handoff']);
+
+/** The fields a kind adds to a message, when present: the same list on send, spool and inbox. */
+function kindFields(m) {
+    return {
+        ...(m.task !== undefined ? { task: m.task } : {}),
+        ...(m.need !== undefined ? { need: m.need } : {}),
+        ...(m.board_error !== undefined ? { board_error: m.board_error } : {}),
+    };
+}
 
 function mailboxPath(teamName, workerName, cwd) {
     return absPath(cwd, TeamPaths.mailbox(teamName, workerName));
@@ -294,12 +309,13 @@ function absorbLocked(dir, canonicalPath, workerName) {
         }
         mailbox.inbox[payload.message_id] = {
             message_id: payload.message_id,
+            kind: payload.kind,
             from_worker: payload.from_worker,
             to_worker: payload.to_worker ?? workerName,
             body: payload.body,
             reply_to: payload.reply_to ?? null,
-            expects_reply: Boolean(payload.expects_reply),
             created_at: payload.created_at,
+            ...kindFields(payload),
             // Cross-team origin. Must survive absorption: a reply without
             // `to_team` would be addressed inside the recipient's own team and
             // never reach the asker.
@@ -389,14 +405,14 @@ function newMessageId() {
  * Send a direct message from one worker to another.
  *
  * Owner model:
- *   - Sender writes ONLY: the sender's own mailbox.sent_pending (when
- *     expects_reply), the sender's own archive jsonl, and the recipient's
+ *   - Sender writes ONLY: the sender's own mailbox.sent_pending (when its
+ *     kind awaits an answer), the sender's own archive jsonl, and the recipient's
  *     incoming-spool file.
  *   - The recipient absorbs the spool file into its own inbox on its next
  *     mailbox-list call.
  *
  * Step ordering (crash-safe):
- *   1. Record `sent_pending` on the sender first (only when expectsReply).
+ *   1. Record `sent_pending` on the sender first (only when the kind awaits an answer).
  *      A crash before this step means nothing happened. A crash after it
  *      means the sender shows a pending entry for a message the recipient
  *      will never get — visible to the user and easy to recover.
@@ -405,8 +421,8 @@ function newMessageId() {
  *   3. Drop the spool file. This is the act of delivery.
  *   4. Fire the tmux notification (best-effort; recipient still polls).
  *
- * `replyTo` (optional) is the message_id this answers. `expectsReply`
- * defaults to false; senders set it to true only for questions. `session` is
+ * `kind` is one of MESSAGE_KINDS (the caller checked it and its fields); `fields` carries the kind's own
+ * fields (task, need, board_error). `replyTo` (optional) is the message_id this answers. `session` is
  * the recipient team's tmux session (manifest session_name): the trigger is
  * typed only while toPaneId is still the recipient's pane there. The returned
  * message carries `trigger` ({sent, refused?}); a caller that logs the send logs
@@ -416,24 +432,26 @@ export async function queueDirectMessage(
     teamName,
     fromWorker,
     toWorker,
+    kind,
     body,
     toPaneId,
     cwd,
     replyTo = null,
-    expectsReply = false,
     crossTeam = null,
-    session = null
+    session = null,
+    fields = {}
 ) {
     const messageId = newMessageId();
     const createdAt = new Date().toISOString();
     const message = {
         message_id: messageId,
+        kind,
         from_worker: fromWorker,
         to_worker: toWorker,
         body,
         reply_to: replyTo ?? null,
-        expects_reply: Boolean(expectsReply),
         created_at: createdAt,
+        ...kindFields(fields),
         // Cross-team only. `from_team` is what lets the recipient reply back
         // with `to_team`; without it a reply would be addressed within the
         // recipient's own team and never reach the asker.
@@ -443,13 +461,13 @@ export async function queueDirectMessage(
     // 1. If we expect a reply, track it on our own sent_pending FIRST so a
     //    later failure cannot leave the recipient with a message that the
     //    sender doesn't know it sent.
-    if (expectsReply) {
+    if (AWAITS_ANSWER.has(kind)) {
         updateMailbox(teamName, fromWorker, cwd, (senderMailbox) => {
             senderMailbox.sent_pending[messageId] = {
                 message_id: messageId,
+                kind,
                 to_worker: toWorker,
                 body,
-                expects_reply: true,
                 sent_at: createdAt,
             };
         });

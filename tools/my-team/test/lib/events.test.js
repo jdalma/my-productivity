@@ -23,7 +23,7 @@ function lines(root) {
 test('every kind of line carries ts, type, team and worker (a)', async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'mt-events-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
-    await appendMessageEvent(root, { team: 'tt', from: 'pm', to: 'core', body: 'hi', message_id: 'm1', reply_to: null, expects_reply: false });
+    await appendMessageEvent(root, { team: 'tt', from: 'pm', to: 'core', body: 'hi', message_id: 'm1', reply_to: null, kind: 'notice' });
     await appendEvent(root, { type: 'tmux-denied', team: 'tt', worker: 'rv', args: ['kill-server'] });
     await appendEvent(root, { type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push', target: 'git push' });
     const [m, x, y] = lines(root);
@@ -38,7 +38,7 @@ test('every kind of line carries ts, type, team and worker (a)', async (t) => {
 
 test('a key the format does not list is an error, and so is a missing one (b)', () => {
     assert.throws(() => eventLine({ type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push', target: 'x', extra: 1 }), /extra/);
-    assert.throws(() => eventLine({ type: 'message', team: 'tt', worker: 'pm', from: 'pm', to: 'core', body: 'x', message_id: 'm', reply_to: null, expects_reply: false, to_session: 's' }), /to_session/);
+    assert.throws(() => eventLine({ type: 'message', team: 'tt', worker: 'pm', from: 'pm', to: 'core', body: 'x', message_id: 'm', reply_to: null, kind: 'notice', to_session: 's' }), /to_session/);
     assert.throws(() => eventLine({ type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push' }), /target/);
     assert.throws(() => eventLine({ type: 'party', team: 'tt', worker: 'rv' }), /party/);
 });
@@ -51,14 +51,16 @@ test('v1, session-keyed, mirrored and new lines read back in one shape (c)', () 
     const mirror = readEvent({ ...base, type: 'message', from: 'pm', to: 'lead', body: 'b', message_id: 'm', reply_to: null,
         expects_reply: false, from_team: 'tt', to_team: 'uu' }, 'uu');
     const fresh = readEvent(eventLine({ type: 'message', team: 'tt', worker: 'pm', from: 'pm', to: 'core', body: 'b',
-        message_id: 'm', reply_to: null, expects_reply: false }), 'tt');
-    const shape = (e) => ['ts', 'type', 'team', 'worker', 'from', 'to', 'body', 'message_id', 'reply_to', 'expects_reply'].map((k) => [k, k in e]);
+        message_id: 'm', reply_to: null, kind: 'notice' }), 'tt');
+    const shape = (e) => ['ts', 'type', 'team', 'worker', 'from', 'to', 'body', 'message_id', 'reply_to', 'kind'].map((k) => [k, k in e]);
     for (const e of [v1, session, mirror, fresh]) {
         assert.deepEqual(shape(e), shape(fresh), JSON.stringify(e));
         assert.equal(e.type, 'message');
         assert.equal(e.worker, 'pm');
     }
-    assert.deepEqual([v1.message_id, v1.reply_to, v1.expects_reply], [null, null, false]);
+    assert.deepEqual([v1.message_id, v1.reply_to, v1.kind], [null, null, 'notice']);
+    // a line before T54: expects_reply, no kind
+    assert.equal(readEvent({ ...base, type: 'message', from: 'pm', to: 'core', body: 'b', message_id: 'm', reply_to: null, expects_reply: true }, 'tt').kind, 'question');
     assert.equal(mirror.team, 'tt', 'a mirrored line was written by the sender\'s team');
     assert.equal(session.to_session, 'my-team-uu-y', 'old optional keys stay readable');
     const denied = readEvent({ ...base, type: 'tmux-denied', team: 'tt', worker: 'rv', args: ['ls'] }, 'xx');
@@ -76,7 +78,7 @@ test(`free text past ${TEXT_LIMIT} characters is cut, saying how much (d)`, () =
     assert.match(many.args.at(-1), /^…\[\+\d+ args\]$/);
     const tool = eventLine({ type: 'tool-denied', team: 'tt', worker: 'rv', tool: 'Bash', rule: 'push', target: long });
     assert.match(tool.target, /…\[\+300 chars\]$/);
-    const msg = eventLine({ type: 'message', team: 'tt', worker: 'pm', from: 'pm', to: 'core', body: long, message_id: 'm', reply_to: null, expects_reply: false });
+    const msg = eventLine({ type: 'message', team: 'tt', worker: 'pm', from: 'pm', to: 'core', body: long, message_id: 'm', reply_to: null, kind: 'notice' });
     assert.equal(msg.body, long, 'a message body is the message itself and stays whole');
 });
 
@@ -103,7 +105,7 @@ test('monitor prints old and new lines without undefined (e)', (t) => {
             env: { PATH: process.env.PATH, HOME: process.env.HOME, MY_TEAM_STATE_ROOT_BASE: base }, encoding: 'utf-8', timeout: 3000,
         });
     } catch (e) { out = e.stdout ?? ''; }
-    assert.match(out, /pm → core/);
+    assert.match(out, /pm → core \(notice\)/);   // a v1 line reads as kind notice (T54)
     assert.match(out, /tmux kill-server/);
     assert.match(out, /Bash.*git push/);
     assert.match(out, /core: board land T1#1 \(doing → review\)/);

@@ -67,7 +67,7 @@ test('a manifest pane id that now belongs to another team\'s pane: nothing typed
     const theirs = pane(t, scratch, 'other-team-session', 'bob');
     const { spool, root } = team(t, { session: 'own-session', workers: [{ name: 'alice', pane_id: mine.id }, { name: 'bob', pane_id: theirs.id }] });
 
-    const r = await runApiSendMessage({ team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'hello' }, { env });
+    const r = await runApiSendMessage({ kind: 'notice', team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'hello' }, { env });
     assert.equal(r.ok, true);
     assert.deepEqual(theirs.typed(), [], 'the other team\'s pane got nothing');
     assert.equal(spool('bob'), 1, 'the message waits in bob\'s mailbox');
@@ -95,7 +95,7 @@ test('a pane in the team\'s own session that now carries another worker\'s name:
     const otherPane = tmuxExec(['split-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'own-session5', sink(join(scratch, 'carol5.typed'))], { stdio: 'pipe' }).trim();
     tmuxExec(['set-option', '-p', '-t', otherPane, '@worker_name', 'carol'], { stdio: 'pipe' });
     const { spool } = team(t, { session: 'own-session5', workers: [{ name: 'alice', pane_id: mine.id }, { name: 'bob', pane_id: otherPane }] });
-    const r = await runApiSendMessage({ team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'x' }, { env });
+    const r = await runApiSendMessage({ kind: 'notice', team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'x' }, { env });
     assert.equal(existsSync(join(scratch, 'carol5.typed')), false, 'carol\'s pane got nothing');
     assert.equal(spool('bob'), 1);
     assert.match(r.warning ?? '', /not typed/);
@@ -106,14 +106,14 @@ test('a pane that is gone, or a manifest without a session: nothing typed, the m
     t.after(() => rmSync(scratch, { recursive: true, force: true }));
     const mine = pane(t, scratch, 'own-session2', 'alice');
     const { spool, root, manifest } = team(t, { session: 'own-session2', workers: [{ name: 'alice', pane_id: mine.id }, { name: 'bob', pane_id: '%9999' }] });
-    const gone = await runApiSendMessage({ team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'x' }, { env });
+    const gone = await runApiSendMessage({ kind: 'notice', team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'x' }, { env });
     assert.equal(spool('bob'), 1);
     assert.match(gone.warning ?? '', /not typed/);
 
     delete manifest.session_name;
     manifest.workers[1].pane_id = mine.id;
     writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest));
-    const r = await runApiSendMessage({ team_name: 'own-team', from_worker: 'bob', to_worker: 'alice', body: 'y' }, { env });
+    const r = await runApiSendMessage({ kind: 'notice', team_name: 'own-team', from_worker: 'bob', to_worker: 'alice', body: 'y' }, { env });
     assert.deepEqual(mine.typed(), [], 'no session to check against: no trigger');
     assert.equal(spool('alice'), 1);
     assert.match(r.warning ?? '', /not typed/);
@@ -126,7 +126,7 @@ test('the team\'s own pane still gets the trigger, with no warning', async (t) =
     const bobPane = tmuxExec(['split-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'own-session3', sink(join(scratch, 'bob3.typed'))], { stdio: 'pipe' }).trim();
     tmuxExec(['set-option', '-p', '-t', bobPane, '@worker_name', 'bob'], { stdio: 'pipe' });
     const { spool } = team(t, { session: 'own-session3', workers: [{ name: 'alice', pane_id: alice.id }, { name: 'bob', pane_id: bobPane }] });
-    const r = await runApiSendMessage({ team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'hi' }, { env });
+    const r = await runApiSendMessage({ kind: 'notice', team_name: 'own-team', from_worker: 'alice', to_worker: 'bob', body: 'hi' }, { env });
     assert.equal(r.warning, undefined, r.warning);
     assert.equal(spool('bob'), 1);
     const typed = readFileSync(join(scratch, 'bob3.typed'), 'utf-8').split('\n').filter(Boolean);

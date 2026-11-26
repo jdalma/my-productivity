@@ -86,7 +86,7 @@ private func pane(_ session: String, _ id: String, _ worker: String?) -> Pane {
     let root = try writeTeam(base, "t")
     for f in ["a.json", "b.json", "c.tmp"] { try write("\(root)/incoming-spool/w/\(f)", "{}") }
     try write("\(root)/mailbox/w.json", """
-        {"schema_version":2,"worker":"w","inbox":{"m1":{},"m2":{},"m3":{}},
+        {"schema_version":3,"worker":"w","inbox":{"m1":{},"m2":{},"m3":{}},
          "sent_pending":{"q1":{"sent_at":"2026-11-02T03:00:00.000Z"},"q2":{"sent_at":"2026-11-01T09:00:00.000Z"},"q3":{}}}
         """)
     let w = try loadTeams(base: base, panes: [])[0].workers[0]
@@ -110,12 +110,12 @@ private func pane(_ session: String, _ id: String, _ worker: String?) -> Pane {
     let base = try myTeamBase()
     defer { try? FileManager.default.removeItem(atPath: base) }
     let root = try writeTeam(base, "t", workers: ["old", "bad", "said"])
-    try write("\(root)/mailbox/old.json", #"{"schema_version":1,"inbox":{"m":{}}}"#)
+    try write("\(root)/mailbox/old.json", #"{"schema_version":2,"inbox":{"m":{}}}"#)
     try write("\(root)/mailbox/bad.json", "{oops")
     try write("\(root)/mailbox/said.json", "[]")
     try write("\(root)/workers/said/status.json", #"{"state":"blocked","reason":"waiting on pm"}"#)
     let w = try loadTeams(base: base, panes: [])[0].workers
-    #expect(w[0].reason == "mailbox unreadable: Mailbox at \(root)/mailbox/old.json has schema_version=1, expected 2. "
+    #expect(w[0].reason == "mailbox unreadable: Mailbox at \(root)/mailbox/old.json has schema_version=2, expected 3. "
         + "Shutdown the team (my-team shutdown) and restart to begin with a fresh schema; automatic migration is not supported.")
     #expect(w[0].unread == 0)
     #expect(w[1].reason?.hasPrefix("mailbox unreadable: Mailbox at \(root)/mailbox/bad.json is not valid JSON") == true)

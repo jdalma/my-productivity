@@ -117,8 +117,8 @@ test('one task from add to approve through the CLI: notices to the right workers
     const notices = { pm: spool(root, 'pm'), core: spool(root, 'core'), rv: spool(root, 'rv') };
     assert.deepEqual(Object.fromEntries(Object.entries(notices).map(([w, n]) => [w, n.length])), { pm: 2, core: 3, rv: 2 }, 'R70 L2: 7 a cycle; land goes to the reviewer only');
     for (const n of Object.values(notices).flat()) {
-        assert.match(n.body, /^\[board\] T1(#\d)? (add|land)$|^\[board\] R1a? verdict$/, n.body);
-        assert.equal(n.expects_reply, false);
+        assert.match(n.body, /^T1(#\d)? (add|land)$|^R1a? verdict$/, n.body);
+        assert.equal(n.kind, 'board');
     }
     assert.deepEqual(notices.core.map((n) => n.from_worker).sort(), ['pm', 'rv', 'rv']);
 
@@ -184,7 +184,7 @@ test('through the CLI: pm edits a task; a document task lands from a folder that
     assert.equal(done.task.state, 'done');
     assert.equal(refused('pm', 'board-edit', { id: 'T1', title: 'late' }).code, 'invalid-transition');
 
-    assert.deepEqual(spool(root, 'rv').map((n) => n.body), ['[board] T1 add', '[board] T1 edit', '[board] R1 verdict']);
+    assert.deepEqual(spool(root, 'rv').map((n) => n.body), ['T1 add', 'T1 edit', 'R1 verdict']);
     const status = as(base, 'pm', 'board-status', {});
     assert.deepEqual(status.recent.map((e) => e.action), ['add', 'take', 'edit', 'land', 'verdict']);
     assert.deepEqual(status.recent[2].detail.changed.deliverable, { from: null, to: 'document' });

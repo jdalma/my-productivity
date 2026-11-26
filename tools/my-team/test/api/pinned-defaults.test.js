@@ -84,7 +84,7 @@ test('T43: each api command\'s --help names its input fields, so AGENTS.md need 
     const help = (...args) => spawnSync(process.execPath, [MY_TEAM, 'api', ...args, '--help'], { encoding: 'utf-8' }).stdout.replace(/\s+/g, ' ');
     assert.match(help(), /--help names its --input fields[^.]*\. In a worker process MY_TEAM_WORKER gives team_name/);
     const fields = {
-        'send-message': /Input: to_worker, body; reply_to, expects_reply, to_team/,
+        'send-message': /Input: to_worker, kind, body; reply_to, task, need, board_error, to_team/,
         'mailbox-list': /Optional input: unread_only/,
         'mailbox-mark-delivered': /Input: message_id/,
         'archive-lookup': /Input: message_id/,

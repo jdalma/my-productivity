@@ -19,6 +19,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { runApiMailboxList } from '../../src/commands/api/mailbox-list.js';
+import { runApiSendMessage } from '../../src/commands/api/send-message.js';
 import { MAILBOX_SCHEMA_VERSION } from '../../src/lib/tmux-comm.js';
 
 function setupTeam({ teamName = 't1', worker = 'alice', mailbox = null, spool = [] } = {}) {
@@ -224,11 +225,37 @@ test('mailbox-list keeps a message kind and the fields of a blocked through abso
     }
 });
 
-test('mailbox-list refuses a v2 mailbox: v3 reads no older format (T54)', async () => {
-    const ctx = setupTeam({ mailbox: { schema_version: 2, worker: 'alice', inbox: {}, sent_pending: {} } });
+test('mailbox-list starts an old-schema mailbox with an empty inbox afresh; the next send writes v3 (T59)', async () => {
+    const ctx = setupTeam({ mailbox: { schema_version: 2, worker: 'alice', inbox: {},
+        sent_pending: { q1: { to_worker: 'bob', body: 'old?', sent_at: '2026-01-01T00:00:00Z' } } } });
+    const manifestPath = join(ctx.stateRoot, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+    manifest.workers.push({ name: 'bob', pane_id: '%98', inbox_path: '' });
+    writeFileSync(manifestPath, JSON.stringify(manifest), 'utf-8');
     try {
-        assert.equal(MAILBOX_SCHEMA_VERSION, 3);
-        await assert.rejects(() => runApiMailboxList({ team_name: ctx.teamName, worker: ctx.worker }), /schema_version=2, expected 3/);
+        const r = await runApiMailboxList({ team_name: ctx.teamName, worker: ctx.worker });
+        assert.deepEqual([r.ok, r.messages, r.sent_pending], [true, [], []]);
+        await runApiSendMessage({ team_name: ctx.teamName, from_worker: 'alice', to_worker: 'bob', kind: 'question', body: 'new?' });
+        const file = JSON.parse(readFileSync(join(ctx.stateRoot, 'mailbox', 'alice.json'), 'utf-8'));
+        assert.equal(file.schema_version, MAILBOX_SCHEMA_VERSION);
+        assert.deepEqual(Object.values(file.sent_pending).map((p) => p.body), ['new?']);
+    } finally {
+        cleanup(ctx);
+    }
+});
+
+test('mailbox-list refuses an old-schema mailbox that still holds messages, naming the file and the count (T59)', async () => {
+    const ctx = setupTeam({ mailbox: { schema_version: 2, worker: 'alice', sent_pending: {},
+        inbox: { m1: { from_worker: 'bob', body: 'a' }, m2: { from_worker: 'bob', body: 'b' } } } });
+    try {
+        const file = join(ctx.stateRoot, 'mailbox', 'alice.json');
+        await assert.rejects(() => runApiMailboxList({ team_name: ctx.teamName, worker: ctx.worker }), (err) => {
+            assert.match(err.message, /schema_version=2, expected 3/);
+            assert.ok(err.message.includes(file), err.message);
+            assert.match(err.message, /2 unread message/);
+            assert.doesNotMatch(err.message, /restart/);
+            return true;
+        });
     } finally {
         cleanup(ctx);
     }

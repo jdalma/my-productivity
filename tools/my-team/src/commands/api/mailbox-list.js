@@ -22,12 +22,11 @@
  *     poll it already makes every cycle.
  */
 
-import { readFileSync, existsSync } from 'fs';
 import { loadManifest, rosterOf } from '../_manifest.js';
 import { setStateRoot } from '../../lib/state-root.js';
 import { TeamPaths } from '../../lib/state-paths.js';
-import { absorbIncomingSpool } from '../../lib/tmux-comm.js';
-import { requireTeamAndWorker, resolveTeamPath, assertMailboxSchemaVersion } from '../../lib/handler-guards.js';
+import { absorbIncomingSpool, readMailboxFile } from '../../lib/tmux-comm.js';
+import { requireTeamAndWorker, resolveTeamPath } from '../../lib/handler-guards.js';
 
 function sortByCreatedAt(a, b) {
     return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''));
@@ -47,27 +46,9 @@ export async function runApiMailboxList(input, deps = {}) {
     // This may write to mailbox.json; safe because the worker is the sole writer.
     await absorbIncomingSpool(teamName, worker, parentDir);
 
-    const mailboxFile = resolveTeamPath(teamName, worker, parentDir, TeamPaths.mailbox);
-
-    if (!existsSync(mailboxFile)) {
-        return { ok: true, worker, messages: [], sent_pending: [], roster: rosterOf(manifest) };
-    }
-
-    let raw;
-    try {
-        raw = readFileSync(mailboxFile, 'utf-8');
-    } catch (err) {
-        throw new Error(`Cannot read mailbox at ${mailboxFile}: ${err.message}`);
-    }
-
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    } catch (err) {
-        throw new Error(`Mailbox at ${mailboxFile} is not valid JSON: ${err.message}`);
-    }
-
-    assertMailboxSchemaVersion(parsed, mailboxFile);
+    // validates the worker name against path traversal; the read below composes the same path
+    resolveTeamPath(teamName, worker, parentDir, TeamPaths.mailbox);
+    const parsed = await readMailboxFile(teamName, worker, parentDir);
 
     const inboxMap = parsed?.inbox && typeof parsed.inbox === 'object' ? parsed.inbox : {};
     const inboxEntries = Object.values(inboxMap);

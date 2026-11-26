@@ -94,8 +94,10 @@ function emptyMailbox(workerName) {
 }
 
 /**
- * Read a mailbox file. Returns the v2 shape. Missing file → empty mailbox.
- * Schema mismatch → throw (no automatic migration; operator must shutdown).
+ * Read a mailbox file. Missing file → empty mailbox.
+ * Another schema_version (or none): with no message left in it, an empty mailbox (its old
+ * sent_pending is dropped, one stderr line says so) that the next write saves as the current
+ * schema; with messages left, throw: there is no migration, someone has to read them first (T59).
  */
 export async function readMailboxFile(teamName, workerName, cwd) {
     return readMailboxAt(mailboxPath(teamName, workerName, cwd), workerName);
@@ -118,12 +120,7 @@ function readMailboxAt(canonicalPath, workerName) {
         return emptyMailbox(workerName);
     }
     if (parsed.schema_version !== MAILBOX_SCHEMA_VERSION) {
-        throw new Error(
-            `Mailbox at ${canonicalPath} has schema_version=${parsed.schema_version ?? 'missing'}, ` +
-            `expected ${MAILBOX_SCHEMA_VERSION}. ` +
-            `Shutdown the team (my-team shutdown) and restart to begin with a fresh schema; ` +
-            `automatic migration is not supported.`
-        );
+        return staleMailbox(canonicalPath, workerName, parsed);
     }
     return {
         schema_version: MAILBOX_SCHEMA_VERSION,
@@ -131,6 +128,30 @@ function readMailboxAt(canonicalPath, workerName) {
         inbox: parsed.inbox && typeof parsed.inbox === 'object' ? parsed.inbox : {},
         sent_pending: parsed.sent_pending && typeof parsed.sent_pending === 'object' ? parsed.sent_pending : {},
     };
+}
+
+function countOf(value) {
+    if (Array.isArray(value)) return value.length;
+    return value && typeof value === 'object' ? Object.keys(value).length : 0;
+}
+
+function staleMailbox(canonicalPath, workerName, parsed) {
+    const version = parsed.schema_version ?? 'missing';
+    // v1 kept its messages in `messages`, v2 on in `inbox`
+    const unread = countOf(parsed.inbox) + countOf(parsed.messages);
+    if (unread > 0) {
+        throw new Error(
+            `Mailbox at ${canonicalPath} has schema_version=${version}, expected ${MAILBOX_SCHEMA_VERSION}, ` +
+            `and still holds ${unread} unread message(s). There is no automatic migration: read them in that file, ` +
+            `then move the file out of mailbox/ or delete it; the next mailbox command starts the mailbox afresh.`
+        );
+    }
+    const dropped = countOf(parsed.sent_pending);
+    process.stderr.write(
+        `[my-team] mailbox ${canonicalPath} has schema_version=${version} and no message: starting it afresh ` +
+        `as schema ${MAILBOX_SCHEMA_VERSION}, dropping ${dropped} sent_pending entr${dropped === 1 ? 'y' : 'ies'}\n`
+    );
+    return emptyMailbox(workerName);
 }
 
 function writeMailboxAt(canonicalPath, workerName, mailbox) {

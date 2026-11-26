@@ -3,13 +3,11 @@
  *
  * Hardens the boundary against:
  *   - path traversal via the `worker` field (untrusted input → fs paths)
- *   - inconsistent schema_version handling between read paths
  */
 
 import { sanitizeName, validateTeamName } from './team-name.js';
 import { validateResolvedPath } from './fs-utils.js';
 import { TeamPaths, absPath } from './state-paths.js';
-import { MAILBOX_SCHEMA_VERSION } from './tmux-comm.js';
 
 /**
  * Validate team_name + worker arguments and return a sanitized pair safe to
@@ -59,23 +57,4 @@ export function resolveTeamPath(teamName, worker, cwd, pathFn) {
     const targetAbs = absPath(cwd, pathFn(teamName, worker));
     validateResolvedPath(targetAbs, rootAbs);
     return targetAbs;
-}
-
-/**
- * Validate a parsed mailbox object's schema_version. Treats both
- * "mismatched" and "missing" as fatal — there is no automatic migration.
- *
- * Returns the parsed object unchanged when valid so callers can chain.
- */
-export function assertMailboxSchemaVersion(parsed, filePath) {
-    if (!parsed || typeof parsed !== 'object') return parsed;
-    if (parsed.schema_version !== MAILBOX_SCHEMA_VERSION) {
-        throw new Error(
-            `Mailbox at ${filePath} has schema_version=${parsed.schema_version ?? 'missing'}, ` +
-            `expected ${MAILBOX_SCHEMA_VERSION}. ` +
-            `Shutdown the team (my-team shutdown) and restart to begin with a fresh schema; ` +
-            `automatic migration is not supported.`
-        );
-    }
-    return parsed;
 }

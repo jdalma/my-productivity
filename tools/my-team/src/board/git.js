@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 
 import { BoardError } from './core/rules.js';
 
@@ -97,3 +97,19 @@ export function withinBaseline(repo, commit, baseline) {
 }
 
 export const subjectOf = (repo, commit) => git(repo, ['log', '-1', '--format=%s', commit]);
+
+/** The paths of the files in `commit`. */
+export const filesOf = (repo, commit) => git(repo, ['ls-tree', '-r', '--name-only', '-z', commit]).split('\0').filter(Boolean);
+
+/** The files of `commit` unpacked into the folder `dir`: no .git there (T51). */
+export function unpackCommit(repo, commit, dir) {
+    const tar = `${dir}.tar`;
+    try {
+        git(repo, ['archive', '--format=tar', '-o', tar, commit]);
+        execFileSync('tar', ['-xf', tar, '-C', dir], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+        throw invalid(`could not unpack ${commit} into ${dir}: ${String(err.stderr ?? err.message).trim()}`);
+    } finally {
+        rmSync(tar, { force: true });
+    }
+}

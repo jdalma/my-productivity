@@ -46,7 +46,7 @@ role을 선언한 팀:
 
 ```
 You just joined team '<team>'. First action: read <AGENTS.md 절대경로>
-for the roster + peer protocol. Then send ONE message (no expects_reply)
+for the roster + peer protocol. Then send ONE notice (kind notice)
 to <orchestrator 목록> stating your name, your cwd, and your assignment
 in one line. Do not message any other worker.
 ```
@@ -92,7 +92,7 @@ const workerRole = validated.role ?? (teamUsesRoles ? 'worker' : null);
 
 ### 규칙이 존재하는 유일한 곳은 role 게이트 뒤
 
-- `roleGuidance('worker')`: "Message your orchestrator ONLY (a) blocked 시 expects_reply 1통, (b) 완료 시 reply_to 최종 보고 1통. No progress updates, no acknowledgements."
+- `roleGuidance('worker')`: "Message your orchestrator ONLY (a) 결정이 필요할 때 question(kind question) 1통, (b) 완료 시 reply_to 최종 보고 1통. No progress updates, no acknowledgements."
 - `roleGuidance('orchestrator')`: "Expect from each worker at most a question when blocked and one final report when done."
 - 커밋 4faba0e가 추가한 문장이 정확히 이 둘이고, 둘 다 §3의 조건에 따라 peer 팀에서는 렌더링되지 않는다.
 - role 팀이더라도 WORKER 섹션의 "your orchestrator(s)"는 `teamRole === 'orchestrator'` 목록이다. `role: worker`인 부모가 스폰하면 부모는 그 목록에 없다. **부모–자식 관계는 프롬프트 어디에도 모델링돼 있지 않다.**
@@ -115,8 +115,8 @@ const workerRole = validated.role ?? (teamUsesRoles ? 'worker' : null);
 - 명령 예시에 `--extra-prompt "<the brief below>"` 추가.
 - "coordinate with it directly" 삭제.
 - **Spawn protocol** 3줄 신설:
-  1. `--extra-prompt`에 반드시 넣을 문장을 고정 텍스트로 제공. 스폰한 워커 이름이 치환된다: "Spawned by `<me>`. Message `<me>` ONLY (a) when you need a decision to proceed — one message with expects_reply — or (b) when the ticket is done — one final report (reply_to the ticket). No progress updates, no acknowledgements: progress goes to your status file and your pane's stdout."
-  2. 티켓 = goal + inputs(file paths) + deliverable + "reply to this message when done". `expects_reply`로 보내 최종 보고가 부모의 `sent_pending`에 잡히게 한다.
+  1. `--extra-prompt`에 반드시 넣을 문장을 고정 텍스트로 제공. 스폰한 워커 이름이 치환된다: "Spawned by `<me>`. Message `<me>` ONLY (a) when you need a decision to proceed — one question (kind question) — or (b) when the ticket is done — one final report (reply_to the ticket). No progress updates, no acknowledgements: progress goes to your status file and your pane's stdout."
+  2. 티켓 = goal + inputs(file paths) + deliverable + "reply to this message when done". kind `question`으로 보내 최종 보고가 부모의 `sent_pending`에 잡히게 한다.
   3. 부모는 진행 상황을 묻지 않는다. status 파일 또는 `my-team status`로 읽는다.
 
 작업판 팀(config `board`)에서는 이 세 줄과 그 위의 "hand it a ticket via send-message"가 작업판용 문장으로 바뀐다.
@@ -154,7 +154,7 @@ node -e "import('./src/lib/worker-bootstrap.js').then(m => {
 
 | 위치 | 변경 |
 |---|---|
-| `add-worker.js` Step 8 | 전원 인사 → orchestrator에게만 1통 보고(이름·cwd·담당 한 줄), `expects_reply` 없음. role 없는 팀은 인사 자체를 제거 |
+| `add-worker.js` Step 8 | 전원 인사 → orchestrator에게만 1통 보고(이름·cwd·담당 한 줄), kind `notice`(답을 기다리지 않음). role 없는 팀은 인사 자체를 제거 |
 | `remove-worker.js` | 남은 전원 통지 → **영향받는 워커만**. 판정 근거는 디스크 사실인 `sent_pending.to_worker`(`tmux-comm.js:290`) + orchestrator. 둘 다 없으면(레거시 peer 팀) 기존대로 전원 |
 | `worker-bootstrap.js` WORKER | "피어에게 직접 물어라" 삭제 → "워크트리가 워킹 트리를 분리하므로 파일 조율 자체를 하지 않는다". 합류 시 자기소개 금지 명시 |
 | `worker-bootstrap.js` ORCHESTRATOR | **Team changes** 규칙: 합류 보고 1통을 받아 사용자에게 stdout으로 알림(팀 브로드캐스트 금지). 파일 겹침은 관리하지 않는다고 명시 |
